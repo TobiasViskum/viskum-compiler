@@ -1,6 +1,7 @@
 use std::str::Chars;
 
-use token::{ Span, Token, TokenKind };
+use span::Span;
+use token::{ Token, TokenKind };
 
 pub const EOF_CHAR: char = '\0';
 
@@ -53,7 +54,7 @@ impl<'a> Lexer<'a> {
         predicate: char,
         other_kind: TokenKind
     ) -> Token {
-        if self.next() == predicate {
+        if self.peek_next() == predicate {
             self.advance();
             self.make_token(other_kind)
         } else {
@@ -62,8 +63,7 @@ impl<'a> Lexer<'a> {
     }
 
     fn skip_char_and_scan(&mut self) -> Token {
-        self.byte_current += self.current_char.len_utf8();
-        self.byte_start = self.byte_current;
+        self.reset_byte_tracker();
         self.scan_token()
     }
 
@@ -119,10 +119,10 @@ impl<'a> Lexer<'a> {
     }
 
     fn eat_while_from_next(&mut self, closure: impl Fn(char) -> bool) -> char {
-        while closure(self.next()) && !self.is_eof() {
+        while closure(self.peek_next()) && !self.is_eof() {
             self.advance();
         }
-        self.next()
+        self.peek_next()
     }
 
     fn eat_while_do_from_current(
@@ -137,7 +137,7 @@ impl<'a> Lexer<'a> {
         self.current_char
     }
 
-    fn next(&self) -> char {
+    pub fn peek_next(&self) -> char {
         self.chars.clone().next().unwrap_or(EOF_CHAR)
     }
 

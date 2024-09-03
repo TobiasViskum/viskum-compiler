@@ -28,7 +28,7 @@ macro_rules! make_parse_rule {
     };
 
     (@construct_rule $method_name:ident) => {
-        Some(|c /*, args*/| c.$method_name(/* args */))
+        Some(|c, expr_builder| c.$method_name(expr_builder))
     };
 
     (@construct_prec None) => {

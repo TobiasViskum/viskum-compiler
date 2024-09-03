@@ -1,4 +1,7 @@
+use std::fmt::Display;
+
 use enum_iterator::Sequence;
+use span::Span;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Token {
@@ -10,18 +13,20 @@ impl Token {
     pub fn new(kind: TokenKind, span: Span) -> Self {
         Self { kind, span }
     }
-}
 
-#[derive(Debug, Clone, Copy)]
-pub struct Span {
-    byte_start: usize,
-    byte_end: usize,
-    line: usize,
-}
+    pub fn get_kind(&self) -> TokenKind {
+        self.kind
+    }
 
-impl Span {
-    pub fn new(byte_start: usize, byte_end: usize, line: usize) -> Self {
-        Self { byte_start, byte_end, line }
+    pub fn get_span(&self) -> Span {
+        self.span
+    }
+
+    pub fn dummy() -> Self {
+        Self {
+            kind: TokenKind::Eof,
+            span: Span::dummy(),
+        }
     }
 }
 
@@ -82,4 +87,10 @@ pub enum TokenKind {
 
     /// End of ofile
     Eof,
+}
+
+impl Display for TokenKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
 }

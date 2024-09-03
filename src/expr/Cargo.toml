@@ -7,3 +7,4 @@ edition = "2021"
 
 [dependencies]
 op = { path = "../op" }
+span = { path = "../span" }

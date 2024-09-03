@@ -1,0 +1,10 @@
+[package]
+name = "expr_builder"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+expr = { path = "../expr" }
+ast_arena = { path = "../ast_arena"}
+op = { path = "../op" }
+precedence = { path = "../precedence" }

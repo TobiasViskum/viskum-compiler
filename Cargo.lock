@@ -49,12 +49,24 @@ name = "expr"
 version = "0.1.0"
 dependencies = [
  "op",
+ "span",
+]
+
+[[package]]
+name = "expr_builder"
+version = "0.1.0"
+dependencies = [
+ "ast_arena",
+ "expr",
+ "op",
+ "precedence",
 ]
 
 [[package]]
 name = "lexer"
 version = "0.1.0"
 dependencies = [
+ "span",
  "token",
 ]
 
@@ -69,10 +81,18 @@ dependencies = [
  "array-init",
  "ast_arena",
  "enum-iterator",
+ "expr",
+ "expr_builder",
  "lexer",
  "op",
+ "precedence",
+ "span",
  "token",
 ]
+
+[[package]]
+name = "precedence"
+version = "0.1.0"
 
 [[package]]
 name = "proc-macro2"
@@ -93,6 +113,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "span"
+version = "0.1.0"
+
+[[package]]
 name = "syn"
 version = "2.0.77"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -108,6 +132,7 @@ name = "token"
 version = "0.1.0"
 dependencies = [
  "enum-iterator",
+ "span",
 ]
 
 [[package]]

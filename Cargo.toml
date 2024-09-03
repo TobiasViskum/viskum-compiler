@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [workspace]
-members = [ "src/ast_arena", "src/compiler", "src/expr", "src/lexer", "src/op", "src/parser", "src/token" ]
+members = [ "src/ast_arena", "src/compiler", "src/expr", "src/expr_builder", "src/lexer", "src/op", "src/parser", "src/precedence", "src/span", "src/token" ]
 
 
 [dependencies]
@@ -12,3 +12,4 @@ compiler = { path = "src/compiler"}
 
 [cargo-new]
 vcs = "none"
+
