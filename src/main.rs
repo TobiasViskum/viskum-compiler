@@ -1,3 +1,8 @@
+use compiler::Compiler;
+
 fn main() {
-    println!("Hello, world!");
+    let result = {
+        let compiler = Compiler::new();
+        compiler.compile_entry()
+    };
 }

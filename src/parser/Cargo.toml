@@ -1,0 +1,12 @@
+[package]
+name = "parser"
+version = "0.1.0"
+edition = "2021"
+
+
+
+[dependencies]
+enum-iterator = "2.1.0"
+array-init = "2.1.0"
+lexer = { path = "../lexer" }
+token = { path = "../token" }

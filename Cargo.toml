@@ -3,4 +3,12 @@ name = "viskum-compiler"
 version = "0.1.0"
 edition = "2021"
 
+[workspace]
+members = [ "src/compiler", "src/expr", "src/lexer", "src/parser", "src/token"]
+
+
 [dependencies]
+compiler = { path = "src/compiler"}
+
+[cargo-new]
+vcs = "none"
