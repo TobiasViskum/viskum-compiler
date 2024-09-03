@@ -9,9 +9,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3d62b7694a562cdf5a74227903507c56ab2cc8bdd1f781ed5cb4cf9c9f810bfc"
 
 [[package]]
+name = "ast_arena"
+version = "0.1.0"
+dependencies = [
+ "expr",
+ "typed-arena",
+]
+
+[[package]]
 name = "compiler"
 version = "0.1.0"
 dependencies = [
+ "ast_arena",
  "parser",
 ]
 
@@ -38,6 +47,9 @@ dependencies = [
 [[package]]
 name = "expr"
 version = "0.1.0"
+dependencies = [
+ "op",
+]
 
 [[package]]
 name = "lexer"
@@ -47,12 +59,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "op"
+version = "0.1.0"
+
+[[package]]
 name = "parser"
 version = "0.1.0"
 dependencies = [
  "array-init",
+ "ast_arena",
  "enum-iterator",
  "lexer",
+ "op",
  "token",
 ]
 
@@ -91,6 +109,12 @@ version = "0.1.0"
 dependencies = [
  "enum-iterator",
 ]
+
+[[package]]
+name = "typed-arena"
+version = "2.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6af6ae20167a9ece4bcb41af5b80f8a1f1df981f6391189ce00fd257af04126a"
 
 [[package]]
 name = "unicode-ident"

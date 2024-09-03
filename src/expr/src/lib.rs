@@ -1,14 +1,27 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
+pub enum Expr<'ast> {
+    ExprWithoutBlock(ExprWithoutBlock<'ast>),
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
+pub enum ExprWithoutBlock<'ast> {
+    ValueExpr(ValueExpr<'ast>),
 }
+
+pub enum ValueExpr<'ast> {
+    BinaryExpr(BinaryExpr<'ast>),
+    ConstExpr(ConstExpr),
+}
+
+pub struct BinaryExpr<'ast> {
+    lhs: &'ast mut Expr<'ast>,
+    op: op::BinaryOp,
+    rhs: &'ast mut Expr<'ast>,
+}
+
+pub enum ConstExpr {
+    IntegerExpr(IntegerExpr),
+}
+
+pub struct IntegerExpr {
+    val: i32,
+}
+pub struct FloatExpr {}

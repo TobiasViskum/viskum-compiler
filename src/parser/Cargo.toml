@@ -10,3 +10,5 @@ enum-iterator = "2.1.0"
 array-init = "2.1.0"
 lexer = { path = "../lexer" }
 token = { path = "../token" }
+op = { path = "../op" }
+ast_arena = { path = "../ast_arena" }

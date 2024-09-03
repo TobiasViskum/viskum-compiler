@@ -1,5 +1,7 @@
+use ast_arena::AstArena;
 use lexer::Lexer;
 use make_parse_rule::make_parse_rule;
+use op::BinaryOp;
 use token::TokenKind;
 mod make_parse_rule;
 
@@ -22,24 +24,38 @@ pub enum Precedence {
     PrecNone,
 }
 
-pub struct Parser<'a> {
+pub struct Parser<'a, 'b> where 'a: 'b {
     parse_rules: [ParseRule; PARSE_RULE_COUNT],
-    lexer: Lexer<'a>,
+    lexer: Lexer<'b>,
+    ast_arena: &'b AstArena<'a>,
 }
 
-impl<'a> Parser<'a> {
-    pub fn new(file_content: &'a str) -> Self {
+impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
+    pub fn new(file_content: &'a str, ast_arena: &'b AstArena<'a>) -> Self {
         Self {
             parse_rules: Self::create_parse_rules(),
             lexer: Lexer::new(file_content),
+            ast_arena,
         }
     }
 
-    pub fn parse(&mut self) {}
+    pub fn parse(&mut self) {
+        self.expression_statement()
+    }
+
+    pub(crate) fn expression_statement(&mut self) {
+        self.parse_precedence()
+    }
+
+    pub(crate) fn parse_precedence(&mut self) {}
 
     pub(crate) fn grouping(&mut self) {}
 
-    pub(crate) fn call(&mut self) {}
+    pub(crate) fn integer(&mut self) {}
+
+    pub(crate) fn add(&mut self) {}
+
+    pub(crate) fn binary(&mut self, binary_op: BinaryOp) {}
 
     pub(crate) fn get_parse_rule(&self, tkind: TokenKind) -> &ParseRule {
         &self.parse_rules[tkind as usize]
@@ -62,14 +78,14 @@ impl<'a> Parser<'a> {
             Gt          = { (None None),        (None None),    (None None) },
             Le          = { (None None),        (None None),    (None None) },
             Lt          = { (None None),        (None None),    (None None) },
-            Plus        = { (None None),        (None None),    (None None) },
+            Plus        = { (None None),        (add None),    (None None) },
             Minus       = { (None None),        (None None),    (None None) },
             Star        = { (None None),        (None None),    (None None) },
             Slash       = { (None None),        (None None),    (None None) },
             Colon       = { (None None),        (None None),    (None None) },
             Define      = { (None None),        (None None),    (None None) },
             
-            Integer     = { (None None),        (None None),    (None None) },
+            Integer     = { (integer None),        (None None),    (None None) },
             Float       = { (None None),        (None None),    (None None) },
             
             Ident       = { (None None),        (None None),    (None None) },
