@@ -58,7 +58,19 @@ impl IdentExpr {
 #[derive(Debug)]
 pub enum ValueExpr<'ast> {
     BinaryExpr(BinaryExpr<'ast>),
+    GruopExpr(GroupExpr<'ast>),
     ConstExpr(ConstExpr),
+}
+
+#[derive(Debug)]
+pub struct GroupExpr<'ast> {
+    expr: &'ast mut Expr<'ast>,
+}
+
+impl<'ast> GroupExpr<'ast> {
+    pub fn new(expr: &'ast mut Expr<'ast>) -> Self {
+        Self { expr }
+    }
 }
 
 #[derive(Debug)]

@@ -53,6 +53,7 @@ impl<'a> Parser<'a> {
             }
         }
         self.expression_statement();
+        self.expression_statement();
     }
 
     pub(crate) fn expression_statement(&mut self) -> Stmt<'a> {
@@ -90,14 +91,30 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// Parse rule method: `grouping`
-    pub(crate) fn grouping(&mut self, expr_builder: &mut ExprBuilder<'a>) {}
-
     /// Parse rule method: `define`
     pub(crate) fn define(&mut self, expr_builder: &mut ExprBuilder<'a>) {
         expr_builder.set_base_prec(Precedence::PrecAssign.get_next());
         self.parse_precedence(expr_builder.get_base_prec(), expr_builder);
         expr_builder.emit_define_stmt()
+    }
+
+    /// Parse rule method: `assign`
+    pub(crate) fn assign(&mut self, expr_builder: &mut ExprBuilder<'a>) {
+        todo!()
+    }
+
+    pub(crate) fn block(&mut self, expr_builder: &mut ExprBuilder<'a>) {
+        while self.current.get_kind() != TokenKind::End && !self.is_eof() {
+            self.expression_statement();
+        }
+        self.consume(TokenKind::End, "Expected `end` keyword after block");
+        todo!()
+    }
+
+    /// Parse rule method: `grouping`
+    pub(crate) fn grouping(&mut self, expr_builder: &mut ExprBuilder<'a>) {
+        self.parse_precedence(expr_builder.get_base_prec(), expr_builder);
+        self.consume(TokenKind::RightParen, "Expected ')' after group")
     }
 
     /// Parse rule method: `ident`
@@ -110,6 +127,16 @@ impl<'a> Parser<'a> {
         let lexeme = self.get_lexeme_of_prev();
         let val = lexeme.parse::<i32>().expect("TODO: Error handling");
         expr_builder.emit_integer(IntegerExpr::new(val));
+    }
+
+    /// Parse rule method: `dot_float`
+    pub(crate) fn dot_float(&mut self, expr_builder: &mut ExprBuilder<'a>) {
+        todo!()
+    }
+
+    /// Parse rule method: `float`
+    pub(crate) fn float(&mut self, expr_builder: &mut ExprBuilder<'a>) {
+        todo!()
     }
 
     /// Parse rule method: `add`
@@ -153,6 +180,25 @@ impl<'a> Parser<'a> {
         self.current = self.lexer.scan_token();
     }
 
+    pub(crate) fn consume(&mut self, kind: TokenKind, err_msg: &str) {
+        if self.current.get_kind() == kind {
+            self.advance();
+        } else {
+            panic!("{}", err_msg);
+
+            // self.advance();
+        }
+    }
+
+    /// Converts e.g. `69` into `0.69`
+    pub(crate) fn integer_to_dot_float(int: i64) -> f64 {
+        let num_digits = int.abs().to_string().len();
+
+        let divisor = (10_i64).pow(num_digits as u32);
+
+        (int as f64) / (divisor as f64)
+    }
+
     pub(crate) fn get_parse_rule_of_current(&self) -> &ParseRule {
         &self.parse_rules[self.current.get_kind() as usize]
     }
@@ -185,10 +231,13 @@ impl<'a> Parser<'a> {
             Slash       = { (None None),        (div PrecFactor),    (None None) },
             Colon       = { (None None),        (None None),    (None None) },
             Define      = { (None None),        (define PrecAssign),    (None None) },
+            Assign      = { (None None),        (assign PrecAssign),    (None None) },
+            Dot         = { (dot_float None),       (None   None        ),  (None   None)},
+            
             
             // Numbers
             Integer     = { (integer None),        (None None),    (None None) },
-            Float       = { (None None),        (None None),    (None None) },
+            Float       = { (float None),        (None None),    (None None) },
             
             // Identifier
             Ident       = { (ident None),        (None None),    (None None) },

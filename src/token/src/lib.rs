@@ -59,8 +59,12 @@ pub enum TokenKind {
     Slash,
     /// `:`
     Colon,
+    /// `=`
+    Assign,
     /// `:=`
     Define,
+    /// `.`
+    Dot,
 
     /* Literals */
     /// Integer e.g. `69`

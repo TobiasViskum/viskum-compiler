@@ -5,6 +5,7 @@ use expr::{
     DefineStmt,
     Expr,
     ExprWithoutBlock,
+    GroupExpr,
     IdentExpr,
     IntegerExpr,
     PlaceExpr,
@@ -43,11 +44,21 @@ impl<'ast> ExprBuilder<'ast> {
         self.final_stmt = Some(define_stmt);
     }
 
+    pub fn emit_group(&mut self) {
+        let group_expr = self.exprs.pop().expect("TODO: Error handling");
+        let expr = Expr::ExprWithoutBlock(
+            ExprWithoutBlock::ValueExpr(
+                ValueExpr::GruopExpr(GroupExpr::new(self.ast_arena.alloc_expr(group_expr)))
+            )
+        );
+        self.exprs.push(expr);
+    }
+
     pub fn emit_ident(&mut self, ident_expr: IdentExpr) {
         let expr = Expr::ExprWithoutBlock(
             ExprWithoutBlock::PlaceExpr(PlaceExpr::IdentExpr(ident_expr))
         );
-        self.exprs.push(expr)
+        self.exprs.push(expr);
     }
 
     pub fn emit_integer(&mut self, integer_expr: IntegerExpr) {

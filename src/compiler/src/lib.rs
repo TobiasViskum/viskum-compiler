@@ -1,5 +1,3 @@
-use std::time::Instant;
-
 use ast_arena::AstArena;
 use parser::Parser;
 
@@ -15,7 +13,7 @@ impl Compiler {
 
         {
             let ast_arena = AstArena::new();
-            let ast = {
+            let _ast = {
                 let mut parser = Parser::new(file_content.as_str(), &ast_arena);
 
                 parser.parse();

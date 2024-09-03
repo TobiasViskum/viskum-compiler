@@ -32,6 +32,8 @@ impl<'a> Lexer<'a> {
             '-' => self.make_token(TokenKind::Minus),
             '*' => self.make_token(TokenKind::Star),
             '/' => self.make_token(TokenKind::Slash),
+            '(' => self.make_token(TokenKind::LeftParen),
+            ')' => self.make_token(TokenKind::RightParen),
             ':' => self.make_token_or_other_if(TokenKind::Colon, '=', TokenKind::Define),
             ' ' => self.skip_char_and_scan(),
             '\n' => self.newline(),
@@ -132,7 +134,11 @@ impl<'a> Lexer<'a> {
     ) -> char {
         while cond(self.current_char) && self.current_char != EOF_CHAR {
             body(self.current_char);
-            self.advance();
+            if cond(self.peek_next()) {
+                self.advance();
+            } else {
+                break;
+            }
         }
         self.current_char
     }
