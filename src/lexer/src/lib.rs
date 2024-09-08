@@ -1,4 +1,4 @@
-use std::str::Chars;
+use std::{ str::Chars, time::Instant };
 
 use span::Span;
 use token::{ Token, TokenKind };
@@ -35,6 +35,7 @@ impl<'a> Lexer<'a> {
             '(' => self.make_token(TokenKind::LeftParen),
             ')' => self.make_token(TokenKind::RightParen),
             ':' => self.make_token_or_other_if(TokenKind::Colon, '=', TokenKind::Define),
+            '=' => self.make_token_or_other_if(TokenKind::Assign, '=', TokenKind::Eq),
             ' ' => self.skip_char_and_scan(),
             '\n' => self.newline(),
             _ if Self::is_digit(char) => self.make_number(),
@@ -75,11 +76,11 @@ impl<'a> Lexer<'a> {
     }
 
     fn make_ident_or_keyword(&mut self) -> Token {
-        let mut buffer = String::with_capacity(32);
+        let mut buffer = String::with_capacity(64);
 
         self.eat_while_do_from_current(
             |c| Self::is_alphabetic(c),
-            |c| buffer.push(c)
+            |c| { buffer.push(c) }
         );
 
         if let Some(keyword_token_kind) = Self::match_keyword(buffer.as_str()) {
@@ -99,6 +100,10 @@ impl<'a> Lexer<'a> {
             "do" => Some(TokenKind::Do),
             "loop" => Some(TokenKind::Loop),
             "while" => Some(TokenKind::While),
+            "if" => Some(TokenKind::If),
+            "else" => Some(TokenKind::Else),
+            "elif" => Some(TokenKind::Elif),
+            "break" => Some(TokenKind::Break),
             _ => None,
         }
     }
@@ -147,7 +152,7 @@ impl<'a> Lexer<'a> {
         self.chars.clone().next().unwrap_or(EOF_CHAR)
     }
 
-    fn is_eof(&self) -> bool {
+    pub fn is_eof(&self) -> bool {
         self.chars.as_str().is_empty()
     }
 
@@ -165,5 +170,77 @@ impl<'a> Lexer<'a> {
 
     fn is_alphabetic(char: char) -> bool {
         char.is_alphabetic() || char == '_'
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use token::TokenKind;
+    use crate::Lexer;
+
+    #[test]
+    fn tokenize_1() {
+        let input = "1 + 2 * if 2 == 2 do 8 + 9 end";
+        let expected_tokens = [
+            TokenKind::Integer,
+            TokenKind::Plus,
+            TokenKind::Integer,
+            TokenKind::Star,
+            TokenKind::If,
+            TokenKind::Integer,
+            TokenKind::Eq,
+            TokenKind::Integer,
+            TokenKind::Do,
+            TokenKind::Integer,
+            TokenKind::Plus,
+            TokenKind::Integer,
+            TokenKind::End,
+        ];
+
+        expect_tokens(input, &expected_tokens)
+    }
+
+    #[test]
+    fn tokenize_2() {
+        let input =
+            "
+            def main()
+                a := 2
+                b := (8 * 2)
+                loop
+                    break
+                end
+            end
+        ";
+        let expected_tokens = [
+            TokenKind::Def,
+            TokenKind::Ident,
+            TokenKind::LeftParen,
+            TokenKind::RightParen,
+            TokenKind::Ident,
+            TokenKind::Define,
+            TokenKind::Integer,
+            TokenKind::Ident,
+            TokenKind::Define,
+            TokenKind::LeftParen,
+            TokenKind::Integer,
+            TokenKind::Star,
+            TokenKind::Integer,
+            TokenKind::RightParen,
+            TokenKind::Loop,
+            TokenKind::Break,
+            TokenKind::End,
+            TokenKind::End,
+        ];
+
+        expect_tokens(input, &expected_tokens)
+    }
+
+    fn expect_tokens(src: &str, expected_tokens: &[TokenKind]) {
+        let mut lexer = Lexer::new(src);
+        for i in 0..expected_tokens.len() {
+            assert_eq!(expected_tokens[i], lexer.scan_token().get_kind());
+        }
+        assert_eq!(TokenKind::Eof, lexer.scan_token().get_kind());
     }
 }

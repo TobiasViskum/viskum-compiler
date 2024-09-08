@@ -1,0 +1,13 @@
+[package]
+name = "ast"
+version = "0.1.0"
+edition = "2021"
+
+
+
+[dependencies]
+op = { path = "../op" }
+span = { path = "../span" }
+core_traits = { path = "../core_traits" }
+typed-arena = { version = "2.0.2" }
+ast_state = { path = "../ast_state"}

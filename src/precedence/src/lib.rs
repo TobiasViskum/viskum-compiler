@@ -19,9 +19,9 @@ pub enum Precedence {
     PrecTerm,
     /// Precedence of `*` and `/`
     PrecFactor,
-    /// Precedence of unary operators: `!`, `-`, `.`
+    /// Precedence of unary operators: `!`, `-`, `.` (prefix)
     PrecUnary,
-    /// Precedence of `()` and `.` in call
+    /// Precedence of `()` and `.` (infix)
     PrecCall,
     /// Precedence of numbers. Used as an infix precedence
     PrecPrimary,

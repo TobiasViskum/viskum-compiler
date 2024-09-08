@@ -37,7 +37,7 @@ pub enum TokenKind {
     LeftParen,
     /// `)`
     RightParen,
-    /// `=`
+    /// `==`
     Eq,
     /// `!=`
     Ne,
@@ -80,17 +80,35 @@ pub enum TokenKind {
     Def,
     /// Keyword `class`
     Class,
+    /// Keyword `if`
+    If,
     /// Keyword `while`
     While,
     /// Keyword `loop`
     Loop,
+    /// Keyword `break`
+    Break,
     /// Keyword `do`
     Do,
     /// Keyword `end`
     End,
+    /// Keyword `else`
+    Else,
+    /// Keyword `elif`
+    Elif,
 
     /// End of ofile
     Eof,
+}
+
+impl TokenKind {
+    pub fn has_assign_prec(&self) -> bool {
+        matches!(self, Self::Assign | Self::Define)
+    }
+
+    pub fn can_end_scope(&self) -> bool {
+        matches!(self, Self::End | Self::Else | Self::Elif)
+    }
 }
 
 impl Display for TokenKind {

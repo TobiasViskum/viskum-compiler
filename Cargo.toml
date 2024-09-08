@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [workspace]
-members = [ "src/ast_arena", "src/compiler", "src/expr", "src/expr_builder", "src/lexer", "src/op", "src/parser", "src/precedence", "src/span", "src/token" ]
+members = [ "src/compiler", "src/ast", "src/expr_builder", "src/lexer", "src/op", "src/parser", "src/precedence", "src/span", "src/token" , "src/core_traits", "src/ast_validator", "src/ast_state", "src/symbol", "src/prim_ty"]
 
 
 [dependencies]

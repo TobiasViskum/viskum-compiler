@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-expr = { path = "../expr" }
-ast_arena = { path = "../ast_arena"}
+ast = { path = "../ast" }
 op = { path = "../op" }
 precedence = { path = "../precedence" }
+ast_state = { path = "../ast_state" }

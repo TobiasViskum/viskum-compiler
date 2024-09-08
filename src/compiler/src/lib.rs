@@ -1,4 +1,5 @@
-use ast_arena::AstArena;
+use ast::AstArena;
+use ast_validator::AstValidator;
 use parser::Parser;
 
 pub struct Compiler {}
@@ -11,14 +12,17 @@ impl Compiler {
     pub fn compile_entry(&self) {
         let file_content = Self::get_file_content();
 
-        {
-            let ast_arena = AstArena::new();
-            let _ast = {
-                let mut parser = Parser::new(file_content.as_str(), &ast_arena);
+        let ast_arena = AstArena::new();
 
-                parser.parse();
-            };
-        }
+        let ast = {
+            let parser = Parser::new(file_content.as_str(), &ast_arena);
+            let ast = parser.parse_into_ast();
+
+            let ast_validator = AstValidator::new(ast);
+            ast_validator.validate_ast()
+        };
+
+        println!("{}", ast.dissasemble(&file_content))
     }
 
     fn get_file_content() -> String {
