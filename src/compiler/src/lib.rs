@@ -1,6 +1,6 @@
 use ast::AstArena;
-use ast_validator::AstValidator;
 use parser::Parser;
+use resolver::Resolver;
 
 pub struct Compiler {}
 
@@ -18,8 +18,10 @@ impl Compiler {
             let parser = Parser::new(file_content.as_str(), &ast_arena);
             let ast = parser.parse_into_ast();
 
-            let ast_validator = AstValidator::new(ast);
-            ast_validator.validate_ast()
+            let mut resolver = Resolver::new(&file_content);
+            let resolved_ast = resolver.resolve_ast(ast);
+            let type_checked_ast = resolver.type_check_ast(resolved_ast);
+            type_checked_ast
         };
 
         println!("{}", ast.dissasemble(&file_content))

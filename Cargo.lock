@@ -12,24 +12,21 @@ checksum = "3d62b7694a562cdf5a74227903507c56ab2cc8bdd1f781ed5cb4cf9c9f810bfc"
 name = "ast"
 version = "0.1.0"
 dependencies = [
- "ast_state",
+ "bumpalo",
  "core_traits",
  "op",
+ "paste",
  "span",
+ "symbol",
+ "ty",
  "typed-arena",
 ]
 
 [[package]]
-name = "ast_state"
-version = "0.1.0"
-
-[[package]]
-name = "ast_validator"
-version = "0.1.0"
-dependencies = [
- "ast",
- "ast_state",
-]
+name = "bumpalo"
+version = "3.16.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "79296716171880943b8470b5f8d03aa55eb2e645a4874bdbb28adb49162e012c"
 
 [[package]]
 name = "byteorder"
@@ -42,13 +39,21 @@ name = "compiler"
 version = "0.1.0"
 dependencies = [
  "ast",
- "ast_validator",
  "parser",
+ "resolver",
 ]
 
 [[package]]
 name = "core_traits"
 version = "0.1.0"
+
+[[package]]
+name = "data_structures"
+version = "0.1.0"
+dependencies = [
+ "fxhash",
+ "indexmap",
+]
 
 [[package]]
 name = "enum-iterator"
@@ -77,13 +82,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5443807d6dff69373d433ab9ef5378ad8df50ca6298caf15de6e52e24aaf54d5"
 
 [[package]]
-name = "expr_builder"
+name = "error"
 version = "0.1.0"
 dependencies = [
- "ast",
- "ast_state",
- "op",
- "precedence",
+ "span",
+ "symbol",
 ]
 
 [[package]]
@@ -132,23 +135,20 @@ version = "0.1.0"
 dependencies = [
  "array-init",
  "ast",
- "ast_state",
  "enum-iterator",
- "expr_builder",
  "lexer",
  "op",
- "precedence",
  "span",
+ "symbol",
  "token",
+ "ty",
 ]
 
 [[package]]
-name = "precedence"
-version = "0.1.0"
-
-[[package]]
-name = "prim_ty"
-version = "0.1.0"
+name = "paste"
+version = "1.0.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
 
 [[package]]
 name = "proc-macro2"
@@ -169,6 +169,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "resolver"
+version = "0.1.0"
+dependencies = [
+ "ast",
+ "error",
+ "fxhash",
+ "symbol",
+ "ty",
+]
+
+[[package]]
 name = "span"
 version = "0.1.0"
 
@@ -176,8 +187,7 @@ version = "0.1.0"
 name = "symbol"
 version = "0.1.0"
 dependencies = [
- "fxhash",
- "indexmap",
+ "data_structures",
  "typed-arena",
 ]
 
@@ -198,6 +208,15 @@ version = "0.1.0"
 dependencies = [
  "enum-iterator",
  "span",
+]
+
+[[package]]
+name = "ty"
+version = "0.1.0"
+dependencies = [
+ "data_structures",
+ "fxhash",
+ "typed-arena",
 ]
 
 [[package]]

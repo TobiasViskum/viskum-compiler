@@ -1,6 +1,8 @@
 [package]
-name = "ast_state"
+name = "data_structures"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+fxhash = "0.2.1"
+indexmap = "2.5.0"

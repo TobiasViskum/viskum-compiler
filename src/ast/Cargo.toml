@@ -10,4 +10,7 @@ op = { path = "../op" }
 span = { path = "../span" }
 core_traits = { path = "../core_traits" }
 typed-arena = { version = "2.0.2" }
-ast_state = { path = "../ast_state"}
+symbol = { path = "../symbol" }
+bumpalo = "3.16.0"
+paste = "1.0.15"
+ty = { path = "../ty" }

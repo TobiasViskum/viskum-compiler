@@ -1,4 +1,5 @@
 use ast::{
+    ast_state::AstUnvalidated,
     AssignStmt,
     AstArena,
     BinaryExpr,
@@ -12,18 +13,19 @@ use ast::{
     IdentExpr,
     IfExpr,
     IntegerExpr,
-    PatternExpr,
+    Pat,
     PlaceExpr,
     Stmt,
     ValueExpr,
 };
-use ast_state::AstUnvalidated;
 use op::BinaryOp;
-use precedence::Precedence;
+use ty::NodeId;
+
+use crate::precedence::Precedence;
 
 pub struct ExprBuilder<'ast> {
-    final_stmt: Option<Stmt<'ast, AstUnvalidated>>,
-    exprs: Vec<Expr<'ast, AstUnvalidated>>,
+    final_stmt: Option<Stmt<'ast>>,
+    exprs: Vec<Expr<'ast>>,
     ast_arena: &'ast AstArena<'ast>,
     base_precedence: Precedence,
 }
@@ -38,7 +40,7 @@ impl<'ast> ExprBuilder<'ast> {
         }
     }
 
-    pub fn take_stmt(mut self) -> Option<Stmt<'ast, AstUnvalidated>> {
+    pub fn take_stmt(mut self) -> Option<Stmt<'ast>> {
         if self.final_stmt.is_none() {
             self.final_stmt = Some(Stmt::ExprStmt(self.exprs.pop().expect("TODO: Error handling")));
         }
@@ -46,55 +48,57 @@ impl<'ast> ExprBuilder<'ast> {
         self.final_stmt
     }
 
-    pub fn take_expr(mut self) -> Option<Expr<'ast, AstUnvalidated>> {
+    pub fn take_expr(mut self) -> Option<Expr<'ast>> {
         self.exprs.pop()
     }
 
-    pub fn emit_define_stmt(&mut self) {
+    pub fn emit_define_stmt(&mut self, ast_node_id: NodeId) {
         let value_expr = self.exprs.pop().expect("TODO: Error handling");
         let setter_expr = self.exprs.pop().expect("TODO: Error handling");
         let pattern_expr = Self::try_as_pattern_expr(&setter_expr).expect(
             "TODO: Error handling (invalid pattern expr)"
         );
 
-        let define_stmt = Stmt::DefineStmt(DefineStmt::new(pattern_expr, value_expr));
+        let define_stmt = Stmt::DefineStmt(DefineStmt::new(pattern_expr, value_expr, ast_node_id));
         self.final_stmt = Some(define_stmt);
     }
 
-    pub fn emit_assign_stmt(&mut self) {
+    pub fn emit_assign_stmt(&mut self, ast_node_id: NodeId) {
         let value_expr = self.exprs.pop().expect("TODO: Error handling");
         let setter_expr = self.exprs.pop().expect("TODO: Error handling");
         let place_expr = Self::try_as_place_expr(&setter_expr).expect(
             "TODO: Error handling (invalid pattern expr)"
         );
 
-        let assign_stmt = Stmt::AssignStmt(AssignStmt::new(place_expr, value_expr));
+        let assign_stmt = Stmt::AssignStmt(AssignStmt::new(place_expr, value_expr, ast_node_id));
         self.final_stmt = Some(assign_stmt);
     }
 
-    pub fn emit_if_expr(&mut self, if_expr: IfExpr<'ast, AstUnvalidated>) {
+    pub fn emit_if_expr(&mut self, if_expr: &'ast IfExpr<'ast>) {
         let expr = Expr::ExprWithBlock(ExprWithBlock::IfExpr(if_expr));
 
         self.exprs.push(expr);
     }
 
-    pub fn emit_block_expr(&mut self, block_expr: BlockExpr<'ast, AstUnvalidated>) {
+    pub fn emit_block_expr(&mut self, block_expr: &'ast BlockExpr<'ast>) {
         let expr = Expr::ExprWithBlock(ExprWithBlock::BlockExpr(block_expr));
 
         self.exprs.push(expr);
     }
 
-    pub fn emit_grouping_expr(&mut self) {
+    pub fn emit_grouping_expr(&mut self, ast_node_id: NodeId) {
         let group_expr = self.exprs.pop().expect("TODO: Error handling");
         let expr = Expr::ExprWithoutBlock(
             ExprWithoutBlock::ValueExpr(
-                ValueExpr::GroupExpr(GroupExpr::new(self.ast_arena.alloc_expr(group_expr)))
+                ValueExpr::GroupExpr(
+                    GroupExpr::new(self.ast_arena.alloc_expr_or_stmt(group_expr), ast_node_id)
+                )
             )
         );
         self.exprs.push(expr);
     }
 
-    pub fn emit_ident_expr(&mut self, ident_expr: IdentExpr<AstUnvalidated>) {
+    pub fn emit_ident_expr(&mut self, ident_expr: IdentExpr) {
         let expr = Expr::ExprWithoutBlock(
             ExprWithoutBlock::PlaceExpr(PlaceExpr::IdentExpr(ident_expr))
         );
@@ -108,7 +112,7 @@ impl<'ast> ExprBuilder<'ast> {
         self.exprs.push(expr);
     }
 
-    pub fn emit_binary_expr(&mut self, op: BinaryOp) {
+    pub fn emit_binary_expr(&mut self, op: BinaryOp, ast_node_id: NodeId) {
         let rhs = self.exprs.pop().expect("TODO: Error handling");
         let lhs = self.exprs.pop().expect("TODO: Error handling");
 
@@ -116,9 +120,10 @@ impl<'ast> ExprBuilder<'ast> {
             ExprWithoutBlock::ValueExpr(
                 ValueExpr::BinaryExpr(
                     BinaryExpr::new(
-                        self.ast_arena.alloc_expr(lhs),
+                        self.ast_arena.alloc_expr_or_stmt(lhs),
                         op,
-                        self.ast_arena.alloc_expr(rhs)
+                        self.ast_arena.alloc_expr_or_stmt(rhs),
+                        ast_node_id
                     )
                 )
             )
@@ -135,9 +140,7 @@ impl<'ast> ExprBuilder<'ast> {
         self.base_precedence = prec;
     }
 
-    fn try_as_pattern_expr(
-        expr: &Expr<'ast, AstUnvalidated>
-    ) -> Option<PatternExpr<AstUnvalidated>> {
+    fn try_as_pattern_expr(expr: &Expr<'ast>) -> Option<Pat> {
         match expr {
             Expr::ExprWithBlock(_) => None,
             Expr::ExprWithoutBlock(expr) => {
@@ -145,7 +148,7 @@ impl<'ast> ExprBuilder<'ast> {
                     ExprWithoutBlock::PlaceExpr(expr) => {
                         match expr {
                             PlaceExpr::IdentExpr(ident_expr) =>
-                                Some(PatternExpr::IdentPattern(*ident_expr)),
+                                Some(Pat::IdentPat(ident_expr.as_pat())),
                         }
                     }
                     ExprWithoutBlock::ValueExpr(expr) => {
@@ -160,7 +163,7 @@ impl<'ast> ExprBuilder<'ast> {
         }
     }
 
-    fn try_as_place_expr(expr: &Expr<'ast, AstUnvalidated>) -> Option<PlaceExpr<AstUnvalidated>> {
+    fn try_as_place_expr(expr: &Expr<'ast>) -> Option<PlaceExpr> {
         match expr {
             Expr::ExprWithBlock(_) => None,
             Expr::ExprWithoutBlock(expr) => {

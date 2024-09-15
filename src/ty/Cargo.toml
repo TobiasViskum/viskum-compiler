@@ -1,8 +1,9 @@
 [package]
-name = "symbol"
+name = "ty"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-typed-arena = { version = "2.0.2" }
+typed-arena = "2.0.2"
+fxhash = "0.2.1"
 data_structures = { path = "../data_structures" }

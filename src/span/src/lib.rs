@@ -2,14 +2,14 @@ use std::ops::Range;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Span {
-    byte_start: usize,
-    byte_end: usize,
-    line: usize,
+    byte_start: u32,
+    byte_end: u32,
+    line: u32,
 }
 
 impl Span {
     pub fn new(byte_start: usize, byte_end: usize, line: usize) -> Self {
-        Self { byte_start, byte_end, line }
+        Self { byte_start: byte_start as u32, byte_end: byte_end as u32, line: line as u32 }
     }
 
     pub fn dummy() -> Self {
@@ -21,19 +21,23 @@ impl Span {
     }
 
     pub fn get_byte_start(&self) -> usize {
-        self.byte_start
+        self.byte_start as usize
     }
 
     pub fn get_byte_end(&self) -> usize {
-        self.byte_end
+        self.byte_end as usize
     }
 
     pub fn get_byte_range(&self) -> Range<usize> {
-        self.byte_start..self.byte_end
+        self.get_byte_start()..self.get_byte_end()
     }
 
     pub fn get_len(&self) -> usize {
-        self.byte_end - self.byte_start
+        self.get_byte_end() - self.get_byte_start()
+    }
+
+    pub fn get_line(&self) -> usize {
+        self.line as usize
     }
 }
 
@@ -49,6 +53,6 @@ mod test {
         let span = Span::new(byte_start, byte_end, line);
         assert_eq!(byte_start, span.get_byte_start());
         assert_eq!(byte_end, span.get_byte_end());
-        assert_eq!(line, span.line)
+        assert_eq!(line, span.get_line())
     }
 }

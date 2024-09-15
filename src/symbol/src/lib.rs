@@ -1,9 +1,14 @@
 use std::cell::{ LazyCell, RefCell };
-use fxhash::FxBuildHasher;
-use indexmap::IndexSet;
+use data_structures::FxIndexSet;
 use typed_arena::Arena;
 
-pub(crate) const GLOBALS: LazyCell<Globals> = LazyCell::new(|| Globals::new());
+thread_local! {
+    static GLOBALS: LazyCell<Globals> = LazyCell::new(|| Globals::new());
+}
+
+fn with_globals<T>(f: impl Fn(&Globals) -> T) -> T {
+    GLOBALS.with(|globals: &LazyCell<Globals>| f(globals))
+}
 
 pub(crate) struct Globals {
     symbol_interner: SymbolInterner,
@@ -11,7 +16,6 @@ pub(crate) struct Globals {
 
 impl Globals {
     pub fn new() -> Self {
-        println!("GLOBALS INITIALIZED");
         Self {
             symbol_interner: SymbolInterner::new(),
         }
@@ -20,12 +24,12 @@ impl Globals {
 
 pub(crate) struct SymbolInterner {
     arena: Arena<Box<str>>,
-    strings: RefCell<IndexSet<&'static str, FxBuildHasher>>,
+    strings: RefCell<FxIndexSet<&'static str>>,
 }
 
 impl SymbolInterner {
     pub(crate) fn new() -> Self {
-        Self { arena: Arena::new(), strings: RefCell::new(IndexSet::default()) }
+        Self { arena: Arena::new(), strings: RefCell::new(Default::default()) }
     }
 
     pub(crate) fn alloc_str(&self, string: &str) -> Symbol {
@@ -34,7 +38,9 @@ impl SymbolInterner {
         }
 
         let string = self.arena.alloc(string.into());
+        // Safe because the symbol interner lives as long as the program
         let string: &'static str = unsafe { &*(string.as_ref() as *const str) };
+
         let (idx, _) = self.strings.borrow_mut().insert_full(string);
         Symbol::from_id(idx)
     }
@@ -44,22 +50,24 @@ impl SymbolInterner {
     }
 }
 
-struct SymbolId(usize);
+#[derive(Hash, PartialEq, Eq, Debug, Clone, Copy)]
+struct SymbolId(pub u32);
 
+#[derive(Hash, PartialEq, Eq, Debug, Clone, Copy)]
 pub struct Symbol {
     id: SymbolId,
 }
 
 impl Symbol {
     pub fn new(str: &str) -> Self {
-        GLOBALS.symbol_interner.alloc_str(str)
+        with_globals(|globals| globals.symbol_interner.alloc_str(str))
     }
 
     pub fn get(&self) -> &'static str {
-        GLOBALS.symbol_interner.get_str(self.id.0)
+        with_globals(|globals| globals.symbol_interner.get_str(self.id.0 as usize))
     }
 
     pub(crate) fn from_id(id: usize) -> Self {
-        Self { id: SymbolId(id) }
+        Self { id: SymbolId(id as u32) }
     }
 }

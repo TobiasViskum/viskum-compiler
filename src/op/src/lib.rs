@@ -2,11 +2,12 @@ use std::fmt::Display;
 
 use core_traits::Dissasemble;
 
+#[derive(Debug, Clone, Copy)]
 pub enum Op {
     BinaryOp(BinaryOp),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum BinaryOp {
     Add,
     Sub,

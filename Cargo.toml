@@ -4,7 +4,19 @@ version = "0.1.0"
 edition = "2021"
 
 [workspace]
-members = [ "src/compiler", "src/ast", "src/expr_builder", "src/lexer", "src/op", "src/parser", "src/precedence", "src/span", "src/token" , "src/core_traits", "src/ast_validator", "src/ast_state", "src/symbol", "src/prim_ty"]
+members = [ 
+    "src/compiler",
+    "src/ast",
+    "src/lexer",
+    "src/op",
+    "src/parser",
+    "src/span",
+    "src/token" ,
+    "src/core_traits",
+    "src/resolver",
+    "src/symbol",
+    "src/ty", "src/error", "src/data_structures", 
+]
 
 
 [dependencies]
