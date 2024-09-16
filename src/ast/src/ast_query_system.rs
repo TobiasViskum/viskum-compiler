@@ -16,24 +16,24 @@ use crate::{
 
 /// Used to lookup any node inside the ast
 ///
-/// It's built during parsing, and is a part of the Ast struct
+/// It's built when making the Resolver
 #[derive(Debug)]
 pub struct AstQuerySystem<'ast> {
     ast_node_id_to_ast_node: FxHashMap<NodeId, AstQueryEntry<'ast>>,
-    nodes_count: usize,
+    expected_nodes_count: usize,
 }
 
 impl<'ast> AstQuerySystem<'ast> {
-    pub fn new(nodes_count: usize) -> Self {
+    pub fn new(expected_nodes_count: usize) -> Self {
         Self {
             ast_node_id_to_ast_node: Default::default(),
-            nodes_count,
+            expected_nodes_count,
         }
     }
 
     pub fn assert_nodes_amount(&self) {
         assert_eq!(
-            self.nodes_count,
+            self.expected_nodes_count,
             self.ast_node_id_to_ast_node.len(),
             "Expected all nodes to be inserted into the AstQuerySystem. Cannot continue compilation"
         )

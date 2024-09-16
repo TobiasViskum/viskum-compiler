@@ -3,6 +3,7 @@ use std::ops::{ Deref, DerefMut };
 use fxhash::FxBuildHasher;
 use indexmap::IndexSet;
 
+/// A wrapper of IndexSet using FxHash instead
 pub struct FxIndexSet<T>(IndexSet<T, FxBuildHasher>);
 
 impl<T> Default for FxIndexSet<T> {

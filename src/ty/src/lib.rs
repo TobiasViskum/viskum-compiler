@@ -1,8 +1,6 @@
-use std::{ cell::{ LazyCell, RefCell }, fmt::Display, hash::{ Hash, Hasher } };
+use std::{ cell::LazyCell, fmt::Display, hash::Hash };
 
 use data_structures::FxIndexSet;
-use fxhash::FxHashMap;
-use ir_defs::NodeId;
 use typed_arena::Arena;
 
 thread_local! {
@@ -13,6 +11,7 @@ fn with_type_arena<T>(f: impl FnOnce(&Arena<Ty>) -> T) -> T {
     TYPE_ARENA.with(move |type_arena: &LazyCell<Arena<Ty>>| f(type_arena))
 }
 
+/// For now, this is just used as a way to intern types
 pub struct TyCtx<'ctx> {
     interned_types: FxIndexSet<&'ctx Ty>,
     // May be needed when multithreading is implemented

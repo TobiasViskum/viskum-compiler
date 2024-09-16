@@ -1,21 +1,9 @@
 use ast::{
-    ast_state::{
-        AstResolved,
-        AstState,
-        AstState0,
-        AstState1,
-        AstState2,
-        AstState3,
-        AstTypeChecked,
-        AstUnvalidated,
-    },
+    ast_state::{ AstState, AstState0, AstState1, AstState2, AstState3, AstTypeChecked },
     ast_visitor::AstVisitEmitter,
     Ast,
     IdentExpr,
     IdentPat,
-    // AstNodeKind,
-    // AstVisitEvent,
-    // ScopeChange,
 };
 use error::{ Error, ErrorKind };
 use fxhash::FxHashMap;
@@ -23,6 +11,7 @@ use ir_defs::{ DefId, NameBinding, NodeId, ScopeId };
 use symbol::Symbol;
 use ty::{ Ty, TyCtx };
 
+/// Main resolver struct. This is responsible for validating the Ast and creating the Cfg from it
 pub struct Resolver<'a> {
     ty_ctx: TyCtx<'a>,
 
@@ -30,12 +19,12 @@ pub struct Resolver<'a> {
     ///
     /// This is reset after the first pass to save some space
     symbol_and_scope_to_def_id: FxHashMap<(Symbol, ScopeId), DefId>,
-
-    /// Built during the first pass (name resolution)
-    node_id_to_def_id: FxHashMap<NodeId, DefId>,
-
     scope_stack: Vec<ScopeId>,
     next_scope_id: ScopeId,
+
+    /// Built during the first pass (name resolution) and then used in the rest of the passes
+    node_id_to_def_id: FxHashMap<NodeId, DefId>,
+
     def_id_to_name_binding: FxHashMap<DefId, (NameBinding, &'a Ty)>,
     node_id_to_ty: FxHashMap<NodeId, &'a Ty>,
 

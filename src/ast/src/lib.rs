@@ -1,3 +1,17 @@
+/*
+
+IMPLEMENTATION DETAIL:
+
+Each node in the Ast doesn't have ANY functionality at all,
+since the nodes are just for holding relavant data.
+Therefore all fields on each node is also public.
+
+That means when making an AstVisitor or AstPrettifier,
+those structs doesn't rely on logic from the Ast nodes,
+but rather keep their logic separated.
+
+*/
+
 mod ast_prettifier;
 mod ast_arena;
 pub mod ast_query_system;
@@ -21,7 +35,6 @@ pub trait AstDissasemble {
     fn ast_dissasemble(&self, scope_depth: usize, src: &str) -> String;
 }
 
-/// Implement query system
 #[derive(Debug)]
 pub struct Ast<'ast, T> where T: AstState {
     main_scope: GlobalScope<'ast>,

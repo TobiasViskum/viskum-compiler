@@ -1,7 +1,7 @@
 /*
 
 This specific visitor pattern, specifically implemented in the Visitor trait,
-is highly inspired how the Rust compiler visits its Ast:
+is inspired by how the Rust compiler visits its Ast:
 https://github.com/rust-lang/rust/blob/master/compiler/rustc_ast/src/visit.rs
 
 */
@@ -30,7 +30,7 @@ use crate::{
     Stmt,
     ValueExpr,
 };
-use ir_defs::{ DefId, DefKind, NameBinding, NameBindingKind, NodeId };
+use ir_defs::{ DefId, DefKind, NameBinding, NodeId };
 use ty::{ PrimTy, Ty };
 
 /// Visits the entire Ast from left to right
