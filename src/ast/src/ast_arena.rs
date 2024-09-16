@@ -17,10 +17,14 @@ impl<'ast> AstArena<'ast> {
         }
     }
 
-    pub fn alloc_expr_or_stmt<T>(&self, expr: T) -> &T where T: Copy {
+    /// Only allocate objects that doesn't require its Drop implementation to be run
+    ///
+    /// That's why Copy is required, just to make sure
+    pub fn alloc_expr_or_stmt<T>(&self, expr: T) -> &T {
         self.ast_arena.alloc(expr)
     }
 
+    /// Allocates a vector of stmts in a TypedArena instead of Bump
     pub fn alloc_vec_stmts(&self, vec: Vec<&'ast Stmt<'ast>>) -> &[&'ast Stmt<'ast>] {
         self.vec_stmts_arena.alloc(vec)
     }

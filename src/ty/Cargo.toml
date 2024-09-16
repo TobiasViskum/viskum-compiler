@@ -7,3 +7,4 @@ edition = "2021"
 typed-arena = "2.0.2"
 fxhash = "0.2.1"
 data_structures = { path = "../data_structures" }
+ir_defs = { path = "../ir_defs" }

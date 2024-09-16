@@ -1,7 +1,8 @@
-use std::{ cell::{ LazyCell, RefCell }, hash::{ Hash, Hasher } };
+use std::{ cell::{ LazyCell, RefCell }, fmt::Display, hash::{ Hash, Hasher } };
 
 use data_structures::FxIndexSet;
 use fxhash::FxHashMap;
+use ir_defs::NodeId;
 use typed_arena::Arena;
 
 thread_local! {
@@ -14,38 +15,37 @@ fn with_type_arena<T>(f: impl FnOnce(&Arena<Ty>) -> T) -> T {
 
 pub struct TyCtx<'ctx> {
     interned_types: FxIndexSet<&'ctx Ty>,
-    node_id_to_ty: FxHashMap<NodeId, &'ctx Ty>,
     // May be needed when multithreading is implemented
     // global_ty_ctx: &'ctx GlobalCtx<'ctx>,
+}
+
+impl<'ctx> Default for TyCtx<'ctx> {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl<'ctx> TyCtx<'ctx> {
     pub fn new() -> Self {
         Self {
             interned_types: Default::default(),
-            node_id_to_ty: Default::default(),
         }
     }
 
-    pub fn set_type_to_node(&mut self, node_id: NodeId, ty: Ty) -> &'ctx Ty {
+    pub fn intern_type(&mut self, ty: Ty) -> &'ctx Ty {
         if let Some(found_type) = self.interned_types.get(&ty) {
             return *found_type;
         }
 
-        // This is safe, because he arena lives as long as the program
+        // This is safe, because the arena lives as long as the program
         let interned_type = with_type_arena(|type_arena| unsafe {
             &*(type_arena.alloc(ty) as *mut Ty)
         });
-        self.node_id_to_ty.insert(node_id, interned_type);
         self.interned_types.insert(interned_type);
 
         interned_type
     }
 }
-
-#[derive(Eq, Hash, PartialEq, Debug, Clone, Copy)]
-/// NodeId is used both as AstNodeId and CfgNodeId
-pub struct NodeId(pub u32);
 
 #[derive(Hash, Eq, PartialEq)]
 pub enum Ty {
@@ -53,8 +53,26 @@ pub enum Ty {
     Unkown,
 }
 
+impl Display for Ty {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Unkown => write!(f, "{{unkown}}"),
+            Self::PrimTy(prim_ty) => prim_ty.fmt(f),
+        }
+    }
+}
+
 #[derive(Hash, Eq, PartialEq)]
 pub enum PrimTy {
     Int,
     Void,
+}
+
+impl Display for PrimTy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Int => write!(f, "Int"),
+            Self::Void => write!(f, "Void"),
+        }
+    }
 }

@@ -18,13 +18,12 @@ impl Compiler {
             let parser = Parser::new(file_content.as_str(), &ast_arena);
             let ast = parser.parse_into_ast();
 
-            let mut resolver = Resolver::new(&file_content);
+            let (mut resolver, ast) = Resolver::from_ast(&file_content, ast);
             let resolved_ast = resolver.resolve_ast(ast);
             let type_checked_ast = resolver.type_check_ast(resolved_ast);
+
             type_checked_ast
         };
-
-        println!("{}", ast.dissasemble(&file_content))
     }
 
     fn get_file_content() -> String {

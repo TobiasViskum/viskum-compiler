@@ -1,5 +1,14 @@
+/*
+
+This specific visitor pattern, specifically implemented in the Visitor trait,
+is highly inspired how the Rust compiler visits its Ast:
+https://github.com/rust-lang/rust/blob/master/compiler/rustc_ast/src/visit.rs
+
+*/
+
 use crate::{
-    ast_state::{ AstState, AstState1, AstState2, AstState3 },
+    ast_query_system::AstQueryEntry,
+    ast_state::{ AstState, AstState0, AstState1, AstState2, AstState3 },
     AssignStmt,
     Ast,
     BinaryExpr,
@@ -21,15 +30,28 @@ use crate::{
     Stmt,
     ValueExpr,
 };
-use ty::{ NodeId, PrimTy, Ty };
+use ir_defs::{ DefId, DefKind, NameBinding, NameBindingKind, NodeId };
+use ty::{ PrimTy, Ty };
 
 /// Visits the entire Ast from left to right
 ///
-/// When the visitor is done, the ast will transition into the next ast-state
+/// When the visitor is done, the ast will transition into the next state
 #[derive(Debug)]
 pub struct AstVisitor<'ast, 'b, T, E> where T: AstState, E: AstVisitEmitter<'ast, T> {
     pub ast: Ast<'ast, T>,
     pub ast_visit_emitter: &'b mut E,
+}
+
+impl<'ast, 'b, E> AstVisitor<'ast, 'b, AstState0, E> where E: AstVisitEmitter<'ast, AstState0> {
+    pub fn visit(mut self) -> Ast<'ast, AstState1> {
+        self.visit_stmts(self.ast.main_scope.stmts);
+        self.ast.query_system.assert_nodes_amount();
+        self.ast.next_state()
+    }
+
+    pub fn insert_query_entry(&mut self, node_id: NodeId, ast_query_entry: AstQueryEntry<'ast>) {
+        self.ast.query_system.insert_entry(node_id, ast_query_entry)
+    }
 }
 
 impl<'ast, 'b, E> AstVisitor<'ast, 'b, AstState1, E> where E: AstVisitEmitter<'ast, AstState1> {
@@ -71,15 +93,33 @@ impl<'ast, 'b, T, E> AstVisitEmitter<'ast, T>
     }
 
     /* Used during the second pass (type checking) */
-    fn set_type_to_node(&mut self, node_id: NodeId, ty: Ty) -> &'ast Ty
+    fn set_type_to_node_id(&mut self, node_id: NodeId, ty: &'ast Ty)
         where T: AstState<ThisState = AstState2>
     {
-        self.ast_visit_emitter.set_type_to_node(node_id, ty)
+        self.ast_visit_emitter.set_type_to_node_id(node_id, ty)
     }
-    fn get_ty_from_node_id(&self, node_id: NodeId) -> Option<&'ast Ty>
+    fn intern_type(&mut self, ty: Ty) -> &'ast Ty where T: AstState<ThisState = AstState2> {
+        self.ast_visit_emitter.intern_type(ty)
+    }
+    fn get_def_id_from_node_id(&self, node_id: NodeId) -> DefId
         where T: AstState<ThisState = AstState2>
     {
-        self.ast_visit_emitter.get_ty_from_node_id(node_id)
+        self.ast_visit_emitter.get_def_id_from_node_id(node_id)
+    }
+    fn get_namebinding_and_ty_from_def_id(&self, def_id: DefId) -> (NameBinding, &'ast Ty)
+        where T: AstState<ThisState = AstState2>
+    {
+        self.ast_visit_emitter.get_namebinding_and_ty_from_def_id(def_id)
+    }
+    fn set_namebinding_and_ty_to_def_id(
+        &mut self,
+        def_id: DefId,
+        name_binding: NameBinding,
+        ty: &'ast Ty
+    )
+        where T: AstState<ThisState = AstState2>
+    {
+        self.ast_visit_emitter.set_namebinding_and_ty_to_def_id(def_id, name_binding, ty)
     }
 }
 
@@ -95,11 +135,77 @@ pub trait AstVisitEmitter<'a, T>: Sized where T: AstState {
     fn lookup_var(&mut self, ident_expr: &'a IdentExpr) where T: AstState<ThisState = AstState1>;
 
     /* Methods for the second pass (type checking) */
-    fn set_type_to_node(&mut self, node_id: NodeId, ty: Ty) -> &'a Ty
+    fn intern_type(&mut self, ty: Ty) -> &'a Ty where T: AstState<ThisState = AstState2>;
+    fn set_type_to_node_id(&mut self, node_id: NodeId, ty: &'a Ty)
         where T: AstState<ThisState = AstState2>;
+    fn get_def_id_from_node_id(&self, node_id: NodeId) -> DefId
+        where T: AstState<ThisState = AstState2>;
+    fn set_namebinding_and_ty_to_def_id(
+        &mut self,
+        def_id: DefId,
+        name_binding: NameBinding,
+        ty: &'a Ty
+    )
+        where T: AstState<ThisState = AstState2>;
+    fn get_namebinding_and_ty_from_def_id(&self, def_id: DefId) -> (NameBinding, &'a Ty)
+        where T: AstState<ThisState = AstState2>;
+}
 
-    fn get_ty_from_node_id(&self, node_id: NodeId) -> Option<&'a Ty>
-        where T: AstState<ThisState = AstState2>;
+/// Implements the visitor trait for
+impl<'ast, 'b, E> Visitor<'ast>
+    for AstVisitor<'ast, 'b, AstState0, E>
+    where E: AstVisitEmitter<'ast, AstState0>
+{
+    type Result = ();
+
+    fn default_result() -> Self::Result {
+        ()
+    }
+
+    fn visit_interger_expr(&mut self, interger_expr: &'ast IntegerExpr) -> Self::Result {
+        self.insert_query_entry(
+            interger_expr.ast_node_id,
+            AstQueryEntry::IntegerExpr(interger_expr)
+        )
+    }
+
+    fn visit_def_stmt(&mut self, def_stmt: &'ast DefineStmt<'ast>) -> Self::Result {
+        self.insert_query_entry(def_stmt.ast_node_id, AstQueryEntry::DefineStmt(def_stmt));
+        walk_def_stmt(self, def_stmt)
+    }
+
+    fn visit_assign_stmt(&mut self, assign_stmt: &'ast AssignStmt<'ast>) -> Self::Result {
+        self.insert_query_entry(assign_stmt.ast_node_id, AstQueryEntry::AssignStmt(assign_stmt));
+        todo!("Walk statement here")
+    }
+
+    fn visit_block_expr(&mut self, expr: &'ast BlockExpr<'ast>) -> Self::Result {
+        self.insert_query_entry(expr.ast_node_id, AstQueryEntry::BlockExpr(expr));
+        walk_stmts(self, expr.stmts)
+    }
+
+    fn visit_if_expr(&mut self, if_expr: &'ast IfExpr<'ast>) -> Self::Result {
+        self.insert_query_entry(if_expr.ast_node_id, AstQueryEntry::IfExpr(if_expr));
+        walk_if_expr(self, if_expr)
+    }
+
+    fn visit_ident_expr(&mut self, ident_expr: &'ast IdentExpr) -> Self::Result {
+        self.insert_query_entry(ident_expr.ast_node_id, AstQueryEntry::IdentExpr(ident_expr))
+    }
+
+    fn visit_ident_pat(&mut self, ident_pat: &'ast IdentPat) -> Self::Result {
+        self.insert_query_entry(ident_pat.ast_node_id, AstQueryEntry::IdentPat(ident_pat))
+    }
+
+    fn visit_binary_expr(&mut self, binary_expr: &'ast BinaryExpr<'ast>) -> Self::Result {
+        self.insert_query_entry(binary_expr.ast_node_id, AstQueryEntry::BinarExpr(binary_expr));
+        walk_binary_expr(self, binary_expr)
+    }
+
+    fn visit_group_expr(&mut self, group_expr: &'ast GroupExpr<'ast>) -> Self::Result {
+        self.insert_query_entry(group_expr.ast_node_id, AstQueryEntry::GroupExpr(group_expr));
+        walk_group_expr(self, group_expr)
+    }
 }
 
 /// Implements the Visitor trait for the first pass (name resolution)
@@ -123,11 +229,12 @@ impl<'ast, 'b, E> Visitor<'ast>
 
     fn visit_block_expr(&mut self, expr: &'ast BlockExpr<'ast>) -> Self::Result {
         self.start_scope();
-        walk_stmts(self, expr.stmts);
+        self.visit_stmts(expr.stmts);
         self.end_scope();
     }
 }
 
+/// Implements the Visitor trait for the second pass (type checking)
 impl<'ast, 'b, E> Visitor<'ast>
     for AstVisitor<'ast, 'b, AstState2, E>
     where E: AstVisitEmitter<'ast, AstState2>
@@ -139,18 +246,76 @@ impl<'ast, 'b, E> Visitor<'ast>
     }
 
     fn visit_interger_expr(&mut self, interger_expr: &'ast IntegerExpr) -> Self::Result {
-        self.set_type_to_node(interger_expr.ast_node_id, Ty::PrimTy(PrimTy::Int))
+        let interned_type = self.intern_type(Ty::PrimTy(PrimTy::Int));
+        self.set_type_to_node_id(interger_expr.ast_node_id, interned_type);
+        interned_type
     }
 
     fn visit_ident_expr(&mut self, ident_expr: &'ast IdentExpr) -> Self::Result {
-        self.get_ty_from_node_id(ident_expr.ast_node_id).unwrap_or(&Ty::Unkown)
+        let def_id = self.ast_visit_emitter.get_def_id_from_node_id(ident_expr.ast_node_id);
+        let (_, def_type) = self.ast_visit_emitter.get_namebinding_and_ty_from_def_id(def_id);
+        def_type
+    }
+
+    fn visit_def_stmt(&mut self, def_stmt: &'ast DefineStmt<'ast>) -> Self::Result {
+        // When tuples are implemented, compare if tuple on lhs, is same as tuple type on rhs
+        let def_type = walk_expr(self, &def_stmt.value_expr);
+
+        match &def_stmt.setter_expr {
+            Pat::IdentPat(ident_pat) => {
+                let def_id = self.ast_visit_emitter.get_def_id_from_node_id(ident_pat.ast_node_id);
+                self.ast_visit_emitter.set_namebinding_and_ty_to_def_id(
+                    def_id,
+                    NameBinding::from(DefKind::Variable),
+                    def_type
+                );
+            }
+        }
+
+        // Returns void, since definitions cannot return a value
+        self.intern_type(Ty::PrimTy(PrimTy::Void))
+    }
+
+    fn visit_if_expr(&mut self, expr: &'ast IfExpr<'ast>) -> Self::Result {
+        let true_type = walk_stmts(self, expr.true_block.stmts);
+        let false_type = expr.false_block
+            .as_ref()
+            .map(|expr| walk_if_false_branch_expr(self, expr));
+
+        if let Some(false_type) = false_type {
+            if true_type == false_type { true_type } else { self.intern_type(Ty::Unkown) }
+        } else {
+            true_type
+        }
+    }
+
+    fn visit_binary_expr(&mut self, binary_expr: &'ast BinaryExpr<'ast>) -> Self::Result {
+        let lhs_type = walk_expr(self, binary_expr.lhs);
+        let rhs_type = walk_expr(self, binary_expr.rhs);
+
+        let result_type = match (lhs_type, rhs_type) {
+            (Ty::PrimTy(PrimTy::Int), Ty::PrimTy(PrimTy::Int)) => { &Ty::PrimTy(PrimTy::Int) }
+            _ => {
+                println!(
+                    "Report error in binary expr: {} {} {}",
+                    lhs_type,
+                    binary_expr.op,
+                    rhs_type
+                );
+                self.intern_type(Ty::Unkown)
+            }
+        };
+
+        self.ast_visit_emitter.set_type_to_node_id(binary_expr.ast_node_id, result_type);
+
+        result_type
     }
 }
 
 /// A default implementation exists for all ast nodes, meaning
-/// the whole ast will be visited if no implementations are overwritten
+/// the whole ast will be visited from left to right by default
 ///
-/// A different implementation can be implemented for each state the Ast is in
+/// Each implementation can be overwritten for each state the Ast can be in
 /// (e.g. Ast\<AstUnresolved\> or Ast\<AstResolved\>)
 pub trait Visitor<'ast>: Sized {
     type Result: Sized;
@@ -239,22 +404,6 @@ pub trait Visitor<'ast>: Sized {
     fn visit_item(&mut self, item: &'ast ItemStmt<'ast>) -> Self::Result {
         todo!()
     }
-}
-
-macro_rules! _walk {
-    (
-        $method_name:ident < $lifetime_a:lifetime,
-        $visitor_generic:ident > (
-            $visitor:ident: &mut $visitor_type:ident,
-            $walk_name:ident: $walk_type:ty
-        ) $code:block
-    ) => {
-        pub fn $method_name<$lifetime_a, 'b, T, E, $visitor_generic>($visitor: &mut $visitor_type, $walk_name: $walk_type) -> $visitor_generic::Result
-            where T: AstState, E: AstVisitEmitter<$lifetime_a, T>, $visitor_generic: Visitor<$lifetime_a, 'b, T, E>
-        {
-            $code
-        }
-    };
 }
 
 pub fn walk_def_stmt<'a, V>(visitor: &mut V, def_stmt: &'a DefineStmt<'a>) -> V::Result

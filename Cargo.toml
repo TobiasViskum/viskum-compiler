@@ -15,7 +15,7 @@ members = [
     "src/core_traits",
     "src/resolver",
     "src/symbol",
-    "src/ty", "src/error", "src/data_structures", 
+    "src/ty", "src/error", "src/data_structures", "src/ir_defs", 
 ]
 
 

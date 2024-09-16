@@ -7,24 +7,28 @@ pub trait AstState: PrivateAstState {
 }
 
 make_ast_states! {
+
+    #[doc = "Ast state 0: Unvalidated"];
+    0: AstBuildingQuerySystem -> AstUnvalidated;
+
+
     #[doc = "Ast state 1: Unvalidated"];
-    1: AstUnvalidated -> AstResolved,
+    1: AstUnvalidated -> AstResolved;
 
     #[doc = "Ast state 2: Name resolution is done"];
-    2: AstResolved -> AstTypeChecked,
+    2: AstResolved -> AstTypeChecked;
 
 
     #[doc = "Ast state 3: Type checking is done"];
-    3: AstTypeChecked -> AstValidated,
+    3: AstTypeChecked -> AstValidated;
 
 
     #[doc = "Ast state 4: Fully validated"];
-    4: AstValidated -> AstValidated
-
+    4: AstValidated -> AstValidated;
 }
 
 macro_rules! make_ast_states {
-    ($(#[doc = $doc:literal]; $idx:literal: $state:ident -> $next_state:ident $(,)?),* $(,)?) => {
+    ($(#[doc = $doc:literal]; $idx:literal: $state:ident -> $next_state:ident;)* $(,)?) => {
         /// Makes sure, that only this file can implement AstState for structs
         trait PrivateAstState: Sized {}
 

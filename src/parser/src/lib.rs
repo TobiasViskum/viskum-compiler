@@ -1,5 +1,6 @@
 use ast::{
-    ast_state::AstUnvalidated,
+    ast_query_system::{ AstQueryEntry, AstQuerySystem },
+    ast_state::{ AstState0, AstUnvalidated },
     Ast,
     AstArena,
     BlockExpr,
@@ -15,13 +16,13 @@ use ast::{
     Stmt,
 };
 use expr_builder::ExprBuilder;
+use ir_defs::NodeId;
 use lexer::Lexer;
 use make_parse_rule::make_parse_rule;
 use op::BinaryOp;
 use precedence::Precedence;
 use span::Span;
 use token::{ Token, TokenKind };
-use ty::NodeId;
 mod make_parse_rule;
 mod expr_builder;
 mod precedence;
@@ -71,9 +72,12 @@ impl<'a> Parser<'a> {
         prev
     }
 
-    pub fn parse_into_ast(mut self) -> Ast<'a, AstUnvalidated> {
+    pub fn parse_into_ast(mut self) -> Ast<'a, AstState0> {
         let global_scope = self.parse_global_scope();
-        Ast::new(global_scope)
+
+        let nodes_count = self.next_ast_node_id.0 as usize;
+
+        Ast::new(global_scope, AstQuerySystem::new(nodes_count))
     }
 
     pub(crate) fn statement(&mut self) -> &'a Stmt<'a> {
@@ -98,19 +102,20 @@ impl<'a> Parser<'a> {
 
         self.consume(TokenKind::End, "Expected `end` after function def");
 
-        Stmt::ItemStmt(
-            ItemStmt::FunctionStmt(
-                FunctionStmt::new(
-                    ident_expr,
-                    Expr::ExprWithBlock(ExprWithBlock::BlockExpr(body)),
-                    self.get_ast_node_id()
-                )
+        let fn_stmt = self.ast_arena.alloc_expr_or_stmt(
+            FunctionStmt::new(
+                ident_expr,
+                Expr::ExprWithBlock(ExprWithBlock::BlockExpr(body)),
+                self.get_ast_node_id()
             )
-        )
+        );
+
+        Stmt::ItemStmt(ItemStmt::FunctionStmt(fn_stmt))
     }
 
     pub(crate) fn expression_statement(&mut self) -> Stmt<'a> {
         let mut expr_builder = ExprBuilder::new(self.ast_arena);
+
         self.parse_precedence(expr_builder.get_base_prec(), &mut expr_builder);
         let stmt = expr_builder.take_stmt().expect("TODO: Error handling");
         stmt
@@ -248,9 +253,11 @@ impl<'a> Parser<'a> {
 
         self.consume(TokenKind::End, "Expected `end` after if expression");
 
-        self.ast_arena.alloc_expr_or_stmt(
+        let if_expr = self.ast_arena.alloc_expr_or_stmt(
             IfExpr::new(condition, true_block, false_block, self.get_ast_node_id())
-        )
+        );
+
+        if_expr
     }
 
     fn parse_block(&mut self) -> &'a BlockExpr<'a> {
@@ -263,7 +270,11 @@ impl<'a> Parser<'a> {
 
         let stmts = self.ast_arena.alloc_vec_stmts(stmts);
 
-        self.ast_arena.alloc_expr_or_stmt(BlockExpr::new(stmts, self.get_ast_node_id()))
+        let block_expr = self.ast_arena.alloc_expr_or_stmt(
+            BlockExpr::new(stmts, self.get_ast_node_id())
+        );
+
+        block_expr
     }
 
     fn parse_global_scope(&mut self) -> GlobalScope<'a> {
@@ -276,7 +287,7 @@ impl<'a> Parser<'a> {
 
         let stmts = self.ast_arena.alloc_vec_stmts(stmts);
 
-        GlobalScope::new(stmts, self.get_ast_node_id())
+        GlobalScope::new(stmts)
     }
 
     /* Helper methods */

@@ -9,3 +9,4 @@ symbol = { path = "../symbol" }
 ty = { path = "../ty" }
 fxhash = "0.2.1"
 error = { path = "../error" }
+ir_defs = { path = "../ir_defs" }

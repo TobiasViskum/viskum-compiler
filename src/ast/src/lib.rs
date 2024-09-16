@@ -1,20 +1,19 @@
+mod ast_prettifier;
 mod ast_arena;
-// mod visit_unvalidated;
-// mod visit_resolved;
+pub mod ast_query_system;
 pub mod ast_state;
 pub mod ast_visitor;
 
 use std::marker::PhantomData;
-
-use ast_state::{ AstState, AstState1, AstState2, AstUnvalidated };
-use ast_visitor::{ AstVisitEmitter, AstVisitor, Visitor };
-// pub use visit_unvalidated::{ AstVisitEvent, ScopeChange, AstNodeKind };
+use ast_query_system::{ AstQueryEntry, AstQuerySystem };
+use ast_state::{ AstState, AstState0, AstState1, AstState2, AstState3 };
+use ast_visitor::{ AstVisitEmitter, AstVisitor };
 use core_traits::Dissasemble;
+use ir_defs::NodeId;
 use op::BinaryOp;
 use span::Span;
 
 pub use ast_arena::AstArena;
-use ty::NodeId;
 
 const AST_DISSASEMBLE_INDENT: usize = 4;
 
@@ -22,16 +21,19 @@ pub trait AstDissasemble {
     fn ast_dissasemble(&self, scope_depth: usize, src: &str) -> String;
 }
 
+/// Implement query system
 #[derive(Debug)]
 pub struct Ast<'ast, T> where T: AstState {
     main_scope: GlobalScope<'ast>,
+    query_system: AstQuerySystem<'ast>,
     _state: PhantomData<T>,
 }
 
 impl<'ast, T> Ast<'ast, T> where T: AstState {
-    pub fn new(main_scope: GlobalScope<'ast>) -> Self {
+    pub fn new(main_scope: GlobalScope<'ast>, query_system: AstQuerySystem<'ast>) -> Self {
         Self {
             main_scope,
+            query_system,
             _state: PhantomData,
         }
     }
@@ -43,8 +45,24 @@ impl<'ast, T> Ast<'ast, T> where T: AstState {
     pub fn next_state<N>(self) -> Ast<'ast, N> where T: AstState<NextState = N>, N: AstState {
         Ast {
             main_scope: self.main_scope,
+            query_system: self.query_system,
             _state: PhantomData,
         }
+    }
+}
+
+impl<'ast> Ast<'ast, AstState0> {
+    pub fn get_visitor<'b, E: AstVisitEmitter<'ast, AstState0>>(
+        self,
+        ast_visit_emitter: &'b mut E
+    ) -> AstVisitor<'ast, 'b, AstState0, E>
+        where 'ast: 'b
+    {
+        AstVisitor::new(self, ast_visit_emitter)
+    }
+
+    pub fn insert_query_entry(&mut self, node_id: NodeId, ast_query_entry: AstQueryEntry<'ast>) {
+        self.query_system.insert_entry(node_id, ast_query_entry)
     }
 }
 
@@ -70,11 +88,17 @@ impl<'ast> Ast<'ast, AstState2> {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+impl<'ast> Ast<'ast, AstState3> {
+    pub fn query_all(&self, mut f: impl FnMut(&NodeId, &AstQueryEntry)) {
+        self.query_system.query_all(|node_id, query_entry| f(node_id, query_entry));
+    }
+}
+
+#[derive(Debug)]
 pub enum Stmt<'ast> {
     ItemStmt(ItemStmt<'ast>),
-    DefineStmt(DefineStmt<'ast>),
-    AssignStmt(AssignStmt<'ast>),
+    DefineStmt(&'ast DefineStmt<'ast>),
+    AssignStmt(&'ast AssignStmt<'ast>),
     ExprStmt(Expr<'ast>),
 }
 
@@ -89,9 +113,9 @@ impl<'ast> AstDissasemble for Stmt<'ast> {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 pub enum ItemStmt<'ast> {
-    FunctionStmt(FunctionStmt<'ast>),
+    FunctionStmt(&'ast FunctionStmt<'ast>),
 }
 
 impl<'ast> AstDissasemble for ItemStmt<'ast> {
@@ -102,7 +126,7 @@ impl<'ast> AstDissasemble for ItemStmt<'ast> {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 pub struct FunctionStmt<'ast> {
     pub ident_expr: IdentExpr,
     pub body: Expr<'ast>,
@@ -124,15 +148,15 @@ impl<'ast> AstDissasemble for FunctionStmt<'ast> {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 pub struct DefineStmt<'ast> {
-    pub setter_expr: Pat,
+    pub setter_expr: Pat<'ast>,
     pub value_expr: Expr<'ast>,
     pub ast_node_id: NodeId,
 }
 
 impl<'ast> DefineStmt<'ast> {
-    pub fn new(setter_expr: Pat, value_expr: Expr<'ast>, ast_node_id: NodeId) -> Self {
+    pub fn new(setter_expr: Pat<'ast>, value_expr: Expr<'ast>, ast_node_id: NodeId) -> Self {
         Self {
             setter_expr,
             value_expr,
@@ -151,15 +175,15 @@ impl<'ast> AstDissasemble for DefineStmt<'ast> {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 pub struct AssignStmt<'ast> {
-    pub setter_expr: PlaceExpr,
+    pub setter_expr: PlaceExpr<'ast>,
     pub value_expr: Expr<'ast>,
     pub ast_node_id: NodeId,
 }
 
 impl<'ast> AssignStmt<'ast> {
-    pub fn new(setter_expr: PlaceExpr, value_expr: Expr<'ast>, ast_node_id: NodeId) -> Self {
+    pub fn new(setter_expr: PlaceExpr<'ast>, value_expr: Expr<'ast>, ast_node_id: NodeId) -> Self {
         Self {
             setter_expr,
             value_expr,
@@ -178,12 +202,12 @@ impl<'ast> AstDissasemble for AssignStmt<'ast> {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub enum Pat {
-    IdentPat(IdentPat),
+#[derive(Debug)]
+pub enum Pat<'ast> {
+    IdentPat(&'ast IdentPat),
 }
 
-impl AstDissasemble for Pat {
+impl<'ast> AstDissasemble for Pat<'ast> {
     fn ast_dissasemble(&self, scope_depth: usize, src: &str) -> String {
         match self {
             Self::IdentPat(expr) => expr.ast_dissasemble(scope_depth, src),
@@ -191,7 +215,7 @@ impl AstDissasemble for Pat {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 pub enum Expr<'ast> {
     ExprWithBlock(ExprWithBlock<'ast>),
     ExprWithoutBlock(ExprWithoutBlock<'ast>),
@@ -206,7 +230,7 @@ impl<'ast> AstDissasemble for Expr<'ast> {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 pub enum ExprWithBlock<'ast> {
     BlockExpr(&'ast BlockExpr<'ast>),
     IfExpr(&'ast IfExpr<'ast>),
@@ -226,12 +250,11 @@ type Stmts<'ast> = &'ast [&'ast Stmt<'ast>];
 #[derive(Debug)]
 pub struct GlobalScope<'ast> {
     pub stmts: Stmts<'ast>,
-    pub ast_node_id: NodeId,
 }
 
 impl<'ast> GlobalScope<'ast> {
-    pub fn new(stmts: Stmts<'ast>, ast_node_id: NodeId) -> Self {
-        Self { stmts, ast_node_id }
+    pub fn new(stmts: Stmts<'ast>) -> Self {
+        Self { stmts }
     }
 }
 impl<'ast> AstDissasemble for GlobalScope<'ast> {
@@ -249,7 +272,7 @@ impl<'ast> AstDissasemble for GlobalScope<'ast> {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 pub struct BlockExpr<'ast> {
     pub stmts: Stmts<'ast>,
     pub ast_node_id: NodeId,
@@ -282,7 +305,7 @@ impl<'ast> AstDissasemble for BlockExpr<'ast> {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 pub struct IfExpr<'ast> {
     pub condition: &'ast Expr<'ast>,
     pub true_block: &'ast BlockExpr<'ast>,
@@ -337,7 +360,7 @@ impl<'ast> AstDissasemble for IfExpr<'ast> {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 pub enum IfFalseBranchExpr<'ast> {
     ElseExpr(&'ast BlockExpr<'ast>),
     ElifExpr(&'ast IfExpr<'ast>),
@@ -352,9 +375,9 @@ impl<'ast> AstDissasemble for IfFalseBranchExpr<'ast> {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 pub enum ExprWithoutBlock<'ast> {
-    PlaceExpr(PlaceExpr),
+    PlaceExpr(PlaceExpr<'ast>),
     ValueExpr(ValueExpr<'ast>),
 }
 
@@ -367,12 +390,12 @@ impl<'ast> AstDissasemble for ExprWithoutBlock<'ast> {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub enum PlaceExpr {
-    IdentExpr(IdentExpr),
+#[derive(Debug)]
+pub enum PlaceExpr<'ast> {
+    IdentExpr(&'ast IdentExpr),
 }
 
-impl AstDissasemble for PlaceExpr {
+impl<'ast> AstDissasemble for PlaceExpr<'ast> {
     fn ast_dissasemble(&self, scope_depth: usize, src: &str) -> String {
         match self {
             Self::IdentExpr(expr) => expr.ast_dissasemble(scope_depth, src),
@@ -380,7 +403,7 @@ impl AstDissasemble for PlaceExpr {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 pub struct IdentPat {
     pub span: Span,
     pub ast_node_id: NodeId,
@@ -405,7 +428,7 @@ impl AstDissasemble for IdentPat {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 pub struct IdentExpr {
     pub span: Span,
     pub ast_node_id: NodeId,
@@ -423,7 +446,7 @@ impl IdentExpr {
         &src[self.span.get_byte_start()..self.span.get_byte_end()]
     }
 
-    pub fn as_pat(self) -> IdentPat {
+    pub fn get_as_pat(&self) -> IdentPat {
         IdentPat::new(self.span, self.ast_node_id)
     }
 }
@@ -434,11 +457,11 @@ impl AstDissasemble for IdentExpr {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 pub enum ValueExpr<'ast> {
-    BinaryExpr(BinaryExpr<'ast>),
-    GroupExpr(GroupExpr<'ast>),
-    ConstExpr(ConstExpr),
+    BinaryExpr(&'ast BinaryExpr<'ast>),
+    GroupExpr(&'ast GroupExpr<'ast>),
+    ConstExpr(ConstExpr<'ast>),
 }
 
 impl<'ast> AstDissasemble for ValueExpr<'ast> {
@@ -451,7 +474,7 @@ impl<'ast> AstDissasemble for ValueExpr<'ast> {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 pub struct GroupExpr<'ast> {
     pub expr: &'ast Expr<'ast>,
     pub ast_node_id: NodeId,
@@ -469,7 +492,7 @@ impl<'ast> AstDissasemble for GroupExpr<'ast> {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 pub struct BinaryExpr<'ast> {
     pub lhs: &'ast Expr<'ast>,
     pub op: BinaryOp,
@@ -498,12 +521,12 @@ impl<'ast> AstDissasemble for BinaryExpr<'ast> {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub enum ConstExpr {
-    IntegerExpr(IntegerExpr),
+#[derive(Debug)]
+pub enum ConstExpr<'ast> {
+    IntegerExpr(&'ast IntegerExpr),
 }
 
-impl Dissasemble for ConstExpr {
+impl<'ast> Dissasemble for ConstExpr<'ast> {
     fn dissasemble(&self) -> String {
         match self {
             Self::IntegerExpr(expr) => expr.dissasemble(),
@@ -511,7 +534,7 @@ impl Dissasemble for ConstExpr {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 pub struct IntegerExpr {
     pub val: i64,
     pub ast_node_id: NodeId,
@@ -529,7 +552,7 @@ impl Dissasemble for IntegerExpr {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 pub struct FloatExpr {
     pub val: f64,
     pub ast_node_id: NodeId,

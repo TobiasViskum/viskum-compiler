@@ -15,3 +15,4 @@ ast = { path = "../ast" }
 span = { path = "../span" }
 symbol = { path = "../symbol" }
 ty = { path = "../ty" }
+ir_defs = { path = "../ir_defs" }

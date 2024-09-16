@@ -9,8 +9,10 @@ b := 6 - (1 + a)
 
 k := if a do
     l := 2
+    2
 else
     ll := 3
+    99
 end
 
 c := a + k + b
