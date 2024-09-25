@@ -7,3 +7,7 @@ edition = "2021"
 parser = { path = "../parser" }
 ast = { path = "../ast" }
 resolver = { path = "../resolver" }
+icfg_builder = { path = "../icfg_builder" }
+icfg = { path = "../icfg" }
+ty = { path = "../ty" }
+codegen = { path = "../codegen" }

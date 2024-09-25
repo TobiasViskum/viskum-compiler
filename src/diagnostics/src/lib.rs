@@ -1,18 +1,26 @@
 use span::Span;
 use symbol::Symbol;
 use ty::Ty;
-use std::fmt::Write;
+use std::{ fmt::Write, marker::PhantomData };
 
-/// Describes how serious an error is
-#[derive(PartialEq, Clone, Copy)]
-pub enum Severity {
-    /// Cannot continue
-    Fatal,
-    /// No effect on program, except at codegen
-    NoImpact,
+pub struct Diagnostic<'ctx> {
+    kind: DiagnosticKind<'ctx>,
+    suggestions: Vec<Suggestion<'ctx>>,
 }
 
-/// Use in Diagnostics instead
+pub struct Suggestion<'ctx> {
+    kind: SuggestionKind<'ctx>,
+}
+
+pub enum SuggestionKind<'ctx> {
+    E(PhantomData<&'ctx ()>),
+}
+
+pub enum DiagnosticKind<'ctx> {
+    Error(Error<'ctx>),
+    // Warning
+}
+
 #[derive(Clone, Copy)]
 pub struct Error<'ctx> {
     kind: ErrorKind<'ctx>,
@@ -37,11 +45,19 @@ impl<'ctx> Error<'ctx> {
     }
 }
 
+/// Describes how serious an error is
+#[derive(PartialEq, Clone, Copy)]
+pub enum Severity {
+    /// Cannot continue
+    Fatal,
+    /// No effect on program, except at codegen
+    NoImpact,
+}
+
 #[derive(Clone, Copy)]
 pub enum ErrorKind<'ctx> {
     UndefinedVariable(Symbol),
     ExpectedBoolExpr(&'ctx Ty),
-    AssignmentToImmutable(Symbol),
     InvalidPattern,
 }
 
@@ -51,15 +67,11 @@ impl<'ctx> ErrorKind<'ctx> {
             Self::UndefinedVariable(_) => Severity::Fatal,
             Self::InvalidPattern => Severity::Fatal,
             Self::ExpectedBoolExpr(_) => Severity::NoImpact,
-            Self::AssignmentToImmutable(_) => Severity::NoImpact,
         }
     }
 
     pub fn write_msg(&self, buffer: &mut String, span: &Span, src: &str) {
         let write_error = match self {
-            Self::AssignmentToImmutable(symbol) => {
-                write!(buffer, "Cannot assign to immutable variable `{}`", symbol.get())
-            }
             Self::UndefinedVariable(symbol) => {
                 write!(buffer, "Undefined variable `{}` at line {}", symbol.get(), span.get_line())
             }

@@ -1,4 +1,4 @@
-use std::ops::{ Deref, DerefMut };
+use std::{ fmt::Debug, ops::{ Deref, DerefMut } };
 
 use fxhash::FxBuildHasher;
 use indexmap::IndexSet;
@@ -24,4 +24,10 @@ impl<T> DerefMut for FxIndexSet<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum Either<L, R> {
+    Left(L),
+    Right(R),
 }

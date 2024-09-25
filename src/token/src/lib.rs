@@ -65,12 +65,20 @@ pub enum TokenKind {
     Define,
     /// `.`
     Dot,
+    /// `!`
+    Bang,
 
     /* Literals */
     /// Integer e.g. `69`
     Integer,
     /// Float e.g. `6.9`
     Float,
+
+    /* Booleans */
+    /// Boolean literal `true`
+    True,
+    /// Boolean literal `false`
+    False,
 
     /* Identifier */
     /// Identifier e.g. `a`
@@ -88,6 +96,8 @@ pub enum TokenKind {
     Loop,
     /// Keyword `break`
     Break,
+    /// Keyword `then`
+    Then,
     /// Keyword `do`
     Do,
     /// Keyword `end`
@@ -96,6 +106,8 @@ pub enum TokenKind {
     Else,
     /// Keyword `elif`
     Elif,
+    /// Keyword `mut`
+    Mut,
 
     /// End of ofile
     Eof,

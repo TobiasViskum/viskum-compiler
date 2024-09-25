@@ -1,6 +1,6 @@
 use std::cell::{ LazyCell, RefCell };
+use bumpalo::Bump;
 use data_structures::FxIndexSet;
-use typed_arena::Arena;
 
 thread_local! {
     static GLOBALS: LazyCell<Globals> = LazyCell::new(|| Globals::new());
@@ -23,13 +23,13 @@ impl Globals {
 }
 
 pub(crate) struct SymbolInterner {
-    arena: Arena<Box<str>>,
+    arena: Bump,
     strings: RefCell<FxIndexSet<&'static str>>,
 }
 
 impl SymbolInterner {
     pub(crate) fn new() -> Self {
-        Self { arena: Arena::new(), strings: RefCell::new(Default::default()) }
+        Self { arena: Bump::new(), strings: RefCell::new(Default::default()) }
     }
 
     pub(crate) fn alloc_str(&self, string: &str) -> Symbol {
@@ -37,7 +37,7 @@ impl SymbolInterner {
             return Symbol::from_id(id);
         }
 
-        let string = self.arena.alloc(string.into());
+        let string: &mut str = self.arena.alloc_str(string);
         // Safe because the symbol interner lives as long as the program
         let string: &'static str = unsafe { &*(string.as_ref() as *const str) };
 

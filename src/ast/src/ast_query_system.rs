@@ -5,16 +5,20 @@ use crate::{
     AssignStmt,
     BinaryExpr,
     BlockExpr,
+    BoolExpr,
     DefineStmt,
+    Expr,
     FunctionStmt,
     GroupExpr,
     IdentExpr,
     IdentPat,
     IfExpr,
     IntegerExpr,
+    Pat,
+    PlaceExpr,
 };
 
-/// Used to lookup any node inside the ast
+/// Used to lookup any node inside the ast and get a reference to it
 ///
 /// It's built when making the Resolver
 #[derive(Debug)]
@@ -56,12 +60,16 @@ impl<'ast> AstQuerySystem<'ast> {
 
 #[derive(Debug, Clone, Copy)]
 pub enum AstQueryEntry<'ast> {
+    Expr(&'ast Expr<'ast>),
+    Pat(&'ast Pat<'ast>),
+    PlaceExpr(&'ast PlaceExpr<'ast>),
     BinarExpr(&'ast BinaryExpr<'ast>),
     FunctionStmt(&'ast FunctionStmt<'ast>),
     DefineStmt(&'ast DefineStmt<'ast>),
     AssignStmt(&'ast AssignStmt<'ast>),
     GroupExpr(&'ast GroupExpr<'ast>),
     IntegerExpr(&'ast IntegerExpr),
+    BoolExpr(&'ast BoolExpr),
     IdentExpr(&'ast IdentExpr),
     IdentPat(&'ast IdentPat),
     BlockExpr(&'ast BlockExpr<'ast>),

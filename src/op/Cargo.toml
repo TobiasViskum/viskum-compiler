@@ -4,4 +4,3 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-core_traits = { path = "../core_traits" }

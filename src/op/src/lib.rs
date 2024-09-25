@@ -1,48 +1,71 @@
 use std::fmt::Display;
 
-use core_traits::Dissasemble;
-
 #[derive(Debug, Clone, Copy)]
 pub enum Op {
     BinaryOp(BinaryOp),
 }
 
+impl Display for Op {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::BinaryOp(binary_op) => binary_op.fmt(f),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
-pub enum BinaryOp {
+pub enum ArithmeticOp {
     Add,
     Sub,
     Mul,
     Div,
 }
 
-impl Dissasemble for BinaryOp {
-    fn dissasemble(&self) -> String {
+impl Display for ArithmeticOp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Add => "+".to_string(),
-            Self::Sub => "-".to_string(),
-            Self::Mul => "*".to_string(),
-            Self::Div => "/".to_string(),
+            Self::Add => write!(f, "+"),
+            Self::Sub => write!(f, "-"),
+            Self::Mul => write!(f, "*"),
+            Self::Div => write!(f, "/"),
         }
     }
 }
 
-impl Display for BinaryOp {
+#[derive(Debug, Clone, Copy)]
+pub enum ComparisonOp {
+    Eq,
+    Ne,
+    Ge,
+    Gt,
+    Le,
+    Lt,
+}
+
+impl Display for ComparisonOp {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.dissasemble())
+        write!(f, "{}", match self {
+            Self::Eq => "==",
+            Self::Ne => "!=",
+            Self::Ge => ">=",
+            Self::Gt => ">",
+            Self::Le => "<=",
+            Self::Lt => "<",
+        })
     }
 }
 
-#[cfg(test)]
-mod test {
-    use core_traits::Dissasemble;
+#[derive(Debug, Clone, Copy)]
+pub enum BinaryOp {
+    ArithmeticOp(ArithmeticOp),
+    ComparisonOp(ComparisonOp),
+}
 
-    use crate::BinaryOp;
-
-    #[test]
-    fn binary_op() {
-        assert_eq!(BinaryOp::Add.dissasemble(), "+");
-        assert_eq!(BinaryOp::Sub.dissasemble(), "-");
-        assert_eq!(BinaryOp::Mul.dissasemble(), "*");
-        assert_eq!(BinaryOp::Div.dissasemble(), "/");
+impl Display for BinaryOp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ArithmeticOp(arithmetic_op) => arithmetic_op.fmt(f),
+            Self::ComparisonOp(comparison_op) => comparison_op.fmt(f),
+        }
     }
 }

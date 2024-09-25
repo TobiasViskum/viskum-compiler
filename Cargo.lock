@@ -13,7 +13,9 @@ name = "ast"
 version = "0.1.0"
 dependencies = [
  "bumpalo",
- "core_traits",
+ "data_structures",
+ "derive-new",
+ "error",
  "fxhash",
  "ir_defs",
  "op",
@@ -37,17 +39,28 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b"
 
 [[package]]
+name = "codegen"
+version = "0.1.0"
+dependencies = [
+ "data_structures",
+ "fxhash",
+ "icfg",
+ "op",
+ "ty",
+]
+
+[[package]]
 name = "compiler"
 version = "0.1.0"
 dependencies = [
  "ast",
+ "codegen",
+ "icfg",
+ "icfg_builder",
  "parser",
  "resolver",
+ "ty",
 ]
-
-[[package]]
-name = "core_traits"
-version = "0.1.0"
 
 [[package]]
 name = "data_structures"
@@ -55,6 +68,26 @@ version = "0.1.0"
 dependencies = [
  "fxhash",
  "indexmap",
+]
+
+[[package]]
+name = "derive-new"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2cdc8d50f426189eef89dac62fabfa0abb27d5cc008f25bf4156a0203325becc"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "diagnostics"
+version = "0.1.0"
+dependencies = [
+ "span",
+ "symbol",
+ "ty",
 ]
 
 [[package]]
@@ -89,6 +122,7 @@ version = "0.1.0"
 dependencies = [
  "span",
  "symbol",
+ "ty",
 ]
 
 [[package]]
@@ -105,6 +139,35 @@ name = "hashbrown"
 version = "0.14.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e5274423e17b7c9fc20b6e7e208532f9b19825d82dfd615708b70edd83df41f1"
+
+[[package]]
+name = "icfg"
+version = "0.1.0"
+dependencies = [
+ "data_structures",
+ "derive-new",
+ "ir_defs",
+ "op",
+ "span",
+ "symbol",
+ "ty",
+]
+
+[[package]]
+name = "icfg_builder"
+version = "0.1.0"
+dependencies = [
+ "ast",
+ "data_structures",
+ "fxhash",
+ "icfg",
+ "ir_defs",
+ "op",
+ "resolver",
+ "span",
+ "symbol",
+ "ty",
+]
 
 [[package]]
 name = "indexmap"
@@ -134,9 +197,6 @@ dependencies = [
 [[package]]
 name = "op"
 version = "0.1.0"
-dependencies = [
- "core_traits",
-]
 
 [[package]]
 name = "parser"
@@ -145,6 +205,7 @@ dependencies = [
  "array-init",
  "ast",
  "enum-iterator",
+ "error",
  "ir_defs",
  "lexer",
  "op",
@@ -198,6 +259,7 @@ version = "0.1.0"
 name = "symbol"
 version = "0.1.0"
 dependencies = [
+ "bumpalo",
  "data_structures",
  "typed-arena",
 ]

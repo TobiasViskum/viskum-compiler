@@ -1,10 +1,26 @@
 use std::fmt::Display;
-
 use symbol::Symbol;
+
+#[derive(PartialEq, Debug, Clone, Copy)]
+pub enum Mutability {
+    Mutable,
+    Immutable,
+}
+
+pub enum LexicalContext {
+    GlobalScope,
+    Context(ContextId, ScopeId),
+}
+
+pub struct ContextId(pub u32);
 
 /// Used during the first pass of name resolution
 #[derive(Eq, Hash, PartialEq, Debug, Clone, Copy)]
 pub struct ScopeId(pub u32);
+
+/// Used as a temporary location for where ExprWithBlock results go (e.g. IfExpr, MatchExpr, etc.)
+#[derive(Eq, Hash, PartialEq, Debug, Clone, Copy)]
+pub struct ResultLoc(pub u32);
 
 /// NodeId is used both as AstNodeId and CfgNodeId
 #[derive(Eq, Hash, PartialEq, Debug, Clone, Copy)]
@@ -30,31 +46,31 @@ impl DefId {
 }
 
 /// Information about a definition
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct NameBinding {
-    kind: NameBindingKind,
+    pub kind: NameBindingKind,
 }
 
 impl From<DefKind> for NameBinding {
     fn from(value: DefKind) -> Self {
-        Self { kind: NameBindingKind::Res(Res::Def(value)) }
+        Self { kind: NameBindingKind::DefKind(value) }
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub enum NameBindingKind {
-    Res(Res),
+    DefKind(DefKind),
     // Module
     // Import
 }
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 /// Resoluted def
 pub enum Res {
     Def(DefKind),
 }
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub enum DefKind {
-    Variable,
+    Variable(Mutability),
 }

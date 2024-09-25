@@ -6,13 +6,18 @@ edition = "2021"
 
 
 [dependencies]
+# Libs in project
 op = { path = "../op" }
 span = { path = "../span" }
-core_traits = { path = "../core_traits" }
-typed-arena = { version = "2.0.2" }
 symbol = { path = "../symbol" }
-bumpalo = "3.16.0"
-paste = "1.0.15"
 ty = { path = "../ty" }
 ir_defs = { path = "../ir_defs" }
+error = { path = "../error" }
+data_structures = { path = "../data_structures" }
+
+# Extern crates
 fxhash = "0.2.1"
+derive-new = "0.7.0"
+bumpalo = "3.16.0"
+paste = "1.0.15"
+typed-arena = { version = "2.0.2" }

@@ -1,0 +1,16 @@
+[package]
+name = "icfg"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Libs in project
+ty = { path = "../ty" }
+op = { path = "../op" }
+ir_defs = { path = "../ir_defs" }
+span = { path = "../span" }
+symbol = { path = "../symbol" }
+data_structures = { path = "../data_structures" }
+
+# Extern crate
+derive-new = "0.7.0"

@@ -1,29 +1,46 @@
 use ast::AstArena;
+use codegen::CodeGen;
+use icfg::{ Icfg, IcfgPrettifier };
+use icfg_builder::IcfgBuilder;
 use parser::Parser;
 use resolver::Resolver;
 
-pub struct Compiler {}
+pub struct Compiler;
 
 impl Compiler {
     pub fn new() -> Self {
-        Self {}
+        Self
     }
 
     pub fn compile_entry(&self) {
-        let file_content = Self::get_file_content();
+        let now = std::time::Instant::now();
+        let icfg = self.build_to_icfg();
 
+        IcfgPrettifier::new(&icfg).print_icfg();
+
+        println!("Compilation took: {:?}", now.elapsed());
+
+        CodeGen::new(&icfg).gen_code("file");
+    }
+
+    fn build_to_icfg<'b>(&self) -> Icfg<'b> {
+        let file_content = Self::get_file_content();
         let ast_arena = AstArena::new();
 
-        let ast = {
-            let parser = Parser::new(file_content.as_str(), &ast_arena);
-            let ast = parser.parse_into_ast();
+        let (resolved_information, ast) = {
+            let parser = Parser::new(&file_content, &ast_arena);
 
-            let (mut resolver, ast) = Resolver::from_ast(&file_content, ast);
+            let (mut resolver, ast) = Resolver::from_ast(&file_content, parser.parse_into_ast());
+
             let resolved_ast = resolver.resolve_ast(ast);
             let type_checked_ast = resolver.type_check_ast(resolved_ast);
 
-            type_checked_ast
+            (resolver.take_resolved_information(), type_checked_ast)
         };
+
+        let icfg_builder = IcfgBuilder::new(ast, resolved_information, &file_content);
+        let icfg = icfg_builder.build();
+        icfg
     }
 
     fn get_file_content() -> String {

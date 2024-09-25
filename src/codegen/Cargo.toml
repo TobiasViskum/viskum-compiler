@@ -1,0 +1,14 @@
+[package]
+name = "codegen"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Libs in project
+icfg = { path = "../icfg" }
+ty = { path = "../ty" }
+op = { path = "../op" }
+data_structures = { path = "../data_structures" }
+
+# Extern crates
+fxhash = "0.2.1"

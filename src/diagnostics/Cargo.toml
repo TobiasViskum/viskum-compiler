@@ -1,9 +1,9 @@
 [package]
-name = "error"
+name = "diagnostics"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-symbol = { path = "../symbol" }
 span = { path = "../span" }
+symbol = { path = "../symbol" }
 ty = { path = "../ty" }

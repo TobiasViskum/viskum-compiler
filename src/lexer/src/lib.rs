@@ -34,10 +34,15 @@ impl<'a> Lexer<'a> {
             '/' => self.make_token(TokenKind::Slash),
             '(' => self.make_token(TokenKind::LeftParen),
             ')' => self.make_token(TokenKind::RightParen),
+            '!' => self.make_token_or_other_if(TokenKind::Bang, '=', TokenKind::Ne),
+            '>' => self.make_token_or_other_if(TokenKind::Gt, '=', TokenKind::Ge),
+            '<' => self.make_token_or_other_if(TokenKind::Lt, '=', TokenKind::Le),
             ':' => self.make_token_or_other_if(TokenKind::Colon, '=', TokenKind::Define),
             '=' => self.make_token_or_other_if(TokenKind::Assign, '=', TokenKind::Eq),
             ' ' => self.skip_char_and_scan(),
-            '\n' => self.newline(),
+            '\n' => self.newline_and_scan(),
+            // this shouldn't be called if char before is ident or ')'
+            '.' if Self::is_digit(self.peek_next()) => self.make_float_number(),
             _ if Self::is_digit(char) => self.make_number(),
             _ if Self::is_alphabetic(char) => self.make_ident_or_keyword(),
             EOF_CHAR => self.make_token(TokenKind::Eof),
@@ -70,42 +75,52 @@ impl<'a> Lexer<'a> {
         self.scan_token()
     }
 
-    fn newline(&mut self) -> Token {
+    fn newline_and_scan(&mut self) -> Token {
         self.line += 1;
         self.skip_char_and_scan()
     }
 
     fn make_ident_or_keyword(&mut self) -> Token {
+        // The length of the word is probably not more than 64 characters
         let mut buffer = String::with_capacity(64);
 
+        if Self::is_alphabetic(self.current_char) {
+            buffer.push(self.eat_if(|c| Self::is_alphabetic(c)));
+        }
+
         self.eat_while_do_from_current(
-            |c| Self::is_alphabetic(c),
-            |c| { buffer.push(c) }
+            |c| (Self::is_alphabetic(c) || Self::is_digit(c)),
+            |c| buffer.push(c)
         );
 
-        if let Some(keyword_token_kind) = Self::match_keyword(buffer.as_str()) {
-            self.make_token(keyword_token_kind)
-        } else {
-            self.make_token(TokenKind::Ident)
+        self.make_token(Self::match_keyword_or_ident(buffer.as_str()))
+    }
+
+    fn match_keyword_or_ident(ident: &str) -> TokenKind {
+        // Make a faster way than a match statement here (match a char at a time)
+        match ident {
+            "def" => TokenKind::Def,
+            "mut" => TokenKind::Mut,
+            "class" => TokenKind::Class,
+            "end" => TokenKind::End,
+            "do" => TokenKind::Do,
+            "loop" => TokenKind::Loop,
+            "while" => TokenKind::While,
+            "if" => TokenKind::If,
+            "else" => TokenKind::Else,
+            "elif" => TokenKind::Elif,
+            "break" => TokenKind::Break,
+            "true" => TokenKind::True,
+            "false" => TokenKind::False,
+            "then" => TokenKind::Then,
+            _ => TokenKind::Ident,
         }
     }
 
-    fn match_keyword(ident: &str) -> Option<TokenKind> {
-        // Make a faster way than a match statement here (match a char at a time)
-
-        match ident {
-            "def" => Some(TokenKind::Def),
-            "class" => Some(TokenKind::Class),
-            "end" => Some(TokenKind::End),
-            "do" => Some(TokenKind::Do),
-            "loop" => Some(TokenKind::Loop),
-            "while" => Some(TokenKind::While),
-            "if" => Some(TokenKind::If),
-            "else" => Some(TokenKind::Else),
-            "elif" => Some(TokenKind::Elif),
-            "break" => Some(TokenKind::Break),
-            _ => None,
-        }
+    fn make_float_number(&mut self) -> Token {
+        self.advance();
+        self.eat_while_from_next(|c| Self::is_digit(c));
+        self.make_token(TokenKind::Float)
     }
 
     fn make_number(&mut self) -> Token {
@@ -125,13 +140,28 @@ impl<'a> Lexer<'a> {
         char
     }
 
-    fn eat_while_from_next(&mut self, closure: impl Fn(char) -> bool) -> char {
-        while closure(self.peek_next()) && !self.is_eof() {
+    /// If predicate from next char is true, then advances
+    ///
+    /// At the end it returns the next char
+    fn eat_while_from_next(&mut self, predicate: impl Fn(char) -> bool) -> char {
+        while predicate(self.peek_next()) && !self.is_eof() {
             self.advance();
         }
         self.peek_next()
     }
 
+    /// Returns the current char and if predicate is true then also advances
+    fn eat_if(&mut self, predicate: impl Fn(char) -> bool) -> char {
+        let c = self.current_char;
+        if predicate(self.peek_next()) {
+            self.advance();
+        }
+        c
+    }
+
+    /// If predicate from current char is true, executes body and then advances if next char also matches predicate
+    ///
+    /// At the end it returns the current char
     fn eat_while_do_from_current(
         &mut self,
         cond: impl Fn(char) -> bool,
