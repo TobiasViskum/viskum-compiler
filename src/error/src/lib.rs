@@ -1,3 +1,4 @@
+use op::BinaryOp;
 use span::Span;
 use symbol::Symbol;
 use ty::Ty;
@@ -14,13 +15,13 @@ pub enum Severity {
 
 /// Use in Diagnostics instead
 #[derive(Clone, Copy)]
-pub struct Error<'ctx> {
-    kind: ErrorKind<'ctx>,
+pub struct Error {
+    kind: ErrorKind,
     span: Span,
 }
 
-impl<'ctx> Error<'ctx> {
-    pub fn new(kind: ErrorKind<'ctx>, span: Span) -> Self {
+impl Error {
+    pub fn new(kind: ErrorKind, span: Span) -> Self {
         Self {
             kind,
             span,
@@ -38,18 +39,24 @@ impl<'ctx> Error<'ctx> {
 }
 
 #[derive(Clone, Copy)]
-pub enum ErrorKind<'ctx> {
+pub enum ErrorKind {
     UndefinedVariable(Symbol),
-    ExpectedBoolExpr(&'ctx Ty),
+    ExpectedBoolExpr(Ty),
     AssignmentToImmutable(Symbol),
+    BreakTypeError(Ty, Ty),
+    BreakOutsideLoop,
+    BinaryExprTypeError(BinaryOp, Ty, Ty),
     InvalidPattern,
 }
 
-impl<'ctx> ErrorKind<'ctx> {
+impl ErrorKind {
     fn get_severity(&self) -> Severity {
         match self {
             Self::UndefinedVariable(_) => Severity::Fatal,
             Self::InvalidPattern => Severity::Fatal,
+            Self::BinaryExprTypeError(_, _, _) => Severity::Fatal,
+            Self::BreakOutsideLoop => Severity::NoImpact,
+            Self::BreakTypeError(_, _) => Severity::NoImpact,
             Self::ExpectedBoolExpr(_) => Severity::NoImpact,
             Self::AssignmentToImmutable(_) => Severity::NoImpact,
         }
@@ -57,6 +64,15 @@ impl<'ctx> ErrorKind<'ctx> {
 
     pub fn write_msg(&self, buffer: &mut String, span: &Span, src: &str) {
         let write_error = match self {
+            Self::BreakTypeError(expected_ty, found_ty) => {
+                write!(buffer, "Expected type `{}` but found type `{}`", expected_ty, found_ty)
+            }
+            Self::BreakOutsideLoop => {
+                write!(buffer, "Keyword `break` cannot be used outside of loops")
+            }
+            Self::BinaryExprTypeError(binary_op, lhs_ty, rhs_ty) => {
+                write!(buffer, "`{}` is not defined for `{}` and `{}`", binary_op, lhs_ty, rhs_ty)
+            }
             Self::AssignmentToImmutable(symbol) => {
                 write!(buffer, "Cannot assign to immutable variable `{}`", symbol.get())
             }

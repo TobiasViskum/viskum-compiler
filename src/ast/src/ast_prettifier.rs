@@ -34,15 +34,15 @@ impl<'ast, T> AstPrettifier<'ast, T> where T: AstState {
         println!("{}", self.buffer);
     }
 
-    pub fn increment_scope_depth(&mut self) {
+    fn increment_scope_depth(&mut self) {
         self.scope_depth += 1;
     }
 
-    pub fn decrement_scope_depth(&mut self) {
+    fn decrement_scope_depth(&mut self) {
         self.scope_depth -= 1;
     }
 
-    pub fn get_indentation(&self) -> String {
+    fn get_indentation(&self) -> String {
         " ".repeat(self.scope_depth * INDENTATION)
     }
 }
@@ -55,8 +55,10 @@ impl<'ast, T> Visitor<'ast> for AstPrettifier<'ast, T> where T: AstState {
     }
 
     fn visit_def_stmt(&mut self, def_stmt: &'ast crate::DefineStmt<'ast>) -> Self::Result {
-        // write!(self.buffer, "{}", &self.src[def_stmt.setter_expr])?;
         write!(self.buffer, "{}", self.get_indentation())?;
+        if def_stmt.mut_span.get().is_some() {
+            write!(self.buffer, "mut ")?;
+        }
         self.visit_pat(&def_stmt.setter_expr)?;
 
         if let Some(node_id_to_ty) = self.node_id_to_ty {
@@ -107,6 +109,29 @@ impl<'ast, T> Visitor<'ast> for AstPrettifier<'ast, T> where T: AstState {
         write!(self.buffer, "{}", bool_expr.val)
     }
 
+    fn visit_loop_expr(&mut self, loop_expr: &'ast crate::LoopExpr<'ast>) -> Self::Result {
+        write!(self.buffer, "loop\n")?;
+        self.increment_scope_depth();
+        self.visit_stmts(loop_expr.body.stmts)?;
+        self.decrement_scope_depth();
+        write!(self.buffer, "\n{}end\n", self.get_indentation())
+    }
+
+    fn visit_break_expr(&mut self, break_expr: &'ast crate::BreakExpr<'ast>) -> Self::Result {
+        write!(self.buffer, "break ")?;
+        break_expr.value.map(|expr| self.visit_expr(expr));
+        Self::default_result()
+    }
+
+    fn visit_assign_stmt(&mut self, assign_stmt: &'ast crate::AssignStmt<'ast>) -> Self::Result {
+        write!(self.buffer, "{}", self.get_indentation())?;
+        self.visit_place_expr(&assign_stmt.setter_expr)?;
+        write!(self.buffer, " = ")?;
+        self.visit_expr(&assign_stmt.value_expr)?;
+
+        write!(self.buffer, "\n")
+    }
+
     fn visit_if_expr(&mut self, if_expr: &'ast crate::IfExpr<'ast>) -> Self::Result {
         write!(self.buffer, "if ")?;
         self.visit_expr(if_expr.condition)?;
@@ -118,20 +143,21 @@ impl<'ast, T> Visitor<'ast> for AstPrettifier<'ast, T> where T: AstState {
         match &if_expr.false_block {
             Some(expr) => {
                 match expr {
-                    IfFalseBranchExpr::ElifExpr(expr) => {
-                        todo!("elif expr is not supported yet");
+                    IfFalseBranchExpr::ElifExpr(elif_expr) => {
+                        write!(self.buffer, "\n{}el", self.get_indentation())?;
+                        self.visit_if_expr(elif_expr)?;
                     }
                     IfFalseBranchExpr::ElseExpr(expr) => {
                         write!(self.buffer, "\n{}else\n", self.get_indentation())?;
                         self.increment_scope_depth();
                         self.visit_stmts(expr.stmts)?;
                         self.decrement_scope_depth();
-                        write!(self.buffer, "\n{}end\n", self.get_indentation())?;
+                        write!(self.buffer, "\n{}end", self.get_indentation())?;
                     }
                 }
             }
             None => {
-                write!(self.buffer, "\n{}end\n", self.get_indentation())?;
+                write!(self.buffer, "\n{}end", self.get_indentation())?;
             }
         }
 
@@ -145,7 +171,7 @@ impl<'ast, T> Visitor<'ast> for AstPrettifier<'ast, T> where T: AstState {
         self.visit_stmts(expr.stmts)?;
         self.decrement_scope_depth();
 
-        write!(self.buffer, "\n{}end\n", self.get_indentation())?;
+        write!(self.buffer, "\n{}end", self.get_indentation())?;
 
         Self::default_result()
     }

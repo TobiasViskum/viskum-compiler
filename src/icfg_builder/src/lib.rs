@@ -2,6 +2,7 @@ use ast::{
     Ast,
     AstTypeChecked,
     FunctionStmt,
+    IfExpr,
     IfFalseBranchExpr,
     PatKind,
     PlaceExpr,
@@ -31,23 +32,22 @@ use icfg::{
     TempId,
 };
 use ir_defs::{ DefId, Mutability, NodeId, ResultLoc };
-use op::BinaryOp;
 use resolver::ResolvedInformation;
 use symbol::Symbol;
-use ty::{ PrimTy, Ty, TyCtx };
+use ty::{ PrimTy, Ty, TyCtx, VOID_TY };
 
-pub struct IcfgBuilder<'icfg, 'ast> {
+pub struct IcfgBuilder<'ast> {
     pending_functions: Vec<&'ast FunctionStmt<'ast>>,
     ast: Ast<'ast, AstTypeChecked>,
-    cfgs: Vec<Cfg<'icfg>>,
-    resolved_information: ResolvedInformation<'icfg>,
+    cfgs: Vec<Cfg>,
+    resolved_information: ResolvedInformation,
     src: &'ast str,
 }
 
-impl<'icfg, 'ast> IcfgBuilder<'icfg, 'ast> {
+impl<'ast> IcfgBuilder<'ast> {
     pub fn new(
         ast: Ast<'ast, AstTypeChecked>,
-        resolved_information: ResolvedInformation<'icfg>,
+        resolved_information: ResolvedInformation,
         src: &'ast str
     ) -> Self {
         Self {
@@ -59,7 +59,7 @@ impl<'icfg, 'ast> IcfgBuilder<'icfg, 'ast> {
         }
     }
 
-    pub fn build(mut self) -> Icfg<'icfg> {
+    pub fn build(mut self) -> Icfg {
         let cfg_builder = self.new_cfg_builder();
         let cfg = cfg_builder.build_cfg();
         self.cfgs.push(cfg);
@@ -67,7 +67,7 @@ impl<'icfg, 'ast> IcfgBuilder<'icfg, 'ast> {
         Icfg::new(self.cfgs)
     }
 
-    pub(crate) fn new_cfg_builder<'c>(&'c mut self) -> CfgBuilder<'icfg, 'ast, 'c> {
+    pub(crate) fn new_cfg_builder<'c>(&'c mut self) -> CfgBuilder<'ast, 'c> {
         CfgBuilder::new(self)
     }
 
@@ -75,7 +75,7 @@ impl<'icfg, 'ast> IcfgBuilder<'icfg, 'ast> {
         self.pending_functions.push(function);
     }
 
-    pub(crate) fn get_ty_from_node_id(&self, node_id: NodeId) -> &'icfg Ty {
+    pub(crate) fn get_ty_from_node_id(&self, node_id: NodeId) -> Ty {
         *self.resolved_information.node_id_to_ty.get(&node_id).expect("Expected ty from node_id")
     }
 
@@ -90,23 +90,28 @@ impl<'icfg, 'ast> IcfgBuilder<'icfg, 'ast> {
     }
 }
 
-/*
-REMOVE: building_basic_block
-*/
-pub struct CfgBuilder<'icfg, 'ast, 'c> {
-    icfg_builder: &'c mut IcfgBuilder<'icfg, 'ast>,
-    local_mems: Vec<LocalMem<'icfg>>,
-    result_mems: Vec<ResultMem<'icfg>>,
-    basic_blocks: Vec<BasicBlock<'icfg>>,
+pub struct CfgBuilder<'ast, 'c> {
+    icfg_builder: &'c mut IcfgBuilder<'ast>,
+
+    /* These is transfered over to the cfg */
+    local_mems: Vec<LocalMem>,
+    result_mems: Vec<ResultMem>,
+    basic_blocks: Vec<BasicBlock>,
+
     def_id_to_local_mem_id: FxHashMap<DefId, LocalMemId>,
     result_loc_to_result_mem_id: FxHashMap<ResultLoc, ResultMemId>,
+
+    /* For loops */
+    break_bb_ids: Vec<(BasicBlockId, Option<Operand>)>,
+    continue_bb_ids: Vec<BasicBlockId>,
+
     // entry_function: &'ast FunctionStmt<'ast>,
     next_ssa_id: u32,
 }
 
-impl<'icfg, 'ast, 'c> CfgBuilder<'icfg, 'ast, 'c> {
+impl<'ast, 'c> CfgBuilder<'ast, 'c> {
     pub fn new(
-        icfg_builder: &'c mut IcfgBuilder<'icfg, 'ast>
+        icfg_builder: &'c mut IcfgBuilder<'ast>
         // entry_function: &'ast FunctionStmt<'ast>
     ) -> Self {
         let mut basic_blocks = Vec::with_capacity(16);
@@ -120,12 +125,14 @@ impl<'icfg, 'ast, 'c> CfgBuilder<'icfg, 'ast, 'c> {
             basic_blocks,
             def_id_to_local_mem_id: Default::default(),
             result_loc_to_result_mem_id: Default::default(),
+            break_bb_ids: Default::default(),
+            continue_bb_ids: Default::default(),
             // entry_function,
             next_ssa_id: 0,
         }
     }
 
-    pub fn build_cfg(mut self) -> Cfg<'icfg> {
+    pub fn build_cfg(mut self) -> Cfg {
         let ast = self.icfg_builder.get_ast();
         self.visit_stmts(ast.main_scope.stmts);
 
@@ -134,9 +141,9 @@ impl<'icfg, 'ast, 'c> CfgBuilder<'icfg, 'ast, 'c> {
         Cfg::new(self.local_mems, self.result_mems, self.basic_blocks)
     }
 
-    pub(crate) fn get_ty(ty: Ty) -> &'icfg Ty {
-        TyCtx.intern_type(ty)
-    }
+    // pub(crate) fn get_ty(ty: Ty) -> Ty {
+    //     TyCtx.intern_type(ty)
+    // }
 
     pub(crate) fn get_next_ssa_id(&mut self) -> u32 {
         self.next_ssa_id += 1;
@@ -154,7 +161,7 @@ impl<'icfg, 'ast, 'c> CfgBuilder<'icfg, 'ast, 'c> {
     pub(crate) fn set_result_loc_to_local_mem(
         &mut self,
         result_loc: ResultLoc,
-        make_result_mem: impl Fn() -> ResultMem<'icfg>
+        make_result_mem: impl Fn() -> ResultMem
     ) -> ResultMemId {
         if let Some(result_mem_id) = self.result_loc_to_result_mem_id.get(&result_loc) {
             *result_mem_id
@@ -167,18 +174,26 @@ impl<'icfg, 'ast, 'c> CfgBuilder<'icfg, 'ast, 'c> {
         }
     }
 
+    pub(crate) fn get_curr_bb_id(&self) -> BasicBlockId {
+        BasicBlockId((self.basic_blocks.len() - 1) as u32)
+    }
+
+    pub(crate) fn get_next_bb_id(&self) -> BasicBlockId {
+        BasicBlockId(self.basic_blocks.len() as u32)
+    }
+
     pub(crate) fn new_basic_block(&mut self) -> BasicBlockId {
         let bb_id = BasicBlockId(self.basic_blocks.len() as u32);
         self.basic_blocks.push(BasicBlock::new(bb_id));
         bb_id
     }
 
-    pub(crate) fn push_node(&mut self, node: Node<'icfg>) {
+    pub(crate) fn push_node(&mut self, node: Node) {
         let bb_id = BasicBlockId((self.basic_blocks.len() - 1) as u32);
         self.push_node_to(bb_id, node);
     }
 
-    pub(crate) fn push_node_to(&mut self, basic_block_id: BasicBlockId, node: Node<'icfg>) {
+    pub(crate) fn push_node_to(&mut self, basic_block_id: BasicBlockId, node: Node) {
         let basic_block = self.basic_blocks
             .get_mut(basic_block_id.0 as usize)
             .expect("Expected basic block");
@@ -196,11 +211,11 @@ impl<'icfg, 'ast, 'c> CfgBuilder<'icfg, 'ast, 'c> {
     }
 }
 
-impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
-    type Result = Operand<'icfg>;
+impl<'ast, 'c> Visitor<'ast> for CfgBuilder<'ast, 'c> {
+    type Result = Operand;
 
     fn default_result() -> Self::Result {
-        Operand::new(Default::default(), Self::get_ty(Ty::PrimTy(PrimTy::Void)))
+        Operand::new(Default::default(), VOID_TY)
     }
 
     fn visit_interger_expr(&mut self, integer_expr: &'ast ast::IntegerExpr) -> Self::Result {
@@ -230,29 +245,37 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
         Operand::new(OperandKind::from(result_place), ty)
     }
 
-    fn visit_if_expr(&mut self, if_expr: &'ast ast::IfExpr<'ast>) -> Self::Result {
+    fn visit_if_expr(&mut self, if_expr: &'ast IfExpr<'ast>) -> Self::Result {
         let if_expr_ty = self.icfg_builder.get_ty_from_node_id(if_expr.ast_node_id);
         let cond_ty = self.icfg_builder.get_ty_from_node_id(if_expr.condition.ast_node_id);
 
-        let result_mem_id = ResultMemId(self.result_mems.len() as u32);
-        let result_mem_id = self.set_result_loc_to_local_mem(if_expr.result_loc, || {
-            ResultMem::new(result_mem_id, if_expr_ty)
-        });
+        let result_mem_id = if !if_expr_ty.is_void() {
+            let result_mems_len = self.result_mems.len();
+            let result_mem_id = self.set_result_loc_to_local_mem(if_expr.result_loc, || {
+                ResultMem::new(ResultMemId(result_mems_len as u32), if_expr_ty)
+            });
+            Some(result_mem_id)
+        } else {
+            None
+        };
 
         let bb_id_before_if_expr = BasicBlockId((self.basic_blocks.len() - 1) as u32);
         let cond = self.visit_expr(if_expr.condition);
 
-        let true_bb_id = {
+        let (first_true_bb_id, last_true_bb_id) = {
+            let if_expr_ty = self.icfg_builder.get_ty_from_node_id(if_expr.ast_node_id);
             let true_bb_id = self.new_basic_block();
             let true_operand = self.visit_block_expr(if_expr.true_block);
-            self.push_node(
-                Node::new(
-                    NodeKind::StoreNode(
-                        StoreNode::new(Either::Right(result_mem_id), if_expr_ty, true_operand)
+            if let Some(result_mem_id) = result_mem_id {
+                self.push_node(
+                    Node::new(
+                        NodeKind::StoreNode(
+                            StoreNode::new(Either::Right(result_mem_id), if_expr_ty, true_operand)
+                        )
                     )
-                )
-            );
-            true_bb_id
+                );
+            }
+            (true_bb_id, self.get_curr_bb_id())
         };
 
         if let Some(false_branch) = &if_expr.false_block {
@@ -268,75 +291,152 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
                     let cond_ty = self.icfg_builder.get_ty_from_node_id(
                         elif_expr.condition.ast_node_id
                     );
-                    // self.push_node(
-                    //     Node::new(
-                    //         NodeKind::StoreNode(
-                    //             StoreNode::new(
-                    //                 Place::ResultMemId(result_mem_id),
-                    //                 if_expr_ty,
-                    //                 false_operand
-                    //             )
-                    //         )
-                    //     )
-                    // );
                     self.push_node_to(
                         bb_id_before_if_expr,
                         Node::new(
                             NodeKind::BranchCondNode(
-                                BranchCondNode::new(cond, cond_ty, true_bb_id, false_bb_id)
+                                BranchCondNode::new(cond, cond_ty, first_true_bb_id, false_bb_id)
                             )
                         )
                     );
-                    self.push_node_to(true_bb_id, branch_out_node);
+                    self.push_node_to(last_true_bb_id, branch_out_node);
                     self.push_node_to(false_bb_id, branch_out_node);
                 }
                 IfFalseBranchExpr::ElseExpr(else_expr) => {
                     let false_operand = self.visit_block_expr(else_expr);
-                    self.push_node(
-                        Node::new(
-                            NodeKind::StoreNode(
-                                StoreNode::new(
-                                    Either::Right(result_mem_id),
-                                    if_expr_ty,
-                                    false_operand
+                    if let Some(result_mem_id) = result_mem_id {
+                        self.push_node(
+                            Node::new(
+                                NodeKind::StoreNode(
+                                    StoreNode::new(
+                                        Either::Right(result_mem_id),
+                                        if_expr_ty,
+                                        false_operand
+                                    )
                                 )
                             )
-                        )
-                    );
+                        );
+                    }
                     self.push_node_to(
                         bb_id_before_if_expr,
                         Node::new(
                             NodeKind::BranchCondNode(
-                                BranchCondNode::new(cond, cond_ty, true_bb_id, false_bb_id)
+                                BranchCondNode::new(cond, cond_ty, first_true_bb_id, false_bb_id)
                             )
                         )
                     );
-                    self.push_node_to(true_bb_id, branch_out_node);
+                    self.push_node_to(last_true_bb_id, branch_out_node);
                     self.push_node_to(false_bb_id, branch_out_node);
 
                     self.new_basic_block();
                 }
             }
         } else {
-            todo!("If exprs without false branch are not implemented yet");
+            let bb_id_after_true_expr = BasicBlockId(last_true_bb_id.0 + 1);
+            self.push_node(Node::new(NodeKind::BranchNode(BranchNode::new(bb_id_after_true_expr))));
+            self.push_node_to(
+                bb_id_before_if_expr,
+                Node::new(
+                    NodeKind::BranchCondNode(
+                        BranchCondNode::new(cond, cond_ty, first_true_bb_id, bb_id_after_true_expr)
+                    )
+                )
+            );
+            self.new_basic_block();
         }
 
-        // self.building_basic_block.push_stmt(
-        //     Stmt::new(
-        //         StmtKind::BranchNode(BranchNode::new(cond, BasicBlockId(true_bb_id), BasicBlockId))
-        //     )
-        // );
-
-        let result_place = TempId(self.get_next_ssa_id());
-        self.push_node(
-            Node::new(
-                NodeKind::LoadNode(
-                    LoadNode::new(result_place, Either::Right(result_mem_id), if_expr_ty)
+        if let Some(result_mem_id) = result_mem_id {
+            let result_place = TempId(self.get_next_ssa_id());
+            self.push_node(
+                Node::new(
+                    NodeKind::LoadNode(
+                        LoadNode::new(result_place, Either::Right(result_mem_id), if_expr_ty)
+                    )
                 )
-            )
-        );
+            );
+            Operand::new(OperandKind::from(result_place), if_expr_ty)
+        } else {
+            Self::default_result()
+        }
+    }
 
-        Operand::new(OperandKind::from(result_place), if_expr_ty)
+    fn visit_loop_expr(&mut self, loop_expr: &'ast ast::LoopExpr<'ast>) -> Self::Result {
+        let loop_expr_ty = self.icfg_builder.get_ty_from_node_id(loop_expr.ast_node_id);
+
+        let result_mem_id = if !loop_expr_ty.is_void() {
+            let result_mems_len = self.result_mems.len();
+            let result_mem_id = self.set_result_loc_to_local_mem(loop_expr.result_loc, || {
+                ResultMem::new(ResultMemId(result_mems_len as u32), loop_expr_ty)
+            });
+            Some(result_mem_id)
+        } else {
+            None
+        };
+
+        let prev_break_bb_ids = std::mem::replace(&mut self.break_bb_ids, vec![]);
+        let prev_continue_bb_ids = std::mem::replace(&mut self.continue_bb_ids, vec![]);
+
+        // Pushes branch node to loop, to the BasicBlock before the loop
+        let loop_bb_id = self.get_next_bb_id();
+        self.push_node(Node::new(NodeKind::BranchNode(BranchNode::new(loop_bb_id))));
+        self.new_basic_block();
+
+        self.visit_block_expr(loop_expr.body);
+
+        // Pushes branch to start of loop
+        self.push_node(Node::new(NodeKind::BranchNode(BranchNode::new(loop_bb_id))));
+        self.new_basic_block();
+        let after_loop_bb_id = self.get_curr_bb_id();
+
+        let break_bb_ids = std::mem::replace(&mut self.break_bb_ids, prev_break_bb_ids);
+        let continue_bb_ids = std::mem::replace(&mut self.continue_bb_ids, prev_continue_bb_ids);
+
+        for (break_bb_id, break_operand) in break_bb_ids {
+            if let Some(break_operand) = break_operand {
+                // Push Store node
+                panic!("Break with value is not yet supported");
+            }
+            self.push_node_to(
+                break_bb_id,
+                Node::new(NodeKind::BranchNode(BranchNode::new(after_loop_bb_id)))
+            );
+        }
+        for continue_bb_id in continue_bb_ids {
+            self.push_node_to(
+                continue_bb_id,
+                Node::new(NodeKind::BranchNode(BranchNode::new(loop_bb_id)))
+            );
+        }
+
+        if !loop_expr_ty.is_void() {
+            let result_place = TempId(self.get_next_ssa_id());
+            // self.push_node(
+            //     Node::new(
+            //         NodeKind::LoadNode(
+            //             LoadNode::new(result_place, Either::Right(result_mem_id), loop_expr_ty)
+            //         )
+            //     )
+            // );
+            Operand::new(OperandKind::from(result_place), loop_expr_ty)
+        } else {
+            Self::default_result()
+        }
+    }
+
+    fn visit_break_expr(&mut self, break_expr: &'ast ast::BreakExpr<'ast>) -> Self::Result {
+        self.break_bb_ids.push((self.get_curr_bb_id(), None));
+        self.new_basic_block();
+
+        // Break expressions always return void
+        Self::default_result()
+    }
+
+    fn visit_continue_expr(&mut self, continue_expr: &'ast ast::ContinueExpr) -> Self::Result {
+        self.continue_bb_ids.push(self.get_curr_bb_id());
+        self.new_basic_block();
+
+        // Continue expressions always return void
+        Self::default_result()
     }
 
     fn visit_assign_stmt(&mut self, assign_stmt: &'ast ast::AssignStmt<'ast>) -> Self::Result {
@@ -361,9 +461,14 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
     }
 
     fn visit_def_stmt(&mut self, def_stmt: &'ast ast::DefineStmt<'ast>) -> Self::Result {
-        let (local_mem, local_mem_id, ty, def_id) = match &def_stmt.setter_expr.kind {
+        let ty = self.icfg_builder.get_ty_from_node_id(def_stmt.value_expr.ast_node_id);
+
+        if ty.is_void() {
+            return Self::default_result();
+        }
+
+        let (local_mem_id, def_id) = match &def_stmt.setter_expr.kind {
             PatKind::IdentPat(ident_pat) => {
-                let ty = self.icfg_builder.get_ty_from_node_id(def_stmt.value_expr.ast_node_id);
                 let local_mem_id = LocalMemId(self.local_mems.len() as u32);
                 let local_mem = LocalMem::new(
                     local_mem_id,
@@ -374,7 +479,7 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
                 );
                 self.local_mems.push(local_mem);
                 let def_id = self.icfg_builder.get_def_id_from_node_id(ident_pat.ast_node_id);
-                (local_mem, local_mem_id, ty, def_id)
+                (local_mem_id, def_id)
             }
         };
 

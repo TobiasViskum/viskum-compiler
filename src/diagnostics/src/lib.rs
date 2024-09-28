@@ -3,8 +3,12 @@ use symbol::Symbol;
 use ty::Ty;
 use std::{ fmt::Write, marker::PhantomData };
 
+pub struct ProgramDiagnostics<'ctx> {
+    diagnostics: Vec<Diagnostic<'ctx>>,
+}
+
 pub struct Diagnostic<'ctx> {
-    kind: DiagnosticKind<'ctx>,
+    kind: DiagnosticKind,
     suggestions: Vec<Suggestion<'ctx>>,
 }
 
@@ -16,19 +20,19 @@ pub enum SuggestionKind<'ctx> {
     E(PhantomData<&'ctx ()>),
 }
 
-pub enum DiagnosticKind<'ctx> {
-    Error(Error<'ctx>),
+pub enum DiagnosticKind {
+    Error(Error),
     // Warning
 }
 
 #[derive(Clone, Copy)]
-pub struct Error<'ctx> {
-    kind: ErrorKind<'ctx>,
+pub struct Error {
+    kind: ErrorKind,
     span: Span,
 }
 
-impl<'ctx> Error<'ctx> {
-    pub fn new(kind: ErrorKind<'ctx>, span: Span) -> Self {
+impl Error {
+    pub fn new(kind: ErrorKind, span: Span) -> Self {
         Self {
             kind,
             span,
@@ -55,13 +59,13 @@ pub enum Severity {
 }
 
 #[derive(Clone, Copy)]
-pub enum ErrorKind<'ctx> {
+pub enum ErrorKind {
     UndefinedVariable(Symbol),
-    ExpectedBoolExpr(&'ctx Ty),
+    ExpectedBoolExpr(Ty),
     InvalidPattern,
 }
 
-impl<'ctx> ErrorKind<'ctx> {
+impl ErrorKind {
     fn get_severity(&self) -> Severity {
         match self {
             Self::UndefinedVariable(_) => Severity::Fatal,

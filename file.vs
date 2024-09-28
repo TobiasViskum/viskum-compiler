@@ -1,9 +1,13 @@
+
 a := do
     k := 0
     a := 2
     b := 2
     a + k
 end
+
+boolean := true
+
 a := (2 + 3) * 9
 b := 6 - (1 + a)
 
@@ -18,10 +22,22 @@ else
     7
 end
 
-mut c := a + k + b
+mut c := a + b + k
 
 c = 2
 
 cond := if true == true then 1 else c end
 
 c = 928 + c
+
+mut i := 0
+if i == 10 then
+    i = i + 1
+end
+
+result := loop
+    i = i + 1
+    if i == 10 then
+        break
+    end
+end

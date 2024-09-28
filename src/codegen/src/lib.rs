@@ -24,16 +24,18 @@ use std::{ fmt::Write, fs::File, process::Command };
 
 const INDENTATION: usize = 4;
 
+// pub(crate) fn get_ty_stack_size_in_bytes(ty: &Ty) -> usize {}
+
 /// Used to allocate places (e.g. results of operations, variables, etc.) before the actual code gen
 pub(crate) struct CodeGenUnitHelper<'a> {
-    cfg: &'a Cfg<'a>,
+    cfg: &'a Cfg,
     next_ssa_id: usize,
     place_to_ssa_id: FxHashMap<PlaceKind, usize>,
     basic_block_id_to_ssa_id: FxHashMap<BasicBlockId, usize>,
 }
 
 impl<'a> CodeGenUnitHelper<'a> {
-    pub(crate) fn new(cfg: &'a Cfg<'a>) -> Self {
+    pub(crate) fn new(cfg: &'a Cfg) -> Self {
         Self {
             cfg,
             next_ssa_id: 1,
@@ -56,54 +58,50 @@ impl<'a> CodeGenUnitHelper<'a> {
     }
 }
 
-impl<'a> CfgVisitor<'a> for CodeGenUnitHelper<'a> {
+impl<'a> CfgVisitor for CodeGenUnitHelper<'a> {
     type Result = ();
     fn default_result() -> Self::Result {}
 
-    fn visit_basic_block(
-        &mut self,
-        basic_block: &icfg::BasicBlock<'a>,
-        cfg: &Cfg<'a>
-    ) -> Self::Result {
+    fn visit_basic_block(&mut self, basic_block: &icfg::BasicBlock, cfg: &Cfg) -> Self::Result {
         let next_ssa_id = self.get_next_ssa_id();
         self.basic_block_id_to_ssa_id.insert(basic_block.basic_block_id, next_ssa_id);
         walk_basic_block(self, basic_block, cfg)
     }
 
-    fn visit_local_mem(&mut self, local_mem: &icfg::LocalMem<'a>) -> Self::Result {
+    fn visit_local_mem(&mut self, local_mem: &icfg::LocalMem) -> Self::Result {
         let next_ssa_id = self.get_next_ssa_id();
         self.place_to_ssa_id.insert(PlaceKind::LocalMemId(local_mem.local_mem_id), next_ssa_id);
     }
 
-    fn visit_result_mem(&mut self, result_mem: &icfg::ResultMem<'a>) -> Self::Result {
+    fn visit_result_mem(&mut self, result_mem: &icfg::ResultMem) -> Self::Result {
         let next_ssa_id = self.get_next_ssa_id();
         self.place_to_ssa_id.insert(PlaceKind::ResultMemId(result_mem.result_mem_id), next_ssa_id);
     }
 
-    fn visit_binary_node(&mut self, binary_node: &icfg::BinaryNode, cfg: &Cfg<'a>) -> Self::Result {
+    fn visit_binary_node(&mut self, binary_node: &icfg::BinaryNode, cfg: &Cfg) -> Self::Result {
         let next_ssa_id = self.get_next_ssa_id();
         self.place_to_ssa_id.insert(PlaceKind::TempId(binary_node.result_place), next_ssa_id);
     }
 
-    fn visit_load_node(&mut self, load_node: &icfg::LoadNode, cfg: &Cfg<'a>) -> Self::Result {
+    fn visit_load_node(&mut self, load_node: &icfg::LoadNode, cfg: &Cfg) -> Self::Result {
         let next_ssa_id = self.get_next_ssa_id();
         self.place_to_ssa_id.insert(PlaceKind::TempId(load_node.result_place), next_ssa_id);
     }
 
-    fn visit_init_node(&mut self, _init_node: &icfg::StoreNode, _cfg: &Cfg<'a>) -> Self::Result {
+    fn visit_init_node(&mut self, _init_node: &icfg::StoreNode, _cfg: &Cfg) -> Self::Result {
         // Should do nothing
     }
 }
 
 pub(crate) struct CodeGenUnit<'a> {
-    cfg: &'a Cfg<'a>,
+    cfg: &'a Cfg,
     buffer: String,
     place_to_ssa_id: FxHashMap<PlaceKind, usize>,
     basic_block_id_to_ssa_id: FxHashMap<BasicBlockId, usize>,
 }
 
 impl<'a> CodeGenUnit<'a> {
-    pub(crate) fn new(cfg: &'a Cfg<'a>) -> Self {
+    pub(crate) fn new(cfg: &'a Cfg) -> Self {
         let (place_to_ssa_id, basic_block_id_to_ssa_id) = {
             CodeGenUnitHelper::new(cfg).allocate_places()
         };
@@ -130,7 +128,7 @@ impl<'a> CodeGenUnit<'a> {
         *self.basic_block_id_to_ssa_id.get(bb_id).expect("Expected BasicBlockId")
     }
 
-    pub(crate) fn get_llvm_ty(&self, ty: &'a Ty) -> String {
+    pub(crate) fn get_llvm_ty(&self, ty: Ty) -> String {
         let str = match ty {
             Ty::PrimTy(prim_ty) =>
                 match prim_ty {
@@ -138,10 +136,21 @@ impl<'a> CodeGenUnit<'a> {
                     PrimTy::Int => "i32",
                     PrimTy::Void => "void",
                 }
+            Ty::Tuple(tuple_ty) => panic!("Tuples not implemented yet"),
             Ty::Unkown => panic!("Unkown type (should not be this far in compilation)"),
         };
         str.to_string()
     }
+
+    // pub(crate) fn get_declaration_llvm_ty(&self, ty: Ty) -> String {
+    //     let str = match ty {
+    //         Ty::PrimTy(primt_ty) => {
+    //             match primt_ty {
+    //                 PrimTy::Bool =>
+    //             }
+    //         }
+    //     }
+    // }
 
     pub(crate) fn get_llvm_operand(&self, operand: &Operand) -> String {
         let string = match &operand.kind {
@@ -166,14 +175,14 @@ impl<'a> CodeGenUnit<'a> {
     }
 }
 
-impl<'a> CfgVisitor<'a> for CodeGenUnit<'a> {
+impl<'a> CfgVisitor for CodeGenUnit<'a> {
     type Result = Result<(), std::fmt::Error>;
 
     fn default_result() -> Self::Result {
         Ok(())
     }
 
-    fn visit_cfg(&mut self, cfg: &Cfg<'a>) -> Self::Result {
+    fn visit_cfg(&mut self, cfg: &Cfg) -> Self::Result {
         writeln!(self.buffer, "define i32 @main() {{")?;
         walk_local_mems(self, cfg)?;
         walk_result_mems(self, cfg)?;
@@ -188,7 +197,7 @@ impl<'a> CfgVisitor<'a> for CodeGenUnit<'a> {
         writeln!(self.buffer, "}}")
     }
 
-    fn visit_local_mem(&mut self, local_mem: &icfg::LocalMem<'a>) -> Self::Result {
+    fn visit_local_mem(&mut self, local_mem: &icfg::LocalMem) -> Self::Result {
         let ssa_id = self.get_ssa_id_from_place(&PlaceKind::LocalMemId(local_mem.local_mem_id));
         writeln!(
             self.buffer,
@@ -199,8 +208,9 @@ impl<'a> CfgVisitor<'a> for CodeGenUnit<'a> {
         )
     }
 
-    fn visit_result_mem(&mut self, result_mem: &icfg::ResultMem<'a>) -> Self::Result {
+    fn visit_result_mem(&mut self, result_mem: &icfg::ResultMem) -> Self::Result {
         let ssa_id = self.get_ssa_id_from_place(&PlaceKind::ResultMemId(result_mem.result_mem_id));
+
         writeln!(
             self.buffer,
             "{}%{} = alloca {}, align 4",
@@ -210,22 +220,18 @@ impl<'a> CfgVisitor<'a> for CodeGenUnit<'a> {
         )
     }
 
-    fn visit_basic_block(
-        &mut self,
-        basic_block: &icfg::BasicBlock<'a>,
-        cfg: &Cfg<'a>
-    ) -> Self::Result {
+    fn visit_basic_block(&mut self, basic_block: &icfg::BasicBlock, cfg: &Cfg) -> Self::Result {
         let bb_id = self.get_bb_id(&basic_block.basic_block_id);
         writeln!(self.buffer, "{}:", bb_id)?;
         walk_basic_block(self, basic_block, cfg)
     }
 
-    fn visit_branch_node(&mut self, branch_node: &icfg::BranchNode, cfg: &Cfg<'a>) -> Self::Result {
+    fn visit_branch_node(&mut self, branch_node: &icfg::BranchNode, cfg: &Cfg) -> Self::Result {
         let branch_id = self.get_bb_id(&branch_node.branch);
         writeln!(self.buffer, "{}br label %{}", " ".repeat(INDENTATION), branch_id)
     }
 
-    fn visit_init_node(&mut self, init_node: &icfg::StoreNode, cfg: &Cfg<'a>) -> Self::Result {
+    fn visit_init_node(&mut self, init_node: &icfg::StoreNode, cfg: &Cfg) -> Self::Result {
         let var_place = match init_node.setter {
             Either::Left(local_mem_id) =>
                 self.get_ssa_id_from_place(&PlaceKind::LocalMemId(local_mem_id)),
@@ -247,7 +253,7 @@ impl<'a> CfgVisitor<'a> for CodeGenUnit<'a> {
     fn visit_branch_cond_node(
         &mut self,
         branch_cond_node: &icfg::BranchCondNode,
-        cfg: &Cfg<'a>
+        cfg: &Cfg
     ) -> Self::Result {
         let cond = self.get_llvm_operand(&branch_cond_node.condition);
         let ty = self.get_llvm_ty(branch_cond_node.ty);
@@ -265,7 +271,7 @@ impl<'a> CfgVisitor<'a> for CodeGenUnit<'a> {
         )
     }
 
-    fn visit_load_node(&mut self, load_node: &icfg::LoadNode, cfg: &Cfg<'a>) -> Self::Result {
+    fn visit_load_node(&mut self, load_node: &icfg::LoadNode, cfg: &Cfg) -> Self::Result {
         let ssa_id = self.get_ssa_id_from_place(&PlaceKind::TempId(load_node.result_place));
         let var_place = match load_node.loc_id {
             Either::Left(local_mem_id) =>
@@ -283,7 +289,7 @@ impl<'a> CfgVisitor<'a> for CodeGenUnit<'a> {
         )
     }
 
-    fn visit_binary_node(&mut self, binary_node: &icfg::BinaryNode, cfg: &Cfg<'a>) -> Self::Result {
+    fn visit_binary_node(&mut self, binary_node: &icfg::BinaryNode, cfg: &Cfg) -> Self::Result {
         let lhs_op = self.get_llvm_operand(&binary_node.lhs);
         let rhs_op = self.get_llvm_operand(&binary_node.rhs);
 
@@ -316,11 +322,11 @@ impl<'a> CfgVisitor<'a> for CodeGenUnit<'a> {
 }
 
 pub struct CodeGen<'icfg> {
-    icfg: &'icfg Icfg<'icfg>,
+    icfg: &'icfg Icfg,
 }
 
 impl<'icfg> CodeGen<'icfg> {
-    pub fn new(icfg: &'icfg Icfg<'icfg>) -> Self {
+    pub fn new(icfg: &'icfg Icfg) -> Self {
         Self { icfg }
     }
 

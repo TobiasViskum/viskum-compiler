@@ -65,6 +65,8 @@ pub enum TokenKind {
     Define,
     /// `.`
     Dot,
+    /// `,`
+    Comma,
     /// `!`
     Bang,
 
@@ -96,6 +98,8 @@ pub enum TokenKind {
     Loop,
     /// Keyword `break`
     Break,
+    /// Keyword `continue`
+    Continue,
     /// Keyword `then`
     Then,
     /// Keyword `do`
@@ -108,6 +112,8 @@ pub enum TokenKind {
     Elif,
     /// Keyword `mut`
     Mut,
+    /// Keyword `ret`
+    Return,
 
     /// End of ofile
     Eof,

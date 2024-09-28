@@ -1,4 +1,4 @@
-use ast::AstArena;
+use ast::{ AstArena, AstPrettifier };
 use codegen::CodeGen;
 use icfg::{ Icfg, IcfgPrettifier };
 use icfg_builder::IcfgBuilder;
@@ -16,14 +16,14 @@ impl Compiler {
         let now = std::time::Instant::now();
         let icfg = self.build_to_icfg();
 
-        IcfgPrettifier::new(&icfg).print_icfg();
+        // IcfgPrettifier::new(&icfg).print_icfg();
 
         println!("Compilation took: {:?}", now.elapsed());
 
         CodeGen::new(&icfg).gen_code("file");
     }
 
-    fn build_to_icfg<'b>(&self) -> Icfg<'b> {
+    fn build_to_icfg(&self) -> Icfg {
         let file_content = Self::get_file_content();
         let ast_arena = AstArena::new();
 
@@ -37,6 +37,12 @@ impl Compiler {
 
             (resolver.take_resolved_information(), type_checked_ast)
         };
+
+        // AstPrettifier::new(
+        //     &ast,
+        //     &file_content,
+        //     Some(&resolved_information.node_id_to_ty)
+        // ).print_ast();
 
         let icfg_builder = IcfgBuilder::new(ast, resolved_information, &file_content);
         let icfg = icfg_builder.build();

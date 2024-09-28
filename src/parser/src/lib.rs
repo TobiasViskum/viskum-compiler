@@ -5,9 +5,12 @@ use ast::{
     AstState0,
     BlockExpr,
     BoolExpr,
+    BreakExpr,
+    ContinueExpr,
     Expr,
     ExprKind,
     ExprWithBlock,
+    ExprWithoutBlock,
     FunctionStmt,
     GlobalScope,
     IdentExpr,
@@ -15,6 +18,7 @@ use ast::{
     IfFalseBranchExpr,
     IntegerExpr,
     ItemStmt,
+    LoopExpr,
     Stmt,
 };
 use error::Error;
@@ -38,7 +42,7 @@ pub type ParseRuleMethod = for<'a, 'b> fn(&'b mut Parser<'a>, &'b mut ExprBuilde
 ///
 /// A parserule contains the token kind precedences and possibly parse methods
 #[derive(Debug, Clone, Copy)]
-pub struct ParseRule {
+pub(crate) struct ParseRule {
     pub prefix_method: Option<ParseRuleMethod>,
     pub prefix_prec: Precedence,
     pub infix_method: Option<ParseRuleMethod>,
@@ -60,6 +64,22 @@ impl ParseRule {
     }
 }
 
+pub(crate) trait ParserHandle {
+    fn get_ast_node_id(&mut self) -> NodeId;
+
+    fn forget_node(&mut self, node_id: NodeId);
+}
+
+impl<'a> ParserHandle for Parser<'a> {
+    fn forget_node(&mut self, node_id: NodeId) {
+        self.forgotten_nodes += 1;
+    }
+
+    fn get_ast_node_id(&mut self) -> NodeId {
+        Parser::get_ast_node_id(self)
+    }
+}
+
 pub struct Parser<'a> {
     parse_rules: [ParseRule; PARSE_RULE_COUNT],
     lexer: Lexer<'a>,
@@ -73,7 +93,7 @@ pub struct Parser<'a> {
     next_result_loc: ResultLoc,
 
     /// Used for error reporting
-    errors: Vec<Error<'a>>,
+    errors: Vec<Error>,
 }
 
 impl<'a> Parser<'a> {
@@ -107,10 +127,39 @@ impl<'a> Parser<'a> {
         let stmt = match self.current.get_kind() {
             TokenKind::Def => self.function_statement(),
             TokenKind::Mut => self.mut_stmt(),
+            TokenKind::Break => self.break_expr(),
+            TokenKind::Continue => self.continue_expr(),
             _ => self.expression_statement(),
         };
 
         self.ast_arena.alloc_expr_or_stmt(stmt)
+    }
+
+    pub(crate) fn expression_statement(&mut self) -> Stmt<'a> {
+        let mut expr_builder = ExprBuilder::new(self.ast_arena);
+        self.parse_precedence(expr_builder.get_base_prec(), &mut expr_builder);
+        let stmt = expr_builder.take_stmt().expect("TODO: Error handling");
+        stmt
+    }
+
+    pub(crate) fn break_expr(&mut self) -> Stmt<'a> {
+        let break_expr = self.ast_arena.alloc_expr_or_stmt(
+            BreakExpr::new(None, self.get_ast_node_id())
+        );
+        let expr_kind = ExprKind::ExprWithoutBlock(ExprWithoutBlock::BreakExpr(break_expr));
+        let expr = self.ast_arena.alloc_expr_or_stmt(Expr::new(expr_kind, self.get_ast_node_id()));
+        self.advance();
+        Stmt::ExprStmt(expr)
+    }
+
+    pub(crate) fn continue_expr(&mut self) -> Stmt<'a> {
+        let continue_expr = self.ast_arena.alloc_expr_or_stmt(
+            ContinueExpr::new(self.get_ast_node_id())
+        );
+        let expr_kind = ExprKind::ExprWithoutBlock(ExprWithoutBlock::ContinueExpr(continue_expr));
+        let expr = self.ast_arena.alloc_expr_or_stmt(Expr::new(expr_kind, self.get_ast_node_id()));
+        self.advance();
+        Stmt::ExprStmt(expr)
     }
 
     pub(crate) fn function_statement(&mut self) -> Stmt<'a> {
@@ -136,25 +185,17 @@ impl<'a> Parser<'a> {
         Stmt::ItemStmt(ItemStmt::FunctionStmt(fn_stmt))
     }
 
-    pub(crate) fn expression_statement(&mut self) -> Stmt<'a> {
-        let mut expr_builder = ExprBuilder::new(self.ast_arena);
-
-        self.parse_precedence(expr_builder.get_base_prec(), &mut expr_builder);
-        let stmt = expr_builder.take_stmt().expect("TODO: Error handling");
-        stmt
-    }
-
     pub(crate) fn mut_stmt(&mut self) -> Stmt<'a> {
         let mut_span = self.prev.get_span();
         self.advance();
         let mut expr_builder = ExprBuilder::new(self.ast_arena);
         self.parse_precedence(expr_builder.get_base_prec(), &mut expr_builder);
-        let mut stmt = expr_builder.take_stmt().expect("TODO: Error handling");
-        Self::test_and_set_mutable(&mut stmt, mut_span).expect("Misuse of mut");
+        let stmt = expr_builder.take_stmt().expect("TODO: Error handling");
+        Self::test_and_set_mutable(&stmt, mut_span).expect("Misuse of mut");
         stmt
     }
 
-    fn test_and_set_mutable<'b>(stmt: &'b mut Stmt<'a>, mut_span: Span) -> Result<(), &'b str> {
+    fn test_and_set_mutable<'b>(stmt: &'b Stmt<'a>, mut_span: Span) -> Result<(), &'b str> {
         match stmt {
             Stmt::DefineStmt(define_stmt) => {
                 define_stmt.mut_span.set(Some(mut_span));
@@ -170,48 +211,66 @@ impl<'a> Parser<'a> {
     pub(crate) fn define(&mut self, expr_builder: &mut ExprBuilder<'a>) {
         expr_builder.set_base_prec(Precedence::PrecAssign.get_next());
         self.parse_precedence(expr_builder.get_base_prec(), expr_builder);
-        self.forgotten_nodes += 1;
-        expr_builder.emit_define_stmt(self.get_ast_node_id())
+        expr_builder.emit_define_stmt(self)
     }
 
     /// Parse rule method: `assign`
     pub(crate) fn assign(&mut self, expr_builder: &mut ExprBuilder<'a>) {
         expr_builder.set_base_prec(Precedence::PrecAssign.get_next());
         self.parse_precedence(expr_builder.get_base_prec(), expr_builder);
-        self.forgotten_nodes += 1;
-        expr_builder.emit_assign_stmt(self.get_ast_node_id())
+        expr_builder.emit_assign_stmt(self)
     }
 
     /// Parse rule method: `block`
     pub(crate) fn block_expr(&mut self, expr_builder: &mut ExprBuilder<'a>) {
         let block_expr = self.parse_block();
         self.consume(TokenKind::End, "Expected `end`");
-        expr_builder.emit_block_expr(block_expr, self.get_ast_node_id());
+        expr_builder.emit_block_expr(block_expr, self);
     }
 
-    /// Parse rule method: `grouping`
+    /// Parse rule method: `grouping`, called by prefix `(`
     pub(crate) fn grouping(&mut self, expr_builder: &mut ExprBuilder<'a>) {
-        self.parse_precedence(expr_builder.get_base_prec(), expr_builder);
-        self.consume(TokenKind::RightParen, "Expected ')' after group");
-        expr_builder.emit_grouping_expr(self.get_ast_node_id())
+        let mut exprs = Vec::new();
+        while !self.is_eof() {
+            let expr = {
+                let base_prec = expr_builder.get_base_prec();
+                let mut expr_builder = ExprBuilder::new(self.ast_arena);
+                self.parse_precedence(base_prec, &mut expr_builder);
+                self.ast_arena.alloc_expr_or_stmt(
+                    expr_builder.take_expr().expect("TODO:Error handling")
+                )
+            };
+
+            exprs.push(expr);
+
+            if self.is_curr_kind(TokenKind::Comma) {
+                self.advance();
+                continue;
+            }
+
+            self.consume(TokenKind::RightParen, "Expected ')' after group");
+            break;
+        }
+
+        expr_builder.emit_grouping_or_tuple_expr(self, exprs)
     }
 
     /// Parse rule method: `ident`
     pub(crate) fn ident(&mut self, expr_builder: &mut ExprBuilder<'a>) {
         let ident_expr = IdentExpr::new(self.prev.get_span(), self.get_ast_node_id());
-        expr_builder.emit_ident_expr(ident_expr, self.get_ast_node_id(), self.get_ast_node_id());
+        expr_builder.emit_ident_expr(ident_expr, self);
     }
 
     /// Parse rule method: `true_literal`
     pub(crate) fn true_lit(&mut self, expr_builder: &mut ExprBuilder<'a>) {
         let bool_expr = BoolExpr::new(true, self.get_ast_node_id());
-        expr_builder.emit_bool_expr(bool_expr, self.get_ast_node_id())
+        expr_builder.emit_bool_expr(bool_expr, self)
     }
 
     /// Parse rule method: `false_literal`
     pub(crate) fn false_lit(&mut self, expr_builder: &mut ExprBuilder<'a>) {
         let bool_expr = BoolExpr::new(false, self.get_ast_node_id());
-        expr_builder.emit_bool_expr(bool_expr, self.get_ast_node_id())
+        expr_builder.emit_bool_expr(bool_expr, self)
     }
 
     /// Parse rule method: `integer`
@@ -219,7 +278,7 @@ impl<'a> Parser<'a> {
         let lexeme = self.get_lexeme_of_prev();
         let val = lexeme.parse::<i64>().expect("TODO: Error handling");
         let integer_expr = IntegerExpr::new(val, self.get_ast_node_id());
-        expr_builder.emit_integer_expr(integer_expr, self.get_ast_node_id());
+        expr_builder.emit_integer_expr(integer_expr, self);
     }
 
     /// Parse rule method: `dot_float`
@@ -286,15 +345,31 @@ impl<'a> Parser<'a> {
     pub(crate) fn binary(&mut self, expr_builder: &mut ExprBuilder<'a>, binary_op: BinaryOp) {
         self.parse_precedence(self.get_parse_rule_of_prev().infix_prec.get_next(), expr_builder);
 
-        expr_builder.emit_binary_expr(binary_op, self.get_ast_node_id())
+        expr_builder.emit_binary_expr(binary_op, self)
     }
 
-    /// Parse rule method: `div`
+    /// Parse rule method: `loop_expr`
+    pub(crate) fn loop_expr(&mut self, expr_builder: &mut ExprBuilder<'a>) {
+        self.push_result_loc();
+
+        let block = self.parse_block();
+        self.consume(TokenKind::End, "Expected `end` after loop");
+
+        let loop_expr = self.ast_arena.alloc_expr_or_stmt(
+            LoopExpr::new(block, self.get_ast_node_id(), self.read_result_loc())
+        );
+
+        expr_builder.emit_loop_expr(loop_expr, self);
+
+        self.pop_result_loc();
+    }
+
+    /// Parse rule method: `if_expr`
     pub(crate) fn if_expr(&mut self, expr_builder: &mut ExprBuilder<'a>) {
         self.push_result_loc();
         let if_expr = self.parse_if_expr();
 
-        expr_builder.emit_if_expr(if_expr, self.get_ast_node_id());
+        expr_builder.emit_if_expr(if_expr, self);
         self.pop_result_loc();
     }
 
@@ -444,6 +519,10 @@ impl<'a> Parser<'a> {
         self.lexer.is_eof() && self.current.get_kind() == TokenKind::Eof
     }
 
+    pub(crate) fn is_curr_kind(&self, kind: TokenKind) -> bool {
+        self.current.get_kind() == kind
+    }
+
     pub(crate) fn get_lexeme(&self, span: Span) -> &str {
         &self.src[span.get_byte_start()..span.get_byte_end()]
     }
@@ -455,7 +534,7 @@ impl<'a> Parser<'a> {
 
     pub(crate) fn advance_if(&mut self, cond: bool) {
         if cond {
-            self.advance()
+            self.advance();
         }
     }
 
@@ -515,8 +594,10 @@ impl<'a> Parser<'a> {
         Colon       = { (None       None),      (None       None            ),      (None       None) },
         Define      = { (None       None),      (define     PrecAssign      ),      (None       None) },
         Assign      = { (None       None),      (assign     PrecAssign      ),      (None       None) },
-        Dot         = { (dot_float  None),      (None       None            ),      (None       None)},
+        Dot         = { (dot_float  None),      (None       None            ),      (None       None) },
+        Comma       = { (None       None),      (None       None            ),      (None       None)},
         Bang        = { (None       None),      (None       None            ),      (None       None)   },
+        
             
         // Numbers
         Integer     = { (integer    None),      (None       None            ),      (None       None) },
@@ -535,8 +616,10 @@ impl<'a> Parser<'a> {
         Class       = { (None       None),      (None       None            ),      (None       None) },
         While       = { (None       None),      (None       None            ),      (None       None) },
         If          = { (if_expr    None),      (None       None            ),      (None       None) },
-        Loop        = { (None       None),      (None       None            ),      (None       None) },
+        Loop        = { (loop_expr  None),      (None       None            ),      (None       None) },
         Break       = { (None       None),      (None       None            ),      (None       None) },
+        Continue    = { (None       None),      (None       None            ),      (None       None) },
+        Return      = { (None       None),      (None       None            ),      (None       None) },
         Do          = { (block_expr None),      (None       None            ),      (None       None) },
         Then        = { (None       None),      (None       None            ),      (None       None) },
         Else        = { (None       None),      (None       None            ),      (None       None) },

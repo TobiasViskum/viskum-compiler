@@ -25,6 +25,8 @@ impl<'a> Lexer<'a> {
     }
 
     pub fn scan_token(&mut self) -> Token {
+        let prev = self.current_char;
+
         let char = self.advance();
 
         match char {
@@ -40,13 +42,17 @@ impl<'a> Lexer<'a> {
             ':' => self.make_token_or_other_if(TokenKind::Colon, '=', TokenKind::Define),
             '=' => self.make_token_or_other_if(TokenKind::Assign, '=', TokenKind::Eq),
             ' ' => self.skip_char_and_scan(),
+            ',' => self.make_token(TokenKind::Comma),
             '\n' => self.newline_and_scan(),
             // this shouldn't be called if char before is ident or ')'
-            '.' if Self::is_digit(self.peek_next()) => self.make_float_number(),
+            '.' if Self::can_be_before_dot_float(prev) && Self::is_digit(self.peek_next()) => {
+                self.make_float_number()
+            }
+            '.' => self.make_token(TokenKind::Dot),
             _ if Self::is_digit(char) => self.make_number(),
             _ if Self::is_alphabetic(char) => self.make_ident_or_keyword(),
             EOF_CHAR => self.make_token(TokenKind::Eof),
-            _ => panic!("Unkown token: {}", char),
+            _ => panic!("Unkown token: {} (produce token_kind: Unknown)", char),
         }
     }
 
@@ -110,6 +116,8 @@ impl<'a> Lexer<'a> {
             "else" => TokenKind::Else,
             "elif" => TokenKind::Elif,
             "break" => TokenKind::Break,
+            "continue" => TokenKind::Continue,
+            "ret" => TokenKind::Return,
             "true" => TokenKind::True,
             "false" => TokenKind::False,
             "then" => TokenKind::Then,
@@ -200,6 +208,10 @@ impl<'a> Lexer<'a> {
 
     fn is_alphabetic(char: char) -> bool {
         char.is_alphabetic() || char == '_'
+    }
+
+    fn can_be_before_dot_float(char: char) -> bool {
+        matches!(char, '+' | '-' | '*' | '/' | ' ')
     }
 }
 

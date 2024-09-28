@@ -6,6 +6,8 @@ use crate::{
     BinaryExpr,
     BlockExpr,
     BoolExpr,
+    BreakExpr,
+    ContinueExpr,
     DefineStmt,
     Expr,
     FunctionStmt,
@@ -14,8 +16,10 @@ use crate::{
     IdentPat,
     IfExpr,
     IntegerExpr,
+    LoopExpr,
     Pat,
     PlaceExpr,
+    TupleExpr,
 };
 
 /// Used to lookup any node inside the ast and get a reference to it
@@ -62,6 +66,10 @@ impl<'ast> AstQuerySystem<'ast> {
 pub enum AstQueryEntry<'ast> {
     Expr(&'ast Expr<'ast>),
     Pat(&'ast Pat<'ast>),
+    TupleExpr(&'ast TupleExpr<'ast>),
+    LoopExpr(&'ast LoopExpr<'ast>),
+    BreakExpr(&'ast BreakExpr<'ast>),
+    ContinueExpr(&'ast ContinueExpr),
     PlaceExpr(&'ast PlaceExpr<'ast>),
     BinarExpr(&'ast BinaryExpr<'ast>),
     FunctionStmt(&'ast FunctionStmt<'ast>),

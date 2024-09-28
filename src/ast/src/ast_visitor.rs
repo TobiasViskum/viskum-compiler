@@ -12,14 +12,18 @@ use crate::{
         Visitor,
     },
     walk_assign_stmt,
+    walk_break_expr,
     walk_expr,
+    walk_loop_expr,
     walk_pat,
     walk_place_expr,
+    walk_tuple_expr,
     AssignStmt,
     Ast,
     BinaryExpr,
     BlockExpr,
     BoolExpr,
+    ContinueExpr,
     DefineStmt,
     Expr,
     GroupExpr,
@@ -30,12 +34,14 @@ use crate::{
     Pat,
     PatKind,
     PlaceKind,
+    TupleExpr,
 };
 use error::{ Error, ErrorKind };
 use ir_defs::{ DefId, DefKind, Mutability, NameBinding, NameBindingKind, NodeId, Res };
-use op::{ ArithmeticOp, BinaryOp };
+use op::{ ArithmeticOp, BinaryOp, Op };
+use span::Span;
 use symbol::Symbol;
-use ty::{ PrimTy, Ty };
+use ty::{ PrimTy, Ty, TyCtx, BOOL_TY, INT_TY, VOID_TY };
 
 /// Visits the entire Ast from left to right
 ///
@@ -45,6 +51,8 @@ pub struct AstVisitor<'ctx, 'ast, 'b, T, E> where T: AstState, E: AstVisitEmitte
     pub ast: Ast<'ast, T>,
     src: &'b str,
     marker: PhantomData<&'ctx ()>,
+    /// All loops: `while`, `loop` etc.
+    loop_ret_ty_stack: Vec<Option<Ty>>,
 
     /// Can call functions on the Resolver
     pub ast_visit_emitter: &'b mut E,
@@ -74,7 +82,7 @@ impl<'ctx, 'ast, 'b, E> AstVisitor<'ctx, 'ast, 'b, AstState1, E>
 }
 
 impl<'ctx, 'ast, 'b, E> AstVisitor<'ctx, 'ast, 'b, AstState2, E>
-    where 'ast: 'b, E: AstVisitEmitter<'ctx, 'ast, AstState2>
+    where 'ctx: 'ast, 'ast: 'b, E: AstVisitEmitter<'ctx, 'ast, AstState2>
 {
     pub fn visit(mut self) -> Ast<'ast, AstState3> {
         self.visit_stmts(self.ast.main_scope.stmts);
@@ -86,7 +94,13 @@ impl<'ctx, 'ast, 'b, T, E> AstVisitor<'ctx, 'ast, 'b, T, E>
     where T: AstState, E: AstVisitEmitter<'ctx, 'ast, T>
 {
     pub fn new(ast: Ast<'ast, T>, src: &'b str, ast_visit_emitter: &'b mut E) -> Self {
-        Self { ast, src, ast_visit_emitter, marker: PhantomData }
+        Self {
+            ast,
+            loop_ret_ty_stack: Vec::with_capacity(4),
+            src,
+            ast_visit_emitter,
+            marker: PhantomData,
+        }
     }
 }
 
@@ -96,7 +110,7 @@ impl<'ctx, 'ast, 'b, T, E> AstVisitor<'ctx, 'ast, 'b, T, E>
 /// The reason it's not using the Resolver directly is to avoid cyclic references
 pub trait AstVisitEmitter<'ctx, 'ast, T>: Sized where T: AstState {
     /* Methods available during all passes  */
-    fn report_error(&mut self, error: Error<'ctx>);
+    fn report_error(&mut self, error: Error);
 
     /* Methods for the first pass (name resolution) */
     fn start_scope(&mut self) where T: AstState<ThisState = AstState1>;
@@ -106,18 +120,13 @@ pub trait AstVisitEmitter<'ctx, 'ast, T>: Sized where T: AstState {
 
     /* Methods for the second pass (type checking) */
     fn intern_type(&mut self, ty: Ty) -> &'ctx Ty where T: AstState<ThisState = AstState2>;
-    fn set_type_to_node_id(&mut self, node_id: NodeId, ty: &'ctx Ty)
+    fn set_type_to_node_id(&mut self, node_id: NodeId, ty: Ty)
         where T: AstState<ThisState = AstState2>;
     fn get_def_id_from_node_id(&self, node_id: NodeId) -> DefId
         where T: AstState<ThisState = AstState2>;
-    fn set_namebinding_and_ty_to_def_id(
-        &mut self,
-        def_id: DefId,
-        name_binding: NameBinding,
-        ty: &'ctx Ty
-    )
+    fn set_namebinding_and_ty_to_def_id(&mut self, def_id: DefId, name_binding: NameBinding, ty: Ty)
         where T: AstState<ThisState = AstState2>;
-    fn get_namebinding_and_ty_from_def_id(&self, def_id: DefId) -> (NameBinding, &'ctx Ty)
+    fn get_namebinding_and_ty_from_def_id(&self, def_id: DefId) -> (NameBinding, Ty)
         where T: AstState<ThisState = AstState2>;
 }
 
@@ -144,6 +153,11 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
         walk_pat(self, pat)
     }
 
+    fn visit_tuple_expr(&mut self, tuple_expr: &'ast crate::TupleExpr<'ast>) -> Self::Result {
+        self.insert_query_entry(tuple_expr.ast_node_id, AstQueryEntry::TupleExpr(tuple_expr));
+        walk_tuple_expr(self, tuple_expr)
+    }
+
     fn visit_place_expr(&mut self, place_expr: &'ast crate::PlaceExpr) -> Self::Result {
         self.insert_query_entry(place_expr.ast_node_id, AstQueryEntry::PlaceExpr(place_expr));
         walk_place_expr(self, place_expr)
@@ -163,6 +177,16 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
         walk_def_stmt(self, def_stmt)
     }
 
+    fn visit_loop_expr(&mut self, loop_expr: &'ast crate::LoopExpr<'ast>) -> Self::Result {
+        self.insert_query_entry(loop_expr.ast_node_id, AstQueryEntry::LoopExpr(loop_expr));
+        walk_loop_expr(self, loop_expr)
+    }
+
+    fn visit_break_expr(&mut self, break_expr: &'ast crate::BreakExpr<'ast>) -> Self::Result {
+        self.insert_query_entry(break_expr.ast_node_id, AstQueryEntry::BreakExpr(break_expr));
+        walk_break_expr(self, break_expr)
+    }
+
     fn visit_assign_stmt(&mut self, assign_stmt: &'ast AssignStmt<'ast>) -> Self::Result {
         self.insert_query_entry(assign_stmt.ast_node_id, AstQueryEntry::AssignStmt(assign_stmt));
         walk_assign_stmt(self, assign_stmt)
@@ -171,6 +195,13 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
     fn visit_block_expr(&mut self, expr: &'ast BlockExpr<'ast>) -> Self::Result {
         self.insert_query_entry(expr.ast_node_id, AstQueryEntry::BlockExpr(expr));
         walk_stmts(self, expr.stmts)
+    }
+
+    fn visit_continue_expr(&mut self, continue_expr: &'ast ContinueExpr) -> Self::Result {
+        self.insert_query_entry(
+            continue_expr.ast_node_id,
+            AstQueryEntry::ContinueExpr(continue_expr)
+        );
     }
 
     fn visit_if_expr(&mut self, if_expr: &'ast IfExpr<'ast>) -> Self::Result {
@@ -226,18 +257,17 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
 /// Implements the Visitor trait for the second pass (type checking)
 impl<'ctx, 'ast, 'b, E> Visitor<'ast>
     for AstVisitor<'ctx, 'ast, 'b, AstState2, E>
-    where 'ast: 'b, E: AstVisitEmitter<'ctx, 'ast, AstState2>
+    where 'ctx: 'ast, 'ast: 'b, E: AstVisitEmitter<'ctx, 'ast, AstState2>
 {
-    type Result = &'ctx Ty;
+    type Result = Ty;
 
     fn default_result() -> Self::Result {
-        &Ty::PrimTy(PrimTy::Void)
+        VOID_TY
     }
 
     fn visit_interger_expr(&mut self, interger_expr: &'ast IntegerExpr) -> Self::Result {
-        let interned_type = self.ast_visit_emitter.intern_type(Ty::PrimTy(PrimTy::Int));
-        self.ast_visit_emitter.set_type_to_node_id(interger_expr.ast_node_id, interned_type);
-        interned_type
+        self.ast_visit_emitter.set_type_to_node_id(interger_expr.ast_node_id, INT_TY);
+        INT_TY
     }
 
     fn visit_place_expr(&mut self, place_expr: &'ast crate::PlaceExpr) -> Self::Result {
@@ -247,9 +277,8 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
     }
 
     fn visit_bool_expr(&mut self, bool_expr: &'ast BoolExpr) -> Self::Result {
-        let interned_type = self.ast_visit_emitter.intern_type(Ty::PrimTy(PrimTy::Bool));
-        self.ast_visit_emitter.set_type_to_node_id(bool_expr.ast_node_id, interned_type);
-        interned_type
+        self.ast_visit_emitter.set_type_to_node_id(bool_expr.ast_node_id, BOOL_TY);
+        BOOL_TY
     }
 
     fn visit_ident_expr(&mut self, ident_expr: &'ast IdentExpr) -> Self::Result {
@@ -292,13 +321,26 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
         }
 
         if setter_ty == value_ty {
-            let void_type = self.ast_visit_emitter.intern_type(Ty::PrimTy(PrimTy::Void));
-            self.ast_visit_emitter.set_type_to_node_id(assign_stmt.ast_node_id, void_type);
+            self.ast_visit_emitter.set_type_to_node_id(assign_stmt.ast_node_id, VOID_TY);
             // Returns void type, because assignments in itself return void
-            void_type
+            VOID_TY
         } else {
-            panic!("Not same type in assignment")
+            panic!("Not same type in assignment: {}, {}", setter_ty, value_ty)
         }
+    }
+
+    fn visit_tuple_expr(&mut self, tuple_expr: &'ast TupleExpr<'ast>) -> Self::Result {
+        let mut tuple_types = Vec::with_capacity(8);
+        for expr in tuple_expr.fields {
+            let ty = self.visit_expr(expr);
+            tuple_types.push(ty);
+        }
+
+        let tuple_ty = TyCtx::tuple_type(tuple_types);
+
+        self.ast_visit_emitter.set_type_to_node_id(tuple_expr.ast_node_id, tuple_ty);
+
+        tuple_ty
     }
 
     fn visit_def_stmt(&mut self, def_stmt: &'ast DefineStmt<'ast>) -> Self::Result {
@@ -323,23 +365,68 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
             }
         }
 
-        let void_type = self.ast_visit_emitter.intern_type(Ty::PrimTy(PrimTy::Void));
-
         // Even though def stmts doesn't return a value,
         // it still sets the type of the def stmt for ease of use in the prettifier
         //
         // It will, however, not have any effect on the actual program,
         // since below it returns void
-        self.ast_visit_emitter.set_type_to_node_id(def_stmt.ast_node_id, void_type);
+        self.ast_visit_emitter.set_type_to_node_id(def_stmt.ast_node_id, VOID_TY);
 
         // Returns void, since definitions cannot return a value
-        void_type
+        VOID_TY
     }
 
     fn visit_expr(&mut self, expr: &'ast Expr<'ast>) -> Self::Result {
         let ty = walk_expr(self, expr);
         self.ast_visit_emitter.set_type_to_node_id(expr.ast_node_id, ty);
         ty
+    }
+
+    fn visit_loop_expr(&mut self, loop_expr: &'ast crate::LoopExpr<'ast>) -> Self::Result {
+        self.loop_ret_ty_stack.push(None);
+        self.visit_block_expr(loop_expr.body);
+
+        let ty = self.loop_ret_ty_stack
+            .last()
+            .expect("This is always present pushed above")
+            .unwrap_or(Self::default_result());
+
+        self.loop_ret_ty_stack.pop();
+
+        self.ast_visit_emitter.set_type_to_node_id(loop_expr.ast_node_id, ty);
+        ty
+    }
+
+    fn visit_continue_expr(&mut self, continue_expr: &'ast ContinueExpr) -> Self::Result {
+        let void_ty = Ty::PrimTy(PrimTy::Void);
+        self.ast_visit_emitter.set_type_to_node_id(continue_expr.ast_node_id, void_ty);
+        void_ty
+    }
+
+    fn visit_break_expr(&mut self, break_expr: &'ast crate::BreakExpr<'ast>) -> Self::Result {
+        let break_ty = break_expr.value
+            .map(|expr| self.visit_expr(expr))
+            .unwrap_or(Self::default_result());
+
+        if let Some(loop_ret_ty) = self.loop_ret_ty_stack.last_mut() {
+            if let Some(expected_ty) = loop_ret_ty {
+                if break_ty != *expected_ty {
+                    self.ast_visit_emitter.report_error(
+                        Error::new(ErrorKind::BreakTypeError(*expected_ty, break_ty), Span::dummy())
+                    );
+                }
+            } else {
+                *loop_ret_ty = Some(break_ty);
+            }
+        } else {
+            self.ast_visit_emitter.report_error(
+                Error::new(ErrorKind::BreakOutsideLoop, Span::dummy())
+            );
+        }
+
+        self.ast_visit_emitter.set_type_to_node_id(break_expr.ast_node_id, break_ty);
+
+        Self::default_result()
     }
 
     fn visit_if_expr(&mut self, if_expr: &'ast IfExpr<'ast>) -> Self::Result {
@@ -360,11 +447,7 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
             .map(|expr| self.visit_if_false_branch_expr(expr));
 
         let if_expr_type = if let Some(false_type) = false_type {
-            if true_type == false_type {
-                true_type
-            } else {
-                self.ast_visit_emitter.intern_type(Ty::Unkown)
-            }
+            if true_type == false_type { true_type } else { Ty::Unkown }
         } else {
             true_type
         };
@@ -390,36 +473,34 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
             | BinaryOp::ArithmeticOp(ArithmeticOp::Mul)
             | BinaryOp::ArithmeticOp(ArithmeticOp::Sub) => {
                 match (lhs_type, rhs_type) {
-                    (Ty::PrimTy(PrimTy::Int), Ty::PrimTy(PrimTy::Int)) => {
-                        self.ast_visit_emitter.intern_type(Ty::PrimTy(PrimTy::Int))
+                    (INT_TY, INT_TY) => { lhs_type }
+                    _ => {
+                        self.ast_visit_emitter.report_error(
+                            Error::new(
+                                ErrorKind::BinaryExprTypeError(binary_expr.op, lhs_type, rhs_type),
+                                Span::dummy()
+                            )
+                        );
+                        Ty::Unkown
                     }
-                    _ => panic!("Only integers are implemented (add, div, mul, sub)"),
                 }
             }
             BinaryOp::ComparisonOp(_) => {
                 match (lhs_type, rhs_type) {
-                    (Ty::PrimTy(PrimTy::Int), Ty::PrimTy(PrimTy::Int)) => {
-                        self.ast_visit_emitter.intern_type(Ty::PrimTy(PrimTy::Bool))
+                    (INT_TY, INT_TY) => { BOOL_TY }
+                    (BOOL_TY, BOOL_TY) => { BOOL_TY }
+                    _ => {
+                        self.ast_visit_emitter.report_error(
+                            Error::new(
+                                ErrorKind::BinaryExprTypeError(binary_expr.op, lhs_type, rhs_type),
+                                Span::dummy()
+                            )
+                        );
+                        Ty::Unkown
                     }
-                    (Ty::PrimTy(PrimTy::Bool), Ty::PrimTy(PrimTy::Bool)) => {
-                        self.ast_visit_emitter.intern_type(Ty::PrimTy(PrimTy::Bool))
-                    }
-                    _ => panic!("Only integers are implemented (eq, ne, ge, gt, le, gt)"),
                 }
             }
         };
-        // let result_type = match (lhs_type, rhs_type) {
-        //     (Ty::PrimTy(PrimTy::Int), Ty::PrimTy(PrimTy::Int)) => { &Ty::PrimTy(PrimTy::Int) }
-        //     _ => {
-        //         println!(
-        //             "Report error in binary expr: {} {} {}",
-        //             lhs_type,
-        //             binary_expr.op,
-        //             rhs_type
-        //         );
-        //         self.ast_visit_emitter.intern_type(Ty::Unkown)
-        //     }
-        // };
 
         self.ast_visit_emitter.set_type_to_node_id(binary_expr.ast_node_id, result_ty);
 

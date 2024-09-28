@@ -12,13 +12,13 @@ use std::fmt::{ Display, Write };
 
 const INDENTATION: usize = 4;
 
-pub struct IcfgPrettifier<'icfg, 'b> {
-    icfg: &'b Icfg<'icfg>,
+pub struct IcfgPrettifier<'b> {
+    icfg: &'b Icfg,
     buffer: String,
 }
 
-impl<'icfg, 'b> IcfgPrettifier<'icfg, 'b> {
-    pub fn new(icfg: &'b Icfg<'icfg>) -> Self {
+impl<'b> IcfgPrettifier<'b> {
+    pub fn new(icfg: &'b Icfg) -> Self {
         Self { icfg, buffer: String::with_capacity(2048) }
     }
 
@@ -31,7 +31,7 @@ impl<'icfg, 'b> IcfgPrettifier<'icfg, 'b> {
         println!("{}", self.buffer)
     }
 
-    fn display_place_kind(place: &PlaceKind, cfg: &Cfg<'icfg>) -> String {
+    fn display_place_kind(place: &PlaceKind, cfg: &Cfg) -> String {
         let mut temp_buffer = String::with_capacity(8);
         (|| -> Result<(), std::fmt::Error> {
             match place {
@@ -47,7 +47,7 @@ impl<'icfg, 'b> IcfgPrettifier<'icfg, 'b> {
         temp_buffer
     }
 
-    fn dislay_operand(operand: &Operand, cfg: &Cfg<'icfg>) -> String {
+    fn dislay_operand(operand: &Operand, cfg: &Cfg) -> String {
         let mut temp_buffer = String::with_capacity(8);
 
         (|| -> Result<(), std::fmt::Error> {
@@ -68,17 +68,17 @@ impl<'icfg, 'b> IcfgPrettifier<'icfg, 'b> {
     }
 }
 
-impl<'icfg, 'b> CfgVisitor<'icfg> for IcfgPrettifier<'icfg, 'b> {
+impl<'b> CfgVisitor for IcfgPrettifier<'b> {
     type Result = Result<(), std::fmt::Error>;
 
     fn default_result() -> Self::Result {
         Ok(())
     }
 
-    fn visit_local_mem(&mut self, local_mem: &crate::LocalMem<'icfg>) -> Self::Result {
+    fn visit_local_mem(&mut self, local_mem: &crate::LocalMem) -> Self::Result {
         writeln!(self.buffer, "{}declare {}: {}", " ".repeat(INDENTATION), local_mem, local_mem.ty)
     }
-    fn visit_result_mem(&mut self, result_mem: &crate::ResultMem<'icfg>) -> Self::Result {
+    fn visit_result_mem(&mut self, result_mem: &crate::ResultMem) -> Self::Result {
         writeln!(
             self.buffer,
             "{}declare {}: {}",
@@ -90,8 +90,8 @@ impl<'icfg, 'b> CfgVisitor<'icfg> for IcfgPrettifier<'icfg, 'b> {
 
     fn visit_basic_block(
         &mut self,
-        basic_block: &crate::BasicBlock<'icfg>,
-        cfg: &crate::Cfg<'icfg>
+        basic_block: &crate::BasicBlock,
+        cfg: &crate::Cfg
     ) -> Self::Result {
         write!(self.buffer, "bb{}: {{\n", basic_block.basic_block_id.0)?;
         walk_basic_block(self, basic_block, cfg)?;
@@ -103,7 +103,7 @@ impl<'icfg, 'b> CfgVisitor<'icfg> for IcfgPrettifier<'icfg, 'b> {
     fn visit_binary_node(
         &mut self,
         binary_node: &crate::BinaryNode,
-        cfg: &crate::Cfg<'icfg>
+        cfg: &crate::Cfg
     ) -> Self::Result {
         writeln!(
             self.buffer,
@@ -117,18 +117,14 @@ impl<'icfg, 'b> CfgVisitor<'icfg> for IcfgPrettifier<'icfg, 'b> {
         )
     }
 
-    fn visit_branch_node(
-        &mut self,
-        branch_node: &crate::BranchNode,
-        _cfg: &Cfg<'icfg>
-    ) -> Self::Result {
+    fn visit_branch_node(&mut self, branch_node: &crate::BranchNode, _cfg: &Cfg) -> Self::Result {
         writeln!(self.buffer, "{}br bb{}", " ".repeat(INDENTATION), branch_node.branch.0)
     }
 
     fn visit_branch_cond_node(
         &mut self,
         branch_cond_node: &crate::BranchCondNode,
-        _cfg: &Cfg<'icfg>
+        _cfg: &Cfg
     ) -> Self::Result {
         writeln!(
             self.buffer,
@@ -140,22 +136,33 @@ impl<'icfg, 'b> CfgVisitor<'icfg> for IcfgPrettifier<'icfg, 'b> {
         )
     }
 
-    fn visit_init_node(
-        &mut self,
-        init_node: &crate::StoreNode,
-        cfg: &crate::Cfg<'icfg>
-    ) -> Self::Result {
+    fn visit_load_node(&mut self, load_node: &crate::LoadNode, cfg: &Cfg) -> Self::Result {
+        let place = &(match load_node.loc_id {
+            Either::Left(local_mem_id) => PlaceKind::LocalMemId(local_mem_id),
+            Either::Right(result_mem_id) => PlaceKind::ResultMemId(result_mem_id),
+        });
+
+        writeln!(
+            self.buffer,
+            "{}{}: {} = load {}",
+            " ".repeat(INDENTATION),
+            load_node.result_place,
+            load_node.ty,
+            Self::display_place_kind(place, cfg)
+        )
+    }
+
+    fn visit_init_node(&mut self, init_node: &crate::StoreNode, cfg: &crate::Cfg) -> Self::Result {
+        let place = &(match init_node.setter {
+            Either::Left(local_mem_id) => PlaceKind::LocalMemId(local_mem_id),
+            Either::Right(result_mem_id) => PlaceKind::ResultMemId(result_mem_id),
+        });
+
         writeln!(
             self.buffer,
             "{}{}: {} = {}",
             " ".repeat(INDENTATION),
-            Self::display_place_kind(
-                &(match init_node.setter {
-                    Either::Left(local_mem_id) => PlaceKind::LocalMemId(local_mem_id),
-                    Either::Right(result_mem_id) => PlaceKind::ResultMemId(result_mem_id),
-                }),
-                cfg
-            ),
+            Self::display_place_kind(place, cfg),
             init_node.result_ty,
             Self::dislay_operand(&init_node.value, cfg)
         )

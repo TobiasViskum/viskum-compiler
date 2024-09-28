@@ -1,25 +1,30 @@
 use std::{ cell::{ LazyCell, RefCell }, fmt::Display, hash::Hash, marker::PhantomData };
 
+use bumpalo::Bump;
 use fxhash::FxHashSet;
 use typed_arena::Arena;
+
+pub const VOID_TY: Ty = Ty::PrimTy(PrimTy::Void);
+pub const INT_TY: Ty = Ty::PrimTy(PrimTy::Int);
+pub const BOOL_TY: Ty = Ty::PrimTy(PrimTy::Bool);
 
 /// We can use a bump arena here, since we don't care if the drop implementations are called
 ///
 /// This is because this object is destroyed once the main thread ends
 struct GlobalSession {
-    type_arena: Arena<Ty>,
+    type_arena: Bump,
     interned_types: RefCell<FxHashSet<&'static Ty>>,
     str_arena: Arena<Box<str>>,
     interned_strings: RefCell<FxHashSet<&'static str>>,
 }
 
 thread_local! {
-    static TYPE_ARENA: LazyCell<Arena<Ty>> = LazyCell::new(|| Arena::new());
+    static TYPE_ARENA: LazyCell<Bump> = LazyCell::new(|| Bump::new());
     static GLOBAL_CTX: LazyCell<GlobalCtx> = LazyCell::new(|| GlobalCtx::default());
 }
 
-fn with_type_arena<T>(f: impl FnOnce(&Arena<Ty>) -> T) -> T {
-    TYPE_ARENA.with(|type_arena: &LazyCell<Arena<Ty>>| f(type_arena))
+fn with_type_arena<T>(f: impl FnOnce(&Bump) -> T) -> T {
+    TYPE_ARENA.with(|type_arena: &LazyCell<Bump>| f(type_arena))
 }
 
 fn with_global_ctx<T>(f: impl FnOnce(&GlobalCtx) -> T) -> T {
@@ -43,9 +48,17 @@ impl GlobalCtx {
         }
     }
 
+    pub fn intern_vec_of_types(&self, types: Vec<Ty>) -> &'static [Ty] {
+        let interned_ty = with_type_arena(|type_arena| unsafe {
+            &*(type_arena.alloc_slice_fill_iter(types.into_iter()) as *mut [Ty])
+        });
+
+        interned_ty
+    }
+
     pub fn intern_type(&self, ty: Ty) -> &'static Ty {
         if let Some(found_type) = self.interned_types.borrow().get(&ty) {
-            return *found_type;
+            return found_type;
         }
 
         // This is safe, because the arena lives as long as the program
@@ -60,7 +73,6 @@ impl GlobalCtx {
 
 /// For now, this is just used as a way to intern types
 pub struct TyCtx;
-
 impl Default for TyCtx {
     fn default() -> Self {
         Self
@@ -70,6 +82,12 @@ impl Default for TyCtx {
 impl TyCtx {
     pub fn intern_type(&mut self, ty: Ty) -> &'static Ty {
         with_global_ctx(|global| global.intern_type(ty))
+    }
+
+    pub fn tuple_type(fields: Vec<Ty>) -> Ty {
+        let fields = with_global_ctx(|global| global.intern_vec_of_types(fields));
+
+        Ty::Tuple(fields)
     }
 
     // fn _intern_type(&mut self, ty: Ty) -> &'ctx Ty {
@@ -87,10 +105,17 @@ impl TyCtx {
     // }
 }
 
-#[derive(Debug, Hash, Eq, PartialEq)]
+#[derive(Debug, Hash, Eq, PartialEq, Clone, Copy)]
 pub enum Ty {
+    Tuple(&'static [Ty]),
     PrimTy(PrimTy),
     Unkown,
+}
+
+impl Ty {
+    pub fn is_void(&self) -> bool {
+        *self == Ty::PrimTy(PrimTy::Void)
+    }
 }
 
 impl Display for Ty {
@@ -98,11 +123,23 @@ impl Display for Ty {
         match self {
             Self::Unkown => write!(f, "{{unkown}}"),
             Self::PrimTy(prim_ty) => prim_ty.fmt(f),
+            Self::Tuple(types) => {
+                write!(f, "(")?;
+                for (i, ty) in types.iter().enumerate() {
+                    let len = types.len();
+                    write!(f, "{}", ty)?;
+                    if i != len - 1 {
+                        write!(f, ", ")?;
+                    }
+                }
+
+                write!(f, ")")
+            }
         }
     }
 }
 
-#[derive(Debug, Hash, Eq, PartialEq)]
+#[derive(Debug, Hash, Eq, PartialEq, Clone, Copy)]
 pub enum PrimTy {
     Int,
     Bool,

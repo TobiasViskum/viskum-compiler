@@ -11,7 +11,9 @@ use crate::{
     BinaryExpr,
     BlockExpr,
     BoolExpr,
+    BreakExpr,
     ConstExpr,
+    ContinueExpr,
     DefineStmt,
     Expr,
     ExprKind,
@@ -24,11 +26,13 @@ use crate::{
     IfFalseBranchExpr,
     IntegerExpr,
     ItemStmt,
+    LoopExpr,
     Pat,
     PatKind,
     PlaceExpr,
     PlaceKind,
     Stmt,
+    TupleExpr,
     ValueExpr,
 };
 
@@ -57,6 +61,11 @@ pub trait Visitor<'ast>: Sized {
     }
     #[allow(unused_variables)]
     fn visit_ident_expr(&mut self, ident_expr: &'ast IdentExpr) -> Self::Result {
+        Self::default_result()
+    }
+
+    #[allow(unused_variables)]
+    fn visit_continue_expr(&mut self, continue_expr: &'ast ContinueExpr) -> Self::Result {
         Self::default_result()
     }
 
@@ -89,6 +98,14 @@ pub trait Visitor<'ast>: Sized {
         self.visit_stmts(expr.stmts)
     }
 
+    fn visit_loop_expr(&mut self, loop_expr: &'ast LoopExpr<'ast>) -> Self::Result {
+        walk_loop_expr(self, loop_expr)
+    }
+
+    fn visit_break_expr(&mut self, break_expr: &'ast BreakExpr<'ast>) -> Self::Result {
+        walk_break_expr(self, break_expr)
+    }
+
     fn visit_if_expr(&mut self, expr: &'ast IfExpr<'ast>) -> Self::Result {
         walk_if_expr(self, expr)
     }
@@ -109,8 +126,12 @@ pub trait Visitor<'ast>: Sized {
         walk_place_expr(self, place_expr)
     }
 
-    fn visit_value_expr(&mut self, value_expr: &'ast ValueExpr) -> Self::Result {
+    fn visit_value_expr(&mut self, value_expr: &'ast ValueExpr<'ast>) -> Self::Result {
         walk_value_expr(self, value_expr)
+    }
+
+    fn visit_tuple_expr(&mut self, tuple_expr: &'ast TupleExpr<'ast>) -> Self::Result {
+        walk_tuple_expr(self, tuple_expr)
     }
 
     fn visit_binary_expr(&mut self, binary_expr: &'ast BinaryExpr<'ast>) -> Self::Result {
@@ -169,6 +190,7 @@ pub fn walk_expr_with_block<'a, V>(
     match expr_with_block {
         ExprWithBlock::BlockExpr(expr) => visitor.visit_block_expr(expr),
         ExprWithBlock::IfExpr(expr) => visitor.visit_if_expr(expr),
+        ExprWithBlock::LoopExpr(loop_expr) => visitor.visit_loop_expr(loop_expr),
     }
 }
 
@@ -181,7 +203,21 @@ pub fn walk_expr_without_block<'a, V>(
     match expr_without_block {
         ExprWithoutBlock::PlaceExpr(expr) => visitor.visit_place_expr(expr),
         ExprWithoutBlock::ValueExpr(expr) => visitor.visit_value_expr(expr),
+        ExprWithoutBlock::BreakExpr(break_expr) => visitor.visit_break_expr(break_expr),
+        ExprWithoutBlock::ContinueExpr(continue_expr) => visitor.visit_continue_expr(continue_expr),
     }
+}
+
+pub fn walk_loop_expr<'a, V>(visitor: &mut V, loop_expr: &'a LoopExpr<'a>) -> V::Result
+    where V: Visitor<'a>
+{
+    visitor.visit_block_expr(loop_expr.body)
+}
+
+pub fn walk_break_expr<'a, V>(visitor: &mut V, break_expr: &'a BreakExpr<'a>) -> V::Result
+    where V: Visitor<'a>
+{
+    break_expr.value.map(|expr| visitor.visit_expr(expr)).unwrap_or(V::default_result())
 }
 
 pub fn walk_if_expr<'a, V>(visitor: &mut V, if_expr: &'a IfExpr<'a>) -> V::Result
@@ -196,7 +232,7 @@ pub fn walk_if_expr<'a, V>(visitor: &mut V, if_expr: &'a IfExpr<'a>) -> V::Resul
     }
 }
 
-pub fn walk_place_expr<'a, V>(visitor: &mut V, place_expr: &'a PlaceExpr) -> V::Result
+pub fn walk_place_expr<'a, V>(visitor: &mut V, place_expr: &'a PlaceExpr<'a>) -> V::Result
     where V: Visitor<'a>
 {
     match &place_expr.kind {
@@ -204,14 +240,25 @@ pub fn walk_place_expr<'a, V>(visitor: &mut V, place_expr: &'a PlaceExpr) -> V::
     }
 }
 
-pub fn walk_value_expr<'a, V>(visitor: &mut V, value_expr: &'a ValueExpr) -> V::Result
+pub fn walk_value_expr<'a, V>(visitor: &mut V, value_expr: &'a ValueExpr<'a>) -> V::Result
     where V: Visitor<'a>
 {
     match value_expr {
+        ValueExpr::TupleExpr(tuple_expr) => visitor.visit_tuple_expr(tuple_expr),
         ValueExpr::BinaryExpr(binary_expr) => visitor.visit_binary_expr(binary_expr),
         ValueExpr::GroupExpr(group_expr) => visitor.visit_group_expr(group_expr),
         ValueExpr::ConstExpr(const_expr) => visitor.visit_const_expr(const_expr),
     }
+}
+
+pub fn walk_tuple_expr<'a, V>(visitor: &mut V, tuple_expr: &'a TupleExpr<'a>) -> V::Result
+    where V: Visitor<'a>
+{
+    tuple_expr.fields.iter().for_each(|expr| {
+        visitor.visit_expr(expr);
+    });
+
+    V::default_result()
 }
 
 pub fn walk_binary_expr<'a, V>(visitor: &mut V, binary_expr: &'a BinaryExpr<'a>) -> V::Result

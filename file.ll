@@ -3,7 +3,7 @@ define i32 @main() {
     %2 = alloca i32, align 4
     %3 = alloca i32, align 4
     %4 = alloca i32, align 4
-    %5 = alloca i32, align 4
+    %5 = alloca i1, align 4
     %6 = alloca i32, align 4
     %7 = alloca i32, align 4
     %8 = alloca i32, align 4
@@ -13,67 +13,80 @@ define i32 @main() {
     %12 = alloca i32, align 4
     %13 = alloca i32, align 4
     %14 = alloca i32, align 4
-    br label %15
-15:
+    %15 = alloca i32, align 4
+    %16 = alloca i32, align 4
+    br label %17
+17:
     store i32 0, ptr %2
     store i32 2, ptr %3
     store i32 2, ptr %4
-    %16 = load i32, ptr %3
-    %17 = load i32, ptr %2
-    %18 = add nsw i32 %16, %17
-    store i32 %18, ptr %1
-    %19 = add nsw i32 2, 3
-    %20 = mul nsw i32 %19, 9
-    store i32 %20, ptr %5
-    %21 = load i32, ptr %5
-    %22 = add nsw i32 1, %21
-    %23 = sub nsw i32 6, %22
-    store i32 %23, ptr %6
-    %24 = load i32, ptr %5
-    %25 = icmp eq i32 %24, 2
-    br i1 %25, label %26, label %27
-26:
-    store i32 2, ptr %8
-    store i32 2, ptr %13
-    br label %30
-27:
-    %28 = load i32, ptr %5
-    %29 = icmp eq i32 %28, 9
-    br i1 %29, label %30, label %31
-30:
-    store i32 3, ptr %9
-    store i32 99, ptr %13
+    %18 = load i32, ptr %3
+    %19 = load i32, ptr %2
+    %20 = add nsw i32 %18, %19
+    store i32 %20, ptr %1
+    store i1 1, ptr %5
+    %21 = add nsw i32 2, 3
+    %22 = mul nsw i32 %21, 9
+    store i32 %22, ptr %6
+    %23 = load i32, ptr %6
+    %24 = add nsw i32 1, %23
+    %25 = sub nsw i32 6, %24
+    store i32 %25, ptr %7
+    %26 = load i32, ptr %6
+    %27 = icmp eq i32 %26, 2
+    br i1 %27, label %28, label %29
+28:
+    store i32 2, ptr %9
+    store i32 2, ptr %15
     br label %32
-31:
-    store i32 4, ptr %10
-    store i32 7, ptr %13
-    br label %32
+29:
+    %30 = load i32, ptr %6
+    %31 = icmp eq i32 %30, 9
+    br i1 %31, label %32, label %33
 32:
-    %33 = load i32, ptr %13
-    %34 = load i32, ptr %13
-    store i32 %34, ptr %7
-    %35 = load i32, ptr %5
-    %36 = load i32, ptr %7
-    %37 = add nsw i32 %35, %36
-    %38 = load i32, ptr %6
+    store i32 3, ptr %10
+    store i32 99, ptr %15
+    br label %34
+33:
+    store i32 4, ptr %11
+    store i32 7, ptr %15
+    br label %34
+34:
+    %35 = load i32, ptr %15
+    %36 = load i32, ptr %15
+    store i32 %36, ptr %8
+    %37 = load i32, ptr %6
+    %38 = load i32, ptr %7
     %39 = add nsw i32 %37, %38
-    store i32 %39, ptr %11
-    store i32 2, ptr %11
-    %40 = icmp eq i1 1, 1
-    br i1 %40, label %41, label %42
-41:
-    store i32 1, ptr %14
-    br label %44
-42:
-    %43 = load i32, ptr %11
-    store i32 %43, ptr %14
-    br label %44
+    %40 = load i32, ptr %8
+    %41 = add nsw i32 %39, %40
+    store i32 %41, ptr %12
+    store i32 2, ptr %12
+    %42 = icmp eq i1 1, 1
+    br i1 %42, label %43, label %44
+43:
+    store i32 1, ptr %16
+    br label %46
 44:
-    %45 = load i32, ptr %14
-    store i32 %45, ptr %12
-    %46 = load i32, ptr %11
-    %47 = add nsw i32 928, %46
-    store i32 %47, ptr %11
+    %45 = load i32, ptr %12
+    store i32 %45, ptr %16
+    br label %46
+46:
+    %47 = load i32, ptr %16
+    store i32 %47, ptr %13
+    %48 = load i32, ptr %12
+    %49 = add nsw i32 928, %48
+    store i32 %49, ptr %12
+    store i32 0, ptr %14
+    %50 = load i32, ptr %14
+    %51 = icmp eq i32 %50, 10
+    br i1 %51, label %52, label %55
+52:
+    %53 = load i32, ptr %14
+    %54 = add nsw i32 %53, 1
+    store i32 %54, ptr %14
+    br label %55
+55:
     ret i32 0
 }
 

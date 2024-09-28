@@ -17,13 +17,13 @@ use ir_defs::{ DefId, NameBinding, NodeId, ScopeId };
 use symbol::Symbol;
 use ty::{ Ty, TyCtx };
 
-pub struct ResolvedInformation<'ctx> {
-    pub node_id_to_ty: FxHashMap<NodeId, &'ctx Ty>,
+pub struct ResolvedInformation {
+    pub node_id_to_ty: FxHashMap<NodeId, Ty>,
     pub node_id_to_def_id: FxHashMap<NodeId, DefId>,
 }
 
 /// Main resolver struct. This is responsible for validating the Ast and creating the Cfg from it
-pub struct Resolver<'ctx, 'ast> where 'ctx: 'ast {
+pub struct Resolver<'a> {
     ty_ctx: TyCtx,
 
     /// Only used during the first pass (name resolution)
@@ -36,16 +36,16 @@ pub struct Resolver<'ctx, 'ast> where 'ctx: 'ast {
     /// Built during the first pass (name resolution) and then used in the rest of the passes
     node_id_to_def_id: FxHashMap<NodeId, DefId>,
 
-    def_id_to_name_binding: FxHashMap<DefId, (NameBinding, &'ctx Ty)>,
-    node_id_to_ty: FxHashMap<NodeId, &'ctx Ty>,
+    def_id_to_name_binding: FxHashMap<DefId, (NameBinding, Ty)>,
+    node_id_to_ty: FxHashMap<NodeId, Ty>,
 
     /* Used for error reporting */
-    src: &'ast str,
-    errors: Vec<Error<'ctx>>,
+    src: &'a str,
+    errors: Vec<Error>,
 }
 
-impl<'ctx, 'ast> Resolver<'ctx, 'ast> {
-    pub fn take_resolved_information(self) -> ResolvedInformation<'ctx> {
+impl<'a> Resolver<'a> {
+    pub fn take_resolved_information(self) -> ResolvedInformation {
         if self.has_errors() {
             self.print_errors();
             self.exit_if_has(Severity::NoImpact);
@@ -58,12 +58,12 @@ impl<'ctx, 'ast> Resolver<'ctx, 'ast> {
     }
 
     /// Makes a Resolver and builds the query system in the Ast
-    pub fn from_ast(src: &'ast str, ast: Ast<'ast, AstState0>) -> (Self, Ast<'ast, AstState1>) {
+    pub fn from_ast(src: &'a str, ast: Ast<'a, AstState0>) -> (Self, Ast<'a, AstState1>) {
         /// Sets up query system
-        fn build_ast_query_system<'ctx, 'ast>(
-            resolver: &mut Resolver<'ctx, 'ast>,
-            ast: Ast<'ast, AstState0>
-        ) -> Ast<'ast, AstState1> {
+        fn build_ast_query_system<'a>(
+            resolver: &mut Resolver<'a>,
+            ast: Ast<'a, AstState0>
+        ) -> Ast<'a, AstState1> {
             let ast_visitor = ast.get_visitor(resolver.src, resolver);
 
             let unvalidated_ast = ast_visitor.visit();
@@ -92,8 +92,8 @@ impl<'ctx, 'ast> Resolver<'ctx, 'ast> {
     }
 
     /// Performs name resolution
-    pub fn resolve_ast(&mut self, ast: Ast<'ast, AstState1>) -> Ast<'ast, AstState2> {
-        fn remove_temp_storage<'ctx, 'ast>(resolver: &mut Resolver<'ctx, 'ast>) {
+    pub fn resolve_ast(&mut self, ast: Ast<'a, AstState1>) -> Ast<'a, AstState2> {
+        fn remove_temp_storage<'a>(resolver: &mut Resolver<'a>) {
             resolver.symbol_and_scope_to_def_id = Default::default();
             resolver.scope_stack = vec![];
             resolver.next_scope_id = ScopeId(0);
@@ -113,7 +113,7 @@ impl<'ctx, 'ast> Resolver<'ctx, 'ast> {
     }
 
     /// Performs type checking
-    pub fn type_check_ast(&mut self, ast: Ast<'ast, AstState2>) -> Ast<'ast, AstState3> {
+    pub fn type_check_ast(&mut self, ast: Ast<'a, AstState2>) -> Ast<'a, AstState3> {
         let ast_visitor = ast.get_visitor(self.src, self);
 
         let type_checked_ast = ast_visitor.visit();
@@ -129,7 +129,7 @@ impl<'ctx, 'ast> Resolver<'ctx, 'ast> {
         type_checked_ast
     }
 
-    fn assert_type_to_all_nodes(&self, type_checked_ast: &Ast<'ast, AstTypeChecked>) {
+    fn assert_type_to_all_nodes(&self, type_checked_ast: &Ast<'a, AstTypeChecked>) {
         // It has previously been asserted, that all nodes is inserted into the query system
         // So therefore this is also going to assert the condition for every node
         type_checked_ast.query_all(|node_id, query_entry| {
@@ -158,6 +158,7 @@ impl<'ctx, 'ast> Resolver<'ctx, 'ast> {
     }
 
     fn exit_if_has(&self, severity: Severity) {
+        self.print_errors();
         if self.has_error_severity(severity) {
             std::process::exit(1)
         }
@@ -175,9 +176,9 @@ impl<'ctx, 'ast> Resolver<'ctx, 'ast> {
     }
 }
 
-impl<'ctx, 'ast, T> AstVisitEmitter<'ctx, 'ast, T> for Resolver<'ctx, 'ast> where T: AstState {
+impl<'ctx, 'a, T> AstVisitEmitter<'ctx, 'a, T> for Resolver<'a> where T: AstState {
     /* Methods used during all passes */
-    fn report_error(&mut self, error: Error<'ctx>) {
+    fn report_error(&mut self, error: Error) {
         self.errors.push(error);
     }
 
@@ -189,13 +190,13 @@ impl<'ctx, 'ast, T> AstVisitEmitter<'ctx, 'ast, T> for Resolver<'ctx, 'ast> wher
     fn end_scope(&mut self) {
         self.scope_stack.pop();
     }
-    fn define_var(&mut self, ident_pat: &'ast IdentPat) {
+    fn define_var(&mut self, ident_pat: &'a IdentPat) {
         let symbol = Symbol::new(&self.src[ident_pat.span.get_byte_range()]);
         let def_id = DefId::new(symbol, ident_pat.ast_node_id);
         self.symbol_and_scope_to_def_id.insert((symbol, self.get_current_scope_id()), def_id);
         self.node_id_to_def_id.insert(ident_pat.ast_node_id, def_id);
     }
-    fn lookup_var(&mut self, ident_expr: &'ast IdentExpr) {
+    fn lookup_var(&mut self, ident_expr: &'a IdentExpr) {
         let symbol = Symbol::new(&self.src[ident_expr.span.get_byte_range()]);
 
         for scope_id in self.scope_stack.iter().rev() {
@@ -209,7 +210,7 @@ impl<'ctx, 'ast, T> AstVisitEmitter<'ctx, 'ast, T> for Resolver<'ctx, 'ast> wher
     }
 
     /* Used during the second pass (type checking) */
-    fn set_type_to_node_id(&mut self, node_id: NodeId, ty: &'ctx Ty) {
+    fn set_type_to_node_id(&mut self, node_id: NodeId, ty: Ty) {
         self.node_id_to_ty.insert(node_id, ty);
     }
     fn intern_type(&mut self, ty: Ty) -> &'ctx Ty {
@@ -218,14 +219,14 @@ impl<'ctx, 'ast, T> AstVisitEmitter<'ctx, 'ast, T> for Resolver<'ctx, 'ast> wher
     fn get_def_id_from_node_id(&self, node_id: NodeId) -> DefId {
         *self.node_id_to_def_id.get(&node_id).expect("Expected DefId")
     }
-    fn get_namebinding_and_ty_from_def_id(&self, def_id: DefId) -> (NameBinding, &'ctx Ty) {
+    fn get_namebinding_and_ty_from_def_id(&self, def_id: DefId) -> (NameBinding, Ty) {
         self.def_id_to_name_binding.get(&def_id).copied().expect("Expected name to be binded")
     }
     fn set_namebinding_and_ty_to_def_id(
         &mut self,
         def_id: DefId,
         name_binding: NameBinding,
-        ty: &'ctx Ty
+        ty: Ty
     ) {
         self.def_id_to_name_binding.insert(def_id, (name_binding, ty));
     }

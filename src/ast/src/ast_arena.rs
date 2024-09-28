@@ -2,7 +2,7 @@ use std::{ fmt::Debug, u16 };
 use bumpalo::Bump;
 use typed_arena::Arena;
 
-use crate::Stmt;
+use crate::{ Expr, Stmt };
 
 pub struct AstArena {
     ast_arena: Bump,
@@ -23,6 +23,10 @@ impl AstArena {
     /// In the future the
     pub fn alloc_vec_stmts<'ast>(&self, vec: Vec<&'ast Stmt<'ast>>) -> &[&'ast Stmt<'ast>] {
         self.ast_arena.alloc_slice_fill_iter(vec.into_iter().map(|stmt| stmt))
+    }
+
+    pub fn alloc_vec_exprs<'ast>(&self, vec: Vec<&'ast Expr<'ast>>) -> &[&'ast Expr<'ast>] {
+        self.ast_arena.alloc_slice_fill_iter(vec.into_iter().map(|expr| expr))
     }
 }
 

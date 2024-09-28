@@ -2,7 +2,7 @@
 
 IMPLEMENTATION DETAILS:
 
-Each node in the Ast doesn't have ANY functionality at all,
+Each node in the Ast doesn't have ANY methods at all (except for `new` method),
 since the nodes are just for holding relavant data.
 Therefore all fields on each node is also public.
 
@@ -46,6 +46,7 @@ Stmt(
 
 */
 
+mod passes;
 mod visitor;
 mod ast_arena;
 mod ast_prettifier;
@@ -203,6 +204,14 @@ pub enum ExprKind<'ast> {
 pub enum ExprWithBlock<'ast> {
     BlockExpr(&'ast BlockExpr<'ast>),
     IfExpr(&'ast IfExpr<'ast>),
+    LoopExpr(&'ast LoopExpr<'ast>),
+}
+
+#[derive(Debug, new)]
+pub struct LoopExpr<'ast> {
+    pub body: &'ast BlockExpr<'ast>,
+    pub ast_node_id: NodeId,
+    pub result_loc: ResultLoc,
 }
 
 #[derive(Debug, new)]
@@ -232,6 +241,19 @@ pub enum IfFalseBranchExpr<'ast> {
 pub enum ExprWithoutBlock<'ast> {
     PlaceExpr(&'ast PlaceExpr<'ast>),
     ValueExpr(ValueExpr<'ast>),
+    BreakExpr(&'ast BreakExpr<'ast>),
+    ContinueExpr(&'ast ContinueExpr),
+}
+
+#[derive(Debug, new)]
+pub struct BreakExpr<'ast> {
+    pub value: Option<&'ast Expr<'ast>>,
+    pub ast_node_id: NodeId,
+}
+
+#[derive(Debug, new)]
+pub struct ContinueExpr {
+    pub ast_node_id: NodeId,
 }
 
 #[derive(Debug, new)]
@@ -267,7 +289,14 @@ impl IdentExpr {
 pub enum ValueExpr<'ast> {
     BinaryExpr(&'ast BinaryExpr<'ast>),
     GroupExpr(&'ast GroupExpr<'ast>),
+    TupleExpr(&'ast TupleExpr<'ast>),
     ConstExpr(ConstExpr<'ast>),
+}
+
+#[derive(Debug, new)]
+pub struct TupleExpr<'ast> {
+    pub fields: &'ast [&'ast Expr<'ast>],
+    pub ast_node_id: NodeId,
 }
 
 #[derive(Debug, new)]

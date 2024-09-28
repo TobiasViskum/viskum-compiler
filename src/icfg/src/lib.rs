@@ -26,30 +26,30 @@ enum Liveness {
     Dead,
 }
 
-pub struct Icfg<'ctx> {
-    pub cfgs: Vec<Cfg<'ctx>>,
+pub struct Icfg {
+    pub cfgs: Vec<Cfg>,
 }
-impl<'ctx> Icfg<'ctx> {
-    pub fn new(cfgs: Vec<Cfg<'ctx>>) -> Self {
+impl Icfg {
+    pub fn new(cfgs: Vec<Cfg>) -> Self {
         Self { cfgs }
     }
 }
 
 /// One Cfg is constructed for each function
-pub struct Cfg<'ctx> {
+pub struct Cfg {
     /// All variables used in the function
-    local_mems: Vec<LocalMem<'ctx>>,
-    result_mems: Vec<ResultMem<'ctx>>,
-    basic_blocks: Vec<BasicBlock<'ctx>>,
+    local_mems: Vec<LocalMem>,
+    result_mems: Vec<ResultMem>,
+    basic_blocks: Vec<BasicBlock>,
     /// Based on if the function is called or not
     liveness: Liveness,
 }
 
-impl<'ctx> Cfg<'ctx> {
+impl Cfg {
     pub fn new(
-        local_mems: Vec<LocalMem<'ctx>>,
-        result_mems: Vec<ResultMem<'ctx>>,
-        basic_blocks: Vec<BasicBlock<'ctx>>
+        local_mems: Vec<LocalMem>,
+        result_mems: Vec<ResultMem>,
+        basic_blocks: Vec<BasicBlock>
     ) -> Self {
         Self { local_mems, result_mems, basic_blocks, liveness: Liveness::Dead }
     }
@@ -65,29 +65,29 @@ impl<'ctx> Cfg<'ctx> {
 
 /// Implement `requires_drop` for when heap objects is implemented
 #[derive(Debug, Clone, Copy, new)]
-pub struct LocalMem<'ctx> {
+pub struct LocalMem {
     pub local_mem_id: LocalMemId,
     pub symbol: Symbol,
     pub span: Span,
-    pub ty: &'ctx Ty,
+    pub ty: Ty,
     pub mutability: Mutability,
 }
 
-impl<'ctx> Display for LocalMem<'ctx> {
+impl Display for LocalMem {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}{}", self.symbol.get(), get_subscript(self.local_mem_id.0))
     }
 }
 
 #[derive(Debug, Clone, Copy, new)]
-pub struct ResultMem<'ctx> {
+pub struct ResultMem {
     pub result_mem_id: ResultMemId,
-    pub ty: &'ctx Ty,
+    pub ty: Ty,
 }
 
-impl<'ctx> Display for ResultMem<'ctx> {
+impl Display for ResultMem {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.result_mem_id.0)
+        write!(f, "{}", self.result_mem_id)
     }
 }
 fn get_subscript(mem: u32) -> String {
@@ -125,7 +125,7 @@ pub struct ResultMemId(pub u32);
 
 impl Display for ResultMemId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "_{}", self.0)
+        write!(f, "r{}", self.0)
     }
 }
 
@@ -139,12 +139,12 @@ impl Display for TempId {
 }
 
 #[derive(Debug)]
-pub struct BasicBlock<'ctx> {
+pub struct BasicBlock {
     pub basic_block_id: BasicBlockId,
-    pub nodes: Vec<Node<'ctx>>,
+    pub nodes: Vec<Node>,
 }
 
-impl<'ctx> BasicBlock<'ctx> {
+impl BasicBlock {
     pub fn new(basic_block_id: BasicBlockId) -> Self {
         Self {
             basic_block_id,
@@ -152,7 +152,7 @@ impl<'ctx> BasicBlock<'ctx> {
         }
     }
 
-    pub fn push_node(&mut self, node: Node<'ctx>) {
+    pub fn push_node(&mut self, node: Node) {
         self.nodes.push(node);
     }
 }
@@ -170,31 +170,31 @@ pub enum AccessKind {
 }
 
 #[derive(Debug, new, Clone, Copy)]
-pub struct Node<'ctx> {
-    pub kind: NodeKind<'ctx>,
+pub struct Node {
+    pub kind: NodeKind,
 }
 
 #[derive(Debug, Clone, Copy)]
-pub enum NodeKind<'ctx> {
+pub enum NodeKind {
     BranchNode(BranchNode),
-    BranchCondNode(BranchCondNode<'ctx>),
-    BinaryNode(BinaryNode<'ctx>),
-    StoreNode(StoreNode<'ctx>),
-    LoadNode(LoadNode<'ctx>),
+    BranchCondNode(BranchCondNode),
+    BinaryNode(BinaryNode),
+    StoreNode(StoreNode),
+    LoadNode(LoadNode),
 }
 
 #[derive(Debug, new, Clone, Copy)]
-pub struct LoadNode<'ctx> {
+pub struct LoadNode {
     pub result_place: TempId,
     pub loc_id: Either<LocalMemId, ResultMemId>,
-    pub ty: &'ctx Ty,
+    pub ty: Ty,
 }
 
 #[derive(Debug, new, Clone, Copy)]
-pub struct BranchCondNode<'ctx> {
-    pub condition: Operand<'ctx>,
+pub struct BranchCondNode {
+    pub condition: Operand,
     /// Right now only Bool
-    pub ty: &'ctx Ty,
+    pub ty: Ty,
     pub true_branch: BasicBlockId,
     pub false_branch: BasicBlockId,
 }
@@ -205,30 +205,30 @@ pub struct BranchNode {
 }
 
 #[derive(Debug, new, Clone, Copy)]
-pub struct StoreNode<'ctx> {
+pub struct StoreNode {
     pub setter: Either<LocalMemId, ResultMemId>,
-    pub result_ty: &'ctx Ty,
-    pub value: Operand<'ctx>,
+    pub result_ty: Ty,
+    pub value: Operand,
 }
 
 #[derive(Debug, new, Clone, Copy)]
-pub struct BinaryNode<'ctx> {
+pub struct BinaryNode {
     pub result_place: TempId,
     /// This should be removed in the future
-    pub result_ty: &'ctx Ty,
-    pub op_ty: &'ctx Ty,
+    pub result_ty: Ty,
+    pub op_ty: Ty,
     pub op: BinaryOp,
-    pub lhs: Operand<'ctx>,
-    pub rhs: Operand<'ctx>,
+    pub lhs: Operand,
+    pub rhs: Operand,
 }
 
 #[derive(Debug, Clone, Copy, new)]
-pub struct Operand<'ctx> {
+pub struct Operand {
     pub kind: OperandKind,
-    pub ty: &'ctx Ty,
+    pub ty: Ty,
 }
 
-impl<'ctx> Display for Operand<'ctx> {
+impl Display for Operand {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "({} as {})", self.kind, self.ty)
     }
