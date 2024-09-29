@@ -1,20 +1,20 @@
 define i32 @main() {
-    %1 = alloca i32, align 4
-    %2 = alloca i32, align 4
-    %3 = alloca i32, align 4
-    %4 = alloca i32, align 4
-    %5 = alloca i1, align 4
-    %6 = alloca i32, align 4
-    %7 = alloca i32, align 4
-    %8 = alloca i32, align 4
-    %9 = alloca i32, align 4
-    %10 = alloca i32, align 4
-    %11 = alloca i32, align 4
-    %12 = alloca i32, align 4
-    %13 = alloca i32, align 4
-    %14 = alloca i32, align 4
-    %15 = alloca i32, align 4
-    %16 = alloca i32, align 4
+    %1 = alloca [4 x i8], align 4
+    %2 = alloca [4 x i8], align 4
+    %3 = alloca [4 x i8], align 4
+    %4 = alloca [4 x i8], align 4
+    %5 = alloca [1 x i8], align 1
+    %6 = alloca [4 x i8], align 4
+    %7 = alloca [4 x i8], align 4
+    %8 = alloca [4 x i8], align 4
+    %9 = alloca [4 x i8], align 4
+    %10 = alloca [4 x i8], align 4
+    %11 = alloca [4 x i8], align 4
+    %12 = alloca [4 x i8], align 4
+    %13 = alloca [4 x i8], align 4
+    %14 = alloca [4 x i8], align 4
+    %15 = alloca [4 x i8], align 4
+    %16 = alloca [4 x i8], align 4
     br label %17
 17:
     store i32 0, ptr %2

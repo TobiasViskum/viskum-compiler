@@ -3,23 +3,20 @@ use fxhash::FxHashMap;
 use icfg::{
     walk_basic_block,
     walk_basic_blocks,
-    walk_cfg,
     walk_local_mems,
+    walk_node,
     walk_result_mems,
     BasicBlockId,
     Cfg,
     CfgVisitor,
     Const,
     Icfg,
-    LocalMemId,
     Operand,
     OperandKind,
     PlaceKind,
-    ResultMemId,
-    TempId,
 };
 use op::{ ArithmeticOp, BinaryOp, ComparisonOp };
-use ty::{ PrimTy, Ty };
+use ty::{ GetTyAttr, PrimTy, Ty };
 use std::{ fmt::Write, fs::File, process::Command };
 
 const INDENTATION: usize = 4;
@@ -78,18 +75,28 @@ impl<'a> CfgVisitor for CodeGenUnitHelper<'a> {
         self.place_to_ssa_id.insert(PlaceKind::ResultMemId(result_mem.result_mem_id), next_ssa_id);
     }
 
-    fn visit_binary_node(&mut self, binary_node: &icfg::BinaryNode, cfg: &Cfg) -> Self::Result {
+    fn visit_binary_node(&mut self, binary_node: &icfg::BinaryNode, _cfg: &Cfg) -> Self::Result {
         let next_ssa_id = self.get_next_ssa_id();
         self.place_to_ssa_id.insert(PlaceKind::TempId(binary_node.result_place), next_ssa_id);
     }
 
-    fn visit_load_node(&mut self, load_node: &icfg::LoadNode, cfg: &Cfg) -> Self::Result {
+    fn visit_load_node(&mut self, load_node: &icfg::LoadNode, _cfg: &Cfg) -> Self::Result {
         let next_ssa_id = self.get_next_ssa_id();
         self.place_to_ssa_id.insert(PlaceKind::TempId(load_node.result_place), next_ssa_id);
     }
 
-    fn visit_init_node(&mut self, _init_node: &icfg::StoreNode, _cfg: &Cfg) -> Self::Result {
-        // Should do nothing
+    fn visit_index_node(&mut self, index_node: &icfg::IndexNode, _cfg: &Cfg) -> Self::Result {
+        let next_ssa_id = self.get_next_ssa_id();
+        self.place_to_ssa_id.insert(PlaceKind::TempId(index_node.result_place), next_ssa_id);
+    }
+
+    fn visit_byte_access_node(
+        &mut self,
+        byte_access_node: &icfg::ByteAccessNode,
+        _cfg: &Cfg
+    ) -> Self::Result {
+        let next_ssa_id = self.get_next_ssa_id();
+        self.place_to_ssa_id.insert(PlaceKind::TempId(byte_access_node.result_place), next_ssa_id);
     }
 }
 
@@ -129,17 +136,19 @@ impl<'a> CodeGenUnit<'a> {
     }
 
     pub(crate) fn get_llvm_ty(&self, ty: Ty) -> String {
-        let str = match ty {
+        match ty {
             Ty::PrimTy(prim_ty) =>
                 match prim_ty {
-                    PrimTy::Bool => "i1",
-                    PrimTy::Int => "i32",
-                    PrimTy::Void => "void",
+                    PrimTy::Bool => "i1".to_string(),
+                    PrimTy::Int => "i32".to_string(),
+                    PrimTy::Void => "void".to_string(),
                 }
-            Ty::Tuple(tuple_ty) => panic!("Tuples not implemented yet"),
+            Ty::Tuple(_) => {
+                let ty_attr = ty.get_size_and_alignment();
+                format!("[{} x i8]", ty_attr.size_bytes)
+            }
             Ty::Unkown => panic!("Unkown type (should not be this far in compilation)"),
-        };
-        str.to_string()
+        }
     }
 
     // pub(crate) fn get_declaration_llvm_ty(&self, ty: Ty) -> String {
@@ -199,24 +208,31 @@ impl<'a> CfgVisitor for CodeGenUnit<'a> {
 
     fn visit_local_mem(&mut self, local_mem: &icfg::LocalMem) -> Self::Result {
         let ssa_id = self.get_ssa_id_from_place(&PlaceKind::LocalMemId(local_mem.local_mem_id));
+
+        let ty_attr = local_mem.ty.get_size_and_alignment();
+
         writeln!(
             self.buffer,
-            "{}%{} = alloca {}, align 4",
+            "{}%{} = alloca [{} x i8], align {}",
             " ".repeat(INDENTATION),
             ssa_id,
-            self.get_llvm_ty(local_mem.ty)
+            ty_attr.size_bytes,
+            ty_attr.alignment_bytes
         )
     }
 
     fn visit_result_mem(&mut self, result_mem: &icfg::ResultMem) -> Self::Result {
         let ssa_id = self.get_ssa_id_from_place(&PlaceKind::ResultMemId(result_mem.result_mem_id));
 
+        let ty_attr = result_mem.ty.get_size_and_alignment();
+
         writeln!(
             self.buffer,
-            "{}%{} = alloca {}, align 4",
+            "{}%{} = alloca [{} x i8], align {}",
             " ".repeat(INDENTATION),
             ssa_id,
-            self.get_llvm_ty(result_mem.ty)
+            ty_attr.size_bytes,
+            ty_attr.alignment_bytes
         )
     }
 
@@ -231,22 +247,50 @@ impl<'a> CfgVisitor for CodeGenUnit<'a> {
         writeln!(self.buffer, "{}br label %{}", " ".repeat(INDENTATION), branch_id)
     }
 
-    fn visit_init_node(&mut self, init_node: &icfg::StoreNode, cfg: &Cfg) -> Self::Result {
-        let var_place = match init_node.setter {
-            Either::Left(local_mem_id) =>
-                self.get_ssa_id_from_place(&PlaceKind::LocalMemId(local_mem_id)),
-            Either::Right(result_mem_id) =>
-                self.get_ssa_id_from_place(&PlaceKind::ResultMemId(result_mem_id)),
-        };
-        let val = self.get_llvm_operand(&init_node.value);
+    fn visit_store_node(&mut self, store_node: &icfg::StoreNode, cfg: &Cfg) -> Self::Result {
+        let var_place = self.get_ssa_id_from_place(&store_node.setter);
+        let val = self.get_llvm_operand(&store_node.value);
 
         writeln!(
             self.buffer,
             "{}store {} {}, ptr %{}",
             " ".repeat(INDENTATION),
-            self.get_llvm_ty(init_node.result_ty),
+            self.get_llvm_ty(store_node.op_ty),
             val,
             var_place
+        )
+    }
+
+    fn visit_index_node(&mut self, index_node: &icfg::IndexNode, cfg: &Cfg) -> Self::Result {
+        let temp_id = self.get_ssa_id_from_place(&PlaceKind::TempId(index_node.result_place));
+        let array_id = self.get_ssa_id_from_place(&index_node.array_place);
+
+        writeln!(
+            self.buffer,
+            "{}%{} = getelementptr inbounds {}, ptr %{}, i64 0, i64 {}",
+            " ".repeat(INDENTATION),
+            temp_id,
+            self.get_llvm_ty(index_node.place_ty),
+            array_id,
+            index_node.index
+        )
+    }
+
+    fn visit_byte_access_node(
+        &mut self,
+        byte_access_node: &icfg::ByteAccessNode,
+        cfg: &Cfg
+    ) -> Self::Result {
+        let temp_id = self.get_ssa_id_from_place(&PlaceKind::TempId(byte_access_node.result_place));
+        let array_id = self.get_ssa_id_from_place(&byte_access_node.access_place);
+
+        writeln!(
+            self.buffer,
+            "{}%{} = getelementptr inbounds i8, ptr %{}, i64 {}",
+            " ".repeat(INDENTATION),
+            temp_id,
+            array_id,
+            byte_access_node.byte_offset
         )
     }
 

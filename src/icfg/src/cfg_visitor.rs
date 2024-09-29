@@ -3,7 +3,9 @@ use crate::{
     BinaryNode,
     BranchCondNode,
     BranchNode,
+    ByteAccessNode,
     Cfg,
+    IndexNode,
     LoadNode,
     LocalMem,
     Node,
@@ -79,7 +81,21 @@ pub trait CfgVisitor: Sized {
     }
 
     #[allow(unused_variables)]
-    fn visit_init_node(&mut self, init_node: &StoreNode, cfg: &Cfg) -> Self::Result {
+    fn visit_store_node(&mut self, store_node: &StoreNode, cfg: &Cfg) -> Self::Result {
+        Self::default_result()
+    }
+
+    #[allow(unused_variables)]
+    fn visit_index_node(&mut self, index_node: &IndexNode, cfg: &Cfg) -> Self::Result {
+        Self::default_result()
+    }
+
+    #[allow(unused_variables)]
+    fn visit_byte_access_node(
+        &mut self,
+        byte_access_node: &ByteAccessNode,
+        cfg: &Cfg
+    ) -> Self::Result {
         Self::default_result()
     }
 }
@@ -130,8 +146,11 @@ pub fn walk_node<'ctx, V>(visitor: &mut V, node: &Node, cfg: &Cfg) -> V::Result 
         NodeKind::BinaryNode(binary_node) => visitor.visit_binary_node(binary_node, cfg),
         NodeKind::BranchCondNode(branch_cond_node) =>
             visitor.visit_branch_cond_node(branch_cond_node, cfg),
-        NodeKind::StoreNode(init_node) => visitor.visit_init_node(init_node, cfg),
+        NodeKind::StoreNode(store_node) => visitor.visit_store_node(store_node, cfg),
         NodeKind::BranchNode(branch_node) => visitor.visit_branch_node(branch_node, cfg),
         NodeKind::LoadNode(load_node) => visitor.visit_load_node(load_node, cfg),
+        NodeKind::IndexNode(index_node) => visitor.visit_index_node(index_node, cfg),
+        NodeKind::ByteAccessNode(byte_access_node) =>
+            visitor.visit_byte_access_node(byte_access_node, cfg),
     }
 }

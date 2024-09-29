@@ -20,6 +20,7 @@ use crate::{
     Pat,
     PlaceExpr,
     TupleExpr,
+    TupleFieldExpr,
 };
 
 /// Used to lookup any node inside the ast and get a reference to it
@@ -64,14 +65,12 @@ impl<'ast> AstQuerySystem<'ast> {
 
 #[derive(Debug, Clone, Copy)]
 pub enum AstQueryEntry<'ast> {
-    Expr(&'ast Expr<'ast>),
-    Pat(&'ast Pat<'ast>),
     TupleExpr(&'ast TupleExpr<'ast>),
     LoopExpr(&'ast LoopExpr<'ast>),
     BreakExpr(&'ast BreakExpr<'ast>),
+    TupleFieldExpr(&'ast TupleFieldExpr<'ast>),
     ContinueExpr(&'ast ContinueExpr),
-    PlaceExpr(&'ast PlaceExpr<'ast>),
-    BinarExpr(&'ast BinaryExpr<'ast>),
+    BinaryExpr(&'ast BinaryExpr<'ast>),
     FunctionStmt(&'ast FunctionStmt<'ast>),
     DefineStmt(&'ast DefineStmt<'ast>),
     AssignStmt(&'ast AssignStmt<'ast>),

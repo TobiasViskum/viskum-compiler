@@ -21,11 +21,11 @@ impl AstArena {
     }
 
     /// In the future the
-    pub fn alloc_vec_stmts<'ast>(&self, vec: Vec<&'ast Stmt<'ast>>) -> &[&'ast Stmt<'ast>] {
+    pub fn alloc_vec_stmts<'ast>(&self, vec: Vec<Stmt<'ast>>) -> &[Stmt<'ast>] {
         self.ast_arena.alloc_slice_fill_iter(vec.into_iter().map(|stmt| stmt))
     }
 
-    pub fn alloc_vec_exprs<'ast>(&self, vec: Vec<&'ast Expr<'ast>>) -> &[&'ast Expr<'ast>] {
+    pub fn alloc_vec_exprs<'ast>(&self, vec: Vec<Expr<'ast>>) -> &[Expr<'ast>] {
         self.ast_arena.alloc_slice_fill_iter(vec.into_iter().map(|expr| expr))
     }
 }

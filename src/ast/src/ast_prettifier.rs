@@ -2,7 +2,14 @@ use fxhash::FxHashMap;
 use ir_defs::NodeId;
 use ty::Ty;
 
-use crate::{ ast_state::AstState, visitor::{ walk_stmt, Visitor }, Ast, IfFalseBranchExpr, Stmt };
+use crate::{
+    ast_state::AstState,
+    get_node_id_from_expr,
+    visitor::{ walk_stmt, Visitor },
+    Ast,
+    IfFalseBranchExpr,
+    Stmt,
+};
 use std::fmt::Write;
 
 // The correct lifetimes here would be <'ast, 'b> since the ast is not borrowed for the rest of its lifetime
@@ -59,22 +66,23 @@ impl<'ast, T> Visitor<'ast> for AstPrettifier<'ast, T> where T: AstState {
         if def_stmt.mut_span.get().is_some() {
             write!(self.buffer, "mut ")?;
         }
-        self.visit_pat(&def_stmt.setter_expr)?;
+        self.visit_pat(def_stmt.setter_expr)?;
 
         if let Some(node_id_to_ty) = self.node_id_to_ty {
-            let ty = node_id_to_ty.get(&def_stmt.value_expr.ast_node_id).expect("Expected type");
+            let node_id = get_node_id_from_expr(def_stmt.value_expr);
+            let ty = node_id_to_ty.get(&node_id).expect("Expected type");
             write!(self.buffer, ": {}", ty)?;
         }
 
         write!(self.buffer, " := ")?;
-        self.visit_expr(&def_stmt.value_expr)?;
+        self.visit_expr(def_stmt.value_expr)?;
 
         write!(self.buffer, "\n")?;
 
         Self::default_result()
     }
 
-    fn visit_stmt(&mut self, stmt: &'ast Stmt<'ast>) -> Self::Result {
+    fn visit_stmt(&mut self, stmt: Stmt<'ast>) -> Self::Result {
         match stmt {
             Stmt::ExprStmt(expr) => {
                 write!(self.buffer, "{}", self.get_indentation())?;
@@ -125,9 +133,9 @@ impl<'ast, T> Visitor<'ast> for AstPrettifier<'ast, T> where T: AstState {
 
     fn visit_assign_stmt(&mut self, assign_stmt: &'ast crate::AssignStmt<'ast>) -> Self::Result {
         write!(self.buffer, "{}", self.get_indentation())?;
-        self.visit_place_expr(&assign_stmt.setter_expr)?;
+        self.visit_place_expr(assign_stmt.setter_expr)?;
         write!(self.buffer, " = ")?;
-        self.visit_expr(&assign_stmt.value_expr)?;
+        self.visit_expr(assign_stmt.value_expr)?;
 
         write!(self.buffer, "\n")
     }

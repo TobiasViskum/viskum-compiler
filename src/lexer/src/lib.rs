@@ -45,9 +45,9 @@ impl<'a> Lexer<'a> {
             ',' => self.make_token(TokenKind::Comma),
             '\n' => self.newline_and_scan(),
             // this shouldn't be called if char before is ident or ')'
-            '.' if Self::can_be_before_dot_float(prev) && Self::is_digit(self.peek_next()) => {
-                self.make_float_number()
-            }
+            // '.' if Self::can_be_before_dot_float(prev) && Self::is_digit(self.peek_next()) => {
+            //     self.make_float_number()
+            // }
             '.' => self.make_token(TokenKind::Dot),
             _ if Self::is_digit(char) => self.make_number(),
             _ if Self::is_alphabetic(char) => self.make_ident_or_keyword(),

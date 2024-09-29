@@ -38,9 +38,9 @@ impl Icfg {
 /// One Cfg is constructed for each function
 pub struct Cfg {
     /// All variables used in the function
-    local_mems: Vec<LocalMem>,
-    result_mems: Vec<ResultMem>,
-    basic_blocks: Vec<BasicBlock>,
+    pub local_mems: Vec<LocalMem>,
+    pub result_mems: Vec<ResultMem>,
+    pub basic_blocks: Vec<BasicBlock>,
     /// Based on if the function is called or not
     liveness: Liveness,
 }
@@ -181,8 +181,38 @@ pub enum NodeKind {
     BinaryNode(BinaryNode),
     StoreNode(StoreNode),
     LoadNode(LoadNode),
+    IndexNode(IndexNode),
+    ByteAccessNode(ByteAccessNode),
 }
 
+/// If used with LoadNode, it can access fields of structs and tuples
+///
+/// If used with StoreNode, it can write to fields of structs and tuples
+///
+/// LLVM instruction:
+///
+/// %{result_place} = getelementptr inbounds i8, ptr %{access_place}, i64 {byte_offset}
+#[derive(Debug, new, Clone, Copy)]
+pub struct ByteAccessNode {
+    pub result_place: TempId,
+    pub access_place: PlaceKind,
+    pub byte_offset: usize,
+}
+
+/// Not implemented yet
+#[derive(Debug, new, Clone, Copy)]
+pub struct IndexNode {
+    pub result_place: TempId,
+    pub array_place: PlaceKind,
+    pub place_ty: Ty,
+    pub index: usize,
+}
+
+/// Used to load a value from the stack
+///
+/// LLVM instruction:
+///
+/// %{result_place} = load {ty}, ptr %{loc_id}
 #[derive(Debug, new, Clone, Copy)]
 pub struct LoadNode {
     pub result_place: TempId,
@@ -190,6 +220,11 @@ pub struct LoadNode {
     pub ty: Ty,
 }
 
+/// Used to goto either one of two basic blocks based on a condition
+///
+/// LLVM instruction:
+///
+/// br i1 {condition}, label %{true_branch}, label %{false_branch}
 #[derive(Debug, new, Clone, Copy)]
 pub struct BranchCondNode {
     pub condition: Operand,
@@ -199,18 +234,33 @@ pub struct BranchCondNode {
     pub false_branch: BasicBlockId,
 }
 
+/// Unconditional goto
+///
+/// LLVM instruction:
+///
+/// br label %{branch}
 #[derive(Debug, new, Clone, Copy)]
 pub struct BranchNode {
     pub branch: BasicBlockId,
 }
 
+/// Used to write to some place (e.g. value on stack, field of tuple/struct, etc.)
+///
+/// LLVM instruction:
+///
+/// store {op_ty} {value}, ptr %{setter}
 #[derive(Debug, new, Clone, Copy)]
 pub struct StoreNode {
-    pub setter: Either<LocalMemId, ResultMemId>,
-    pub result_ty: Ty,
+    pub setter: PlaceKind,
+    pub op_ty: Ty,
     pub value: Operand,
 }
 
+/// Translates to any binary instruction. That is, either an arithmetic instruction or a comparison
+///
+/// LLVM instruction:
+///
+/// %{result_place} = {op} {op_ty} {lhs}, {rhs}
 #[derive(Debug, new, Clone, Copy)]
 pub struct BinaryNode {
     pub result_place: TempId,
@@ -222,6 +272,12 @@ pub struct BinaryNode {
     pub rhs: Operand,
 }
 
+/// CHANGE:
+/// Remove type from this (necessary type information is already in nodes most of the times)
+///
+/// REASON:
+/// A lot of the times the necessary information is already inside the node,
+/// so the type in this struct is essentially 24 bytes wasted (e.g. BinaryNode could save 48 bytes from this)
 #[derive(Debug, Clone, Copy, new)]
 pub struct Operand {
     pub kind: OperandKind,

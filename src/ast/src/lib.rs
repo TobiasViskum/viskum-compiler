@@ -2,7 +2,7 @@
 
 IMPLEMENTATION DETAILS:
 
-Each node in the Ast doesn't have ANY methods at all (except for `new` method),
+Each node in the Ast doesn't have ANY methods at all (except for a `new` method),
 since the nodes are just for holding relavant data.
 Therefore all fields on each node is also public.
 
@@ -14,29 +14,33 @@ You might see in some of the enums in this file, that
 some have references to their variants and some don't. That's because, 
 they only holds references to "real" nodes, which is a node that has a NodeId
 
-A description of the overall structure of the Ast (inspired by the way Rust structure its HIR)
+A description of the overall structure of the Ast (inspired by the way Rust structure its HIR).
+A `&` means that it's a reference to the node (allocated in an arena)
 
 Stmt(
-    DefineStmt,
-    AssignStmt,
+    &DefineStmt,
+    &AssignStmt,
     ItemStmt(
-        FunctionStmt
+        &FunctionStmt
     ),
     ExprStmt(
         Expr(
             ExprWithBlock(
-                BlockExpr,
-                IfExpr
+                &BlockExpr,
+                &IfExpr,
+                &LoopExpr
             ),
             ExprWithoutBlock(
                 PlaceExpr(
-                    IdentExpr
+                    &IdentExpr,
+                    &TupleFieldExpr
                 ),
                 ValueExpr(
-                    BinaryExpr,
-                    GroupExpr,
+                    &BinaryExpr,
+                    &GroupExpr,
+                    &TupleExpr,
                     ConstExpr(
-                        IntegerExpr
+                        &IntegerExpr
                     )
                 )
             )
@@ -67,7 +71,7 @@ use op::BinaryOp;
 use span::Span;
 use derive_new::new;
 
-type Stmts<'ast> = &'ast [&'ast Stmt<'ast>];
+type Stmts<'ast> = &'ast [Stmt<'ast>];
 
 #[derive(Debug, new)]
 pub struct Ast<'ast, T> where T: AstState {
@@ -144,7 +148,7 @@ pub enum Stmt<'ast> {
     ItemStmt(ItemStmt<'ast>),
     DefineStmt(&'ast DefineStmt<'ast>),
     AssignStmt(&'ast AssignStmt<'ast>),
-    ExprStmt(&'ast Expr<'ast>),
+    ExprStmt(Expr<'ast>),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -154,8 +158,8 @@ pub enum ItemStmt<'ast> {
 
 #[derive(Debug, new)]
 pub struct FunctionStmt<'ast> {
-    pub ident_expr: IdentExpr,
-    pub body: &'ast Expr<'ast>,
+    pub ident_expr: &'ast IdentExpr,
+    pub body: Expr<'ast>,
     pub ast_node_id: NodeId,
 }
 
@@ -163,39 +167,26 @@ pub struct FunctionStmt<'ast> {
 pub struct DefineStmt<'ast> {
     #[new(value = "None.into()")]
     pub mut_span: Cell<Option<Span>>,
-    pub setter_expr: &'ast Pat<'ast>,
-    pub value_expr: &'ast Expr<'ast>,
+    pub setter_expr: Pat<'ast>,
+    pub value_expr: Expr<'ast>,
     pub ast_node_id: NodeId,
 }
 
 #[derive(Debug, new)]
 pub struct AssignStmt<'ast> {
-    pub setter_expr: &'ast PlaceExpr<'ast>,
-    pub value_expr: &'ast Expr<'ast>,
+    pub setter_expr: PlaceExpr<'ast>,
+    pub value_expr: Expr<'ast>,
     pub ast_node_id: NodeId,
     pub span: Span,
 }
 
-#[derive(Debug, new)]
-pub struct Pat<'ast> {
-    pub kind: PatKind<'ast>,
-    pub ast_node_id: NodeId,
-}
-
 #[derive(Debug, Clone, Copy)]
-pub enum PatKind<'ast> {
+pub enum Pat<'ast> {
     IdentPat(&'ast IdentPat),
 }
 
-/// This is a unique node, because it makes access of node_id eaiser
-#[derive(Debug, new)]
-pub struct Expr<'ast> {
-    pub kind: ExprKind<'ast>,
-    pub ast_node_id: NodeId,
-}
-
 #[derive(Debug, Clone, Copy)]
-pub enum ExprKind<'ast> {
+pub enum Expr<'ast> {
     ExprWithBlock(ExprWithBlock<'ast>),
     ExprWithoutBlock(ExprWithoutBlock<'ast>),
 }
@@ -222,7 +213,7 @@ pub struct BlockExpr<'ast> {
 
 #[derive(Debug, new)]
 pub struct IfExpr<'ast> {
-    pub condition: &'ast Expr<'ast>,
+    pub condition: Expr<'ast>,
     pub true_block: &'ast BlockExpr<'ast>,
     pub false_block: Option<IfFalseBranchExpr<'ast>>,
     pub ast_node_id: NodeId,
@@ -239,7 +230,7 @@ pub enum IfFalseBranchExpr<'ast> {
 
 #[derive(Debug, Clone, Copy)]
 pub enum ExprWithoutBlock<'ast> {
-    PlaceExpr(&'ast PlaceExpr<'ast>),
+    PlaceExpr(PlaceExpr<'ast>),
     ValueExpr(ValueExpr<'ast>),
     BreakExpr(&'ast BreakExpr<'ast>),
     ContinueExpr(&'ast ContinueExpr),
@@ -247,7 +238,7 @@ pub enum ExprWithoutBlock<'ast> {
 
 #[derive(Debug, new)]
 pub struct BreakExpr<'ast> {
-    pub value: Option<&'ast Expr<'ast>>,
+    pub value: Option<Expr<'ast>>,
     pub ast_node_id: NodeId,
 }
 
@@ -256,15 +247,17 @@ pub struct ContinueExpr {
     pub ast_node_id: NodeId,
 }
 
-#[derive(Debug, new)]
-pub struct PlaceExpr<'ast> {
-    pub kind: PlaceKind<'ast>,
-    pub ast_node_id: NodeId,
+#[derive(Debug, Clone, Copy)]
+pub enum PlaceExpr<'ast> {
+    IdentExpr(&'ast IdentExpr),
+    TupleFieldExpr(&'ast TupleFieldExpr<'ast>),
 }
 
-#[derive(Debug, Clone, Copy)]
-pub enum PlaceKind<'ast> {
-    IdentExpr(&'ast IdentExpr),
+#[derive(Debug, new)]
+pub struct TupleFieldExpr<'ast> {
+    pub lhs: Expr<'ast>,
+    pub rhs: &'ast IntegerExpr,
+    pub ast_node_id: NodeId,
 }
 
 #[derive(Debug, new)]
@@ -295,21 +288,21 @@ pub enum ValueExpr<'ast> {
 
 #[derive(Debug, new)]
 pub struct TupleExpr<'ast> {
-    pub fields: &'ast [&'ast Expr<'ast>],
+    pub fields: &'ast [Expr<'ast>],
     pub ast_node_id: NodeId,
 }
 
 #[derive(Debug, new)]
 pub struct GroupExpr<'ast> {
-    pub expr: &'ast Expr<'ast>,
+    pub expr: Expr<'ast>,
     pub ast_node_id: NodeId,
 }
 
 #[derive(Debug, new)]
 pub struct BinaryExpr<'ast> {
-    pub lhs: &'ast Expr<'ast>,
+    pub lhs: Expr<'ast>,
     pub op: BinaryOp,
-    pub rhs: &'ast Expr<'ast>,
+    pub rhs: Expr<'ast>,
     pub ast_node_id: NodeId,
 }
 
@@ -335,4 +328,51 @@ pub struct IntegerExpr {
 pub struct FloatExpr {
     pub val: f64,
     pub ast_node_id: NodeId,
+}
+
+pub fn get_node_id_from_expr(expr: Expr) -> NodeId {
+    match expr {
+        Expr::ExprWithBlock(expr_with_block) => {
+            match expr_with_block {
+                ExprWithBlock::BlockExpr(block_expr) => block_expr.ast_node_id,
+                ExprWithBlock::IfExpr(if_expr) => if_expr.ast_node_id,
+                ExprWithBlock::LoopExpr(loop_expr) => loop_expr.ast_node_id,
+            }
+        }
+        Expr::ExprWithoutBlock(expr_without_block) => {
+            match expr_without_block {
+                ExprWithoutBlock::BreakExpr(break_expr) => break_expr.ast_node_id,
+                ExprWithoutBlock::ContinueExpr(continue_expr) => continue_expr.ast_node_id,
+                ExprWithoutBlock::PlaceExpr(place_expr) => get_node_id_from_place_expr(place_expr),
+                ExprWithoutBlock::ValueExpr(value_expr) => get_node_id_from_value_expr(value_expr),
+            }
+        }
+    }
+}
+
+pub fn get_node_id_from_place_expr(place_expr: PlaceExpr) -> NodeId {
+    match place_expr {
+        PlaceExpr::IdentExpr(ident_expr) => ident_expr.ast_node_id,
+        PlaceExpr::TupleFieldExpr(tuple_field_expr) => tuple_field_expr.ast_node_id,
+    }
+}
+
+pub fn get_node_id_from_value_expr(value_expr: ValueExpr) -> NodeId {
+    match value_expr {
+        ValueExpr::BinaryExpr(binary_expr) => binary_expr.ast_node_id,
+        ValueExpr::GroupExpr(group_expr) => group_expr.ast_node_id,
+        ValueExpr::TupleExpr(tuple_expr) => tuple_expr.ast_node_id,
+        ValueExpr::ConstExpr(const_expr) => {
+            match const_expr {
+                ConstExpr::BoolExpr(bool_expr) => bool_expr.ast_node_id,
+                ConstExpr::IntegerExpr(integer_expr) => integer_expr.ast_node_id,
+            }
+        }
+    }
+}
+
+pub fn get_node_id_from_pattern(pat: Pat) -> NodeId {
+    match pat {
+        Pat::IdentPat(ident_pat) => ident_pat.ast_node_id,
+    }
 }

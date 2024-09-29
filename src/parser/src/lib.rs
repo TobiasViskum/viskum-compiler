@@ -8,7 +8,6 @@ use ast::{
     BreakExpr,
     ContinueExpr,
     Expr,
-    ExprKind,
     ExprWithBlock,
     ExprWithoutBlock,
     FunctionStmt,
@@ -123,21 +122,19 @@ impl<'a> Parser<'a> {
         Ast::new(global_scope, AstQuerySystem::new(nodes_count))
     }
 
-    pub(crate) fn statement(&mut self) -> &'a Stmt<'a> {
-        let stmt = match self.current.get_kind() {
+    pub(crate) fn statement(&mut self) -> Stmt<'a> {
+        match self.current.get_kind() {
             TokenKind::Def => self.function_statement(),
             TokenKind::Mut => self.mut_stmt(),
             TokenKind::Break => self.break_expr(),
             TokenKind::Continue => self.continue_expr(),
             _ => self.expression_statement(),
-        };
-
-        self.ast_arena.alloc_expr_or_stmt(stmt)
+        }
     }
 
     pub(crate) fn expression_statement(&mut self) -> Stmt<'a> {
         let mut expr_builder = ExprBuilder::new(self.ast_arena);
-        self.parse_precedence(expr_builder.get_base_prec(), &mut expr_builder);
+        self.expression(&mut expr_builder);
         let stmt = expr_builder.take_stmt().expect("TODO: Error handling");
         stmt
     }
@@ -146,8 +143,7 @@ impl<'a> Parser<'a> {
         let break_expr = self.ast_arena.alloc_expr_or_stmt(
             BreakExpr::new(None, self.get_ast_node_id())
         );
-        let expr_kind = ExprKind::ExprWithoutBlock(ExprWithoutBlock::BreakExpr(break_expr));
-        let expr = self.ast_arena.alloc_expr_or_stmt(Expr::new(expr_kind, self.get_ast_node_id()));
+        let expr = Expr::ExprWithoutBlock(ExprWithoutBlock::BreakExpr(break_expr));
         self.advance();
         Stmt::ExprStmt(expr)
     }
@@ -156,8 +152,7 @@ impl<'a> Parser<'a> {
         let continue_expr = self.ast_arena.alloc_expr_or_stmt(
             ContinueExpr::new(self.get_ast_node_id())
         );
-        let expr_kind = ExprKind::ExprWithoutBlock(ExprWithoutBlock::ContinueExpr(continue_expr));
-        let expr = self.ast_arena.alloc_expr_or_stmt(Expr::new(expr_kind, self.get_ast_node_id()));
+        let expr = Expr::ExprWithoutBlock(ExprWithoutBlock::ContinueExpr(continue_expr));
         self.advance();
         Stmt::ExprStmt(expr)
     }
@@ -175,11 +170,14 @@ impl<'a> Parser<'a> {
 
         self.consume(TokenKind::End, "Expected `end` after function def");
 
-        let expr_kind = ExprKind::ExprWithBlock(ExprWithBlock::BlockExpr(body));
-        let expr = self.ast_arena.alloc_expr_or_stmt(Expr::new(expr_kind, self.get_ast_node_id()));
+        let expr = Expr::ExprWithBlock(ExprWithBlock::BlockExpr(body));
 
         let fn_stmt = self.ast_arena.alloc_expr_or_stmt(
-            FunctionStmt::new(ident_expr, expr, self.get_ast_node_id())
+            FunctionStmt::new(
+                self.ast_arena.alloc_expr_or_stmt(ident_expr),
+                expr,
+                self.get_ast_node_id()
+            )
         );
 
         Stmt::ItemStmt(ItemStmt::FunctionStmt(fn_stmt))
@@ -207,17 +205,21 @@ impl<'a> Parser<'a> {
         }
     }
 
+    pub(crate) fn expression(&mut self, expr_builder: &mut ExprBuilder<'a>) {
+        self.parse_precedence(expr_builder.get_base_prec(), expr_builder);
+    }
+
     /// Parse rule method: `define`
     pub(crate) fn define(&mut self, expr_builder: &mut ExprBuilder<'a>) {
         expr_builder.set_base_prec(Precedence::PrecAssign.get_next());
-        self.parse_precedence(expr_builder.get_base_prec(), expr_builder);
+        self.expression(expr_builder);
         expr_builder.emit_define_stmt(self)
     }
 
     /// Parse rule method: `assign`
     pub(crate) fn assign(&mut self, expr_builder: &mut ExprBuilder<'a>) {
         expr_builder.set_base_prec(Precedence::PrecAssign.get_next());
-        self.parse_precedence(expr_builder.get_base_prec(), expr_builder);
+        self.expression(expr_builder);
         expr_builder.emit_assign_stmt(self)
     }
 
@@ -225,22 +227,14 @@ impl<'a> Parser<'a> {
     pub(crate) fn block_expr(&mut self, expr_builder: &mut ExprBuilder<'a>) {
         let block_expr = self.parse_block();
         self.consume(TokenKind::End, "Expected `end`");
-        expr_builder.emit_block_expr(block_expr, self);
+        expr_builder.emit_block_expr(block_expr);
     }
 
     /// Parse rule method: `grouping`, called by prefix `(`
     pub(crate) fn grouping(&mut self, expr_builder: &mut ExprBuilder<'a>) {
         let mut exprs = Vec::new();
         while !self.is_eof() {
-            let expr = {
-                let base_prec = expr_builder.get_base_prec();
-                let mut expr_builder = ExprBuilder::new(self.ast_arena);
-                self.parse_precedence(base_prec, &mut expr_builder);
-                self.ast_arena.alloc_expr_or_stmt(
-                    expr_builder.take_expr().expect("TODO:Error handling")
-                )
-            };
-
+            let expr = self.parse_expr_and_take(expr_builder.get_base_prec());
             exprs.push(expr);
 
             if self.is_curr_kind(TokenKind::Comma) {
@@ -258,32 +252,53 @@ impl<'a> Parser<'a> {
     /// Parse rule method: `ident`
     pub(crate) fn ident(&mut self, expr_builder: &mut ExprBuilder<'a>) {
         let ident_expr = IdentExpr::new(self.prev.get_span(), self.get_ast_node_id());
-        expr_builder.emit_ident_expr(ident_expr, self);
+        expr_builder.emit_ident_expr(ident_expr);
     }
 
     /// Parse rule method: `true_literal`
     pub(crate) fn true_lit(&mut self, expr_builder: &mut ExprBuilder<'a>) {
         let bool_expr = BoolExpr::new(true, self.get_ast_node_id());
-        expr_builder.emit_bool_expr(bool_expr, self)
+        expr_builder.emit_bool_expr(bool_expr)
     }
 
     /// Parse rule method: `false_literal`
     pub(crate) fn false_lit(&mut self, expr_builder: &mut ExprBuilder<'a>) {
         let bool_expr = BoolExpr::new(false, self.get_ast_node_id());
-        expr_builder.emit_bool_expr(bool_expr, self)
+        expr_builder.emit_bool_expr(bool_expr)
     }
 
     /// Parse rule method: `integer`
     pub(crate) fn integer(&mut self, expr_builder: &mut ExprBuilder<'a>) {
+        let integer_expr = self.parse_integer_expr();
+        expr_builder.emit_integer_expr(integer_expr);
+    }
+
+    pub(crate) fn parse_integer_expr(&mut self) -> IntegerExpr {
         let lexeme = self.get_lexeme_of_prev();
         let val = lexeme.parse::<i64>().expect("TODO: Error handling");
-        let integer_expr = IntegerExpr::new(val, self.get_ast_node_id());
-        expr_builder.emit_integer_expr(integer_expr, self);
+        IntegerExpr::new(val, self.get_ast_node_id())
     }
 
     /// Parse rule method: `dot_float`
     pub(crate) fn dot_float(&mut self, _expr_builder: &mut ExprBuilder<'a>) {
         todo!()
+    }
+
+    /// Parse rule method `dot_expr`
+    pub(crate) fn field_expr(&mut self, expr_builder: &mut ExprBuilder<'a>) {
+        match self.current.get_kind() {
+            TokenKind::Integer => {
+                self.advance();
+                let integer_expr = self.parse_integer_expr();
+                expr_builder.emit_tuple_field_expr(integer_expr, self);
+            }
+            _ => {
+                println!("{}", self.current.get_kind());
+                todo!()
+                // self.expression(expr_builder);
+                // // Emit dot expr
+            }
+        }
     }
 
     /// Parse rule method: `float`
@@ -359,7 +374,7 @@ impl<'a> Parser<'a> {
             LoopExpr::new(block, self.get_ast_node_id(), self.read_result_loc())
         );
 
-        expr_builder.emit_loop_expr(loop_expr, self);
+        expr_builder.emit_loop_expr(loop_expr);
 
         self.pop_result_loc();
     }
@@ -369,18 +384,18 @@ impl<'a> Parser<'a> {
         self.push_result_loc();
         let if_expr = self.parse_if_expr();
 
-        expr_builder.emit_if_expr(if_expr, self);
+        expr_builder.emit_if_expr(if_expr);
         self.pop_result_loc();
     }
 
-    pub fn parse_expr_and_take(&mut self) -> &'a Expr<'a> {
+    pub fn parse_expr_and_take(&mut self, prec: Precedence) -> Expr<'a> {
         let mut expr_builder = ExprBuilder::new(self.ast_arena);
-        self.parse_precedence(expr_builder.get_base_prec(), &mut expr_builder);
-        self.ast_arena.alloc_expr_or_stmt(expr_builder.take_expr().expect("TODO:Error handling"))
+        self.parse_precedence(prec, &mut expr_builder);
+        expr_builder.take_expr().expect("TODO:Error handling")
     }
 
     pub(crate) fn parse_if_expr(&mut self) -> &'a IfExpr<'a> {
-        let cond = self.parse_expr_and_take();
+        let cond = self.parse_expr_and_take(Precedence::PrecAssign.get_next());
 
         self.consume(TokenKind::Then, "Expected 'then' after if-condition");
 
@@ -594,7 +609,7 @@ impl<'a> Parser<'a> {
         Colon       = { (None       None),      (None       None            ),      (None       None) },
         Define      = { (None       None),      (define     PrecAssign      ),      (None       None) },
         Assign      = { (None       None),      (assign     PrecAssign      ),      (None       None) },
-        Dot         = { (dot_float  None),      (None       None            ),      (None       None) },
+        Dot         = { (dot_float  None),      (field_expr PrecCall        ),      (None       None) },
         Comma       = { (None       None),      (None       None            ),      (None       None)},
         Bang        = { (None       None),      (None       None            ),      (None       None)   },
         

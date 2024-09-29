@@ -1,4 +1,4 @@
-use std::{ marker::PhantomData, process::id };
+use std::marker::PhantomData;
 
 use crate::{
     ast_query_system::AstQueryEntry,
@@ -13,11 +13,9 @@ use crate::{
     },
     walk_assign_stmt,
     walk_break_expr,
-    walk_expr,
     walk_loop_expr,
-    walk_pat,
-    walk_place_expr,
     walk_tuple_expr,
+    walk_tuple_field_expr,
     AssignStmt,
     Ast,
     BinaryExpr,
@@ -25,20 +23,18 @@ use crate::{
     BoolExpr,
     ContinueExpr,
     DefineStmt,
-    Expr,
     GroupExpr,
     IdentExpr,
     IdentPat,
     IfExpr,
     IntegerExpr,
     Pat,
-    PatKind,
-    PlaceKind,
+    PlaceExpr,
     TupleExpr,
 };
 use error::{ Error, ErrorKind };
-use ir_defs::{ DefId, DefKind, Mutability, NameBinding, NameBindingKind, NodeId, Res };
-use op::{ ArithmeticOp, BinaryOp, Op };
+use ir_defs::{ DefId, DefKind, Mutability, NameBinding, NameBindingKind, NodeId };
+use op::{ ArithmeticOp, BinaryOp };
 use span::Span;
 use symbol::Symbol;
 use ty::{ PrimTy, Ty, TyCtx, BOOL_TY, INT_TY, VOID_TY };
@@ -148,24 +144,9 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
         )
     }
 
-    fn visit_pat(&mut self, pat: &'ast Pat) -> Self::Result {
-        self.insert_query_entry(pat.ast_node_id, AstQueryEntry::Pat(pat));
-        walk_pat(self, pat)
-    }
-
     fn visit_tuple_expr(&mut self, tuple_expr: &'ast crate::TupleExpr<'ast>) -> Self::Result {
         self.insert_query_entry(tuple_expr.ast_node_id, AstQueryEntry::TupleExpr(tuple_expr));
         walk_tuple_expr(self, tuple_expr)
-    }
-
-    fn visit_place_expr(&mut self, place_expr: &'ast crate::PlaceExpr) -> Self::Result {
-        self.insert_query_entry(place_expr.ast_node_id, AstQueryEntry::PlaceExpr(place_expr));
-        walk_place_expr(self, place_expr)
-    }
-
-    fn visit_expr(&mut self, expr: &'ast Expr<'ast>) -> Self::Result {
-        self.insert_query_entry(expr.ast_node_id, AstQueryEntry::Expr(expr));
-        walk_expr(self, expr)
     }
 
     fn visit_bool_expr(&mut self, bool_expr: &'ast BoolExpr) -> Self::Result {
@@ -185,6 +166,17 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
     fn visit_break_expr(&mut self, break_expr: &'ast crate::BreakExpr<'ast>) -> Self::Result {
         self.insert_query_entry(break_expr.ast_node_id, AstQueryEntry::BreakExpr(break_expr));
         walk_break_expr(self, break_expr)
+    }
+
+    fn visit_tuple_field_expr(
+        &mut self,
+        tuple_field_expr: &'ast crate::TupleFieldExpr<'ast>
+    ) -> Self::Result {
+        self.insert_query_entry(
+            tuple_field_expr.ast_node_id,
+            AstQueryEntry::TupleFieldExpr(tuple_field_expr)
+        );
+        walk_tuple_field_expr(self, tuple_field_expr)
     }
 
     fn visit_assign_stmt(&mut self, assign_stmt: &'ast AssignStmt<'ast>) -> Self::Result {
@@ -218,7 +210,7 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
     }
 
     fn visit_binary_expr(&mut self, binary_expr: &'ast BinaryExpr<'ast>) -> Self::Result {
-        self.insert_query_entry(binary_expr.ast_node_id, AstQueryEntry::BinarExpr(binary_expr));
+        self.insert_query_entry(binary_expr.ast_node_id, AstQueryEntry::BinaryExpr(binary_expr));
         walk_binary_expr(self, binary_expr)
     }
 
@@ -270,12 +262,6 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
         INT_TY
     }
 
-    fn visit_place_expr(&mut self, place_expr: &'ast crate::PlaceExpr) -> Self::Result {
-        let ty = walk_place_expr(self, place_expr);
-        self.ast_visit_emitter.set_type_to_node_id(place_expr.ast_node_id, ty);
-        ty
-    }
-
     fn visit_bool_expr(&mut self, bool_expr: &'ast BoolExpr) -> Self::Result {
         self.ast_visit_emitter.set_type_to_node_id(bool_expr.ast_node_id, BOOL_TY);
         BOOL_TY
@@ -288,12 +274,50 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
         def_type
     }
 
+    fn visit_tuple_field_expr(
+        &mut self,
+        tuple_field_expr: &'ast crate::TupleFieldExpr<'ast>
+    ) -> Self::Result {
+        let lhs_ty = self.visit_expr(tuple_field_expr.lhs);
+        self.visit_interger_expr(tuple_field_expr.rhs);
+
+        let tuple_ty = match lhs_ty {
+            Ty::Tuple(tuple_ty) => tuple_ty,
+            ty => {
+                self.ast_visit_emitter.report_error(
+                    Error::new(ErrorKind::InvalidTuple(ty), Span::dummy())
+                );
+                self.ast_visit_emitter.set_type_to_node_id(
+                    tuple_field_expr.ast_node_id,
+                    Ty::Unkown
+                );
+                return Ty::Unkown;
+            }
+        };
+
+        if tuple_field_expr.rhs.val > ((tuple_ty.len() - 1) as i64) {
+            self.ast_visit_emitter.report_error(
+                Error::new(
+                    ErrorKind::TupleAccessOutOfBounds(tuple_ty, tuple_field_expr.rhs.val as usize),
+                    Span::dummy()
+                )
+            );
+            self.ast_visit_emitter.set_type_to_node_id(tuple_field_expr.ast_node_id, Ty::Unkown);
+            return Ty::Unkown;
+        } else {
+            let access_ty = tuple_ty[tuple_field_expr.rhs.val as usize];
+            self.ast_visit_emitter.set_type_to_node_id(tuple_field_expr.ast_node_id, access_ty);
+
+            access_ty
+        }
+    }
+
     fn visit_assign_stmt(&mut self, assign_stmt: &'ast AssignStmt<'ast>) -> Self::Result {
         let setter_ty = self.visit_place_expr(assign_stmt.setter_expr);
         let value_ty = self.visit_expr(assign_stmt.value_expr);
 
-        let (name_binding, symbol) = match &assign_stmt.setter_expr.kind {
-            PlaceKind::IdentExpr(ident_expr) => {
+        let (name_binding, symbol) = match &assign_stmt.setter_expr {
+            PlaceExpr::IdentExpr(ident_expr) => {
                 let def_id = self.ast_visit_emitter.get_def_id_from_node_id(ident_expr.ast_node_id);
                 let symbol = Symbol::new(&self.src[ident_expr.span.get_byte_range()]);
                 let name_binding = self.ast_visit_emitter.get_namebinding_and_ty_from_def_id(
@@ -301,6 +325,8 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
                 ).0;
                 (name_binding, symbol)
             }
+            PlaceExpr::TupleFieldExpr(_) =>
+                panic!("Not working yet (tuple_field_expr in assignment)"),
         };
 
         match &name_binding.kind {
@@ -332,7 +358,7 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
     fn visit_tuple_expr(&mut self, tuple_expr: &'ast TupleExpr<'ast>) -> Self::Result {
         let mut tuple_types = Vec::with_capacity(8);
         for expr in tuple_expr.fields {
-            let ty = self.visit_expr(expr);
+            let ty = self.visit_expr(*expr);
             tuple_types.push(ty);
         }
 
@@ -345,11 +371,10 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
 
     fn visit_def_stmt(&mut self, def_stmt: &'ast DefineStmt<'ast>) -> Self::Result {
         // When tuples are implemented, compare if tuple on lhs, is same as tuple type on rhs
-        let value_type = self.visit_expr(&def_stmt.value_expr);
-        self.ast_visit_emitter.set_type_to_node_id(def_stmt.setter_expr.ast_node_id, value_type);
+        let value_type = self.visit_expr(def_stmt.value_expr);
 
-        match &def_stmt.setter_expr.kind {
-            PatKind::IdentPat(ident_pat) => {
+        match &def_stmt.setter_expr {
+            Pat::IdentPat(ident_pat) => {
                 let mutability = if def_stmt.mut_span.get().is_some() {
                     Mutability::Mutable
                 } else {
@@ -374,12 +399,6 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
 
         // Returns void, since definitions cannot return a value
         VOID_TY
-    }
-
-    fn visit_expr(&mut self, expr: &'ast Expr<'ast>) -> Self::Result {
-        let ty = walk_expr(self, expr);
-        self.ast_visit_emitter.set_type_to_node_id(expr.ast_node_id, ty);
-        ty
     }
 
     fn visit_loop_expr(&mut self, loop_expr: &'ast crate::LoopExpr<'ast>) -> Self::Result {
@@ -444,7 +463,7 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
         let true_type = self.visit_block_expr(if_expr.true_block);
         let false_type = if_expr.false_block
             .as_ref()
-            .map(|expr| self.visit_if_false_branch_expr(expr));
+            .map(|expr| self.visit_if_false_branch_expr(*expr));
 
         let if_expr_type = if let Some(false_type) = false_type {
             if true_type == false_type { true_type } else { Ty::Unkown }

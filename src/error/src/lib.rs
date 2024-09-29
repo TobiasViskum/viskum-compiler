@@ -46,15 +46,19 @@ pub enum ErrorKind {
     BreakTypeError(Ty, Ty),
     BreakOutsideLoop,
     BinaryExprTypeError(BinaryOp, Ty, Ty),
+    InvalidTuple(Ty),
+    TupleAccessOutOfBounds(&'static [Ty], usize),
     InvalidPattern,
 }
 
 impl ErrorKind {
     fn get_severity(&self) -> Severity {
         match self {
+            Self::InvalidTuple(_) => Severity::Fatal,
             Self::UndefinedVariable(_) => Severity::Fatal,
             Self::InvalidPattern => Severity::Fatal,
             Self::BinaryExprTypeError(_, _, _) => Severity::Fatal,
+            Self::TupleAccessOutOfBounds(_, _) => Severity::Fatal,
             Self::BreakOutsideLoop => Severity::NoImpact,
             Self::BreakTypeError(_, _) => Severity::NoImpact,
             Self::ExpectedBoolExpr(_) => Severity::NoImpact,
@@ -64,6 +68,18 @@ impl ErrorKind {
 
     pub fn write_msg(&self, buffer: &mut String, span: &Span, src: &str) {
         let write_error = match self {
+            Self::TupleAccessOutOfBounds(tuple_ty, accessed_len) => {
+                write!(
+                    buffer,
+                    "Tried to access element {} of tuple '{}', which only has {} elements",
+                    accessed_len,
+                    Ty::Tuple(tuple_ty),
+                    tuple_ty.len()
+                )
+            }
+            Self::InvalidTuple(found_ty) => {
+                write!(buffer, "Expected tuple but found type `{}`", found_ty)
+            }
             Self::BreakTypeError(expected_ty, found_ty) => {
                 write!(buffer, "Expected type `{}` but found type `{}`", expected_ty, found_ty)
             }

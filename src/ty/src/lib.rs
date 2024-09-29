@@ -105,6 +105,21 @@ impl TyCtx {
     // }
 }
 
+pub struct TyAttr {
+    pub size_bytes: usize,
+    pub alignment_bytes: usize,
+}
+
+impl TyAttr {
+    pub fn new(size_bytes: usize, alignment_bytes: usize) -> Self {
+        Self { size_bytes, alignment_bytes }
+    }
+}
+
+pub trait GetTyAttr {
+    fn get_size_and_alignment(&self) -> TyAttr;
+}
+
 #[derive(Debug, Hash, Eq, PartialEq, Clone, Copy)]
 pub enum Ty {
     Tuple(&'static [Ty]),
@@ -115,6 +130,33 @@ pub enum Ty {
 impl Ty {
     pub fn is_void(&self) -> bool {
         *self == Ty::PrimTy(PrimTy::Void)
+    }
+}
+
+impl GetTyAttr for Ty {
+    fn get_size_and_alignment(&self) -> TyAttr {
+        match self {
+            Self::Tuple(tuple) => {
+                let mut total_size = 0;
+                let mut alignment = None;
+
+                for ty in tuple.iter() {
+                    let ty_attr = ty.get_size_and_alignment();
+                    total_size += ty_attr.size_bytes;
+                    if let Some(alignment) = &mut alignment {
+                        if ty_attr.size_bytes < *alignment {
+                            *alignment = ty_attr.size_bytes;
+                        }
+                    } else {
+                        alignment = Some(ty_attr.size_bytes);
+                    }
+                }
+
+                TyAttr::new(total_size, alignment.unwrap_or(0))
+            }
+            Self::PrimTy(prim_ty) => prim_ty.get_size_and_alignment(),
+            Self::Unkown => panic!("Unkown has no size and alignment"),
+        }
     }
 }
 
@@ -144,6 +186,16 @@ pub enum PrimTy {
     Int,
     Bool,
     Void,
+}
+
+impl GetTyAttr for PrimTy {
+    fn get_size_and_alignment(&self) -> TyAttr {
+        match self {
+            Self::Int => TyAttr::new(4, 4),
+            Self::Bool => TyAttr::new(1, 1),
+            Self::Void => TyAttr::new(0, 0),
+        }
+    }
 }
 
 impl Display for PrimTy {

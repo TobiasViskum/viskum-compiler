@@ -1,12 +1,12 @@
 use ast::{
+    get_node_id_from_expr,
     Ast,
     AstTypeChecked,
     FunctionStmt,
     IfExpr,
     IfFalseBranchExpr,
-    PatKind,
+    Pat,
     PlaceExpr,
-    PlaceKind,
     Visitor,
 };
 use data_structures::Either;
@@ -17,9 +17,10 @@ use icfg::{
     BinaryNode,
     BranchCondNode,
     BranchNode,
+    ByteAccessNode,
     Cfg,
     Icfg,
-    StoreNode,
+    IndexNode,
     LoadNode,
     LocalMem,
     LocalMemId,
@@ -27,14 +28,16 @@ use icfg::{
     NodeKind,
     Operand,
     OperandKind,
+    PlaceKind,
     ResultMem,
     ResultMemId,
+    StoreNode,
     TempId,
 };
 use ir_defs::{ DefId, Mutability, NodeId, ResultLoc };
 use resolver::ResolvedInformation;
 use symbol::Symbol;
-use ty::{ PrimTy, Ty, TyCtx, VOID_TY };
+use ty::{ GetTyAttr, PrimTy, Ty, TyCtx, VOID_TY };
 
 pub struct IcfgBuilder<'ast> {
     pending_functions: Vec<&'ast FunctionStmt<'ast>>,
@@ -161,13 +164,14 @@ impl<'ast, 'c> CfgBuilder<'ast, 'c> {
     pub(crate) fn set_result_loc_to_local_mem(
         &mut self,
         result_loc: ResultLoc,
-        make_result_mem: impl Fn() -> ResultMem
+        make_result_mem_ty: impl Fn() -> Ty
     ) -> ResultMemId {
         if let Some(result_mem_id) = self.result_loc_to_result_mem_id.get(&result_loc) {
             *result_mem_id
         } else {
-            let result_mem = make_result_mem();
+            let result_mem_ty = make_result_mem_ty();
             let result_mem_id = ResultMemId(self.result_mems.len() as u32);
+            let result_mem = ResultMem::new(result_mem_id, result_mem_ty);
             self.result_mems.push(result_mem);
             self.result_loc_to_result_mem_id.insert(result_loc, result_mem_id);
             result_mem_id
@@ -247,13 +251,13 @@ impl<'ast, 'c> Visitor<'ast> for CfgBuilder<'ast, 'c> {
 
     fn visit_if_expr(&mut self, if_expr: &'ast IfExpr<'ast>) -> Self::Result {
         let if_expr_ty = self.icfg_builder.get_ty_from_node_id(if_expr.ast_node_id);
-        let cond_ty = self.icfg_builder.get_ty_from_node_id(if_expr.condition.ast_node_id);
+
+        let cond_ty = self.icfg_builder.get_ty_from_node_id(
+            get_node_id_from_expr(if_expr.condition)
+        );
 
         let result_mem_id = if !if_expr_ty.is_void() {
-            let result_mems_len = self.result_mems.len();
-            let result_mem_id = self.set_result_loc_to_local_mem(if_expr.result_loc, || {
-                ResultMem::new(ResultMemId(result_mems_len as u32), if_expr_ty)
-            });
+            let result_mem_id = self.set_result_loc_to_local_mem(if_expr.result_loc, || if_expr_ty);
             Some(result_mem_id)
         } else {
             None
@@ -270,7 +274,11 @@ impl<'ast, 'c> Visitor<'ast> for CfgBuilder<'ast, 'c> {
                 self.push_node(
                     Node::new(
                         NodeKind::StoreNode(
-                            StoreNode::new(Either::Right(result_mem_id), if_expr_ty, true_operand)
+                            StoreNode::new(
+                                PlaceKind::ResultMemId(result_mem_id),
+                                if_expr_ty,
+                                true_operand
+                            )
                         )
                     )
                 );
@@ -289,7 +297,7 @@ impl<'ast, 'c> Visitor<'ast> for CfgBuilder<'ast, 'c> {
                 IfFalseBranchExpr::ElifExpr(elif_expr) => {
                     self.visit_if_expr(elif_expr);
                     let cond_ty = self.icfg_builder.get_ty_from_node_id(
-                        elif_expr.condition.ast_node_id
+                        get_node_id_from_expr(elif_expr.condition)
                     );
                     self.push_node_to(
                         bb_id_before_if_expr,
@@ -309,7 +317,7 @@ impl<'ast, 'c> Visitor<'ast> for CfgBuilder<'ast, 'c> {
                             Node::new(
                                 NodeKind::StoreNode(
                                     StoreNode::new(
-                                        Either::Right(result_mem_id),
+                                        PlaceKind::ResultMemId(result_mem_id),
                                         if_expr_ty,
                                         false_operand
                                     )
@@ -364,10 +372,10 @@ impl<'ast, 'c> Visitor<'ast> for CfgBuilder<'ast, 'c> {
         let loop_expr_ty = self.icfg_builder.get_ty_from_node_id(loop_expr.ast_node_id);
 
         let result_mem_id = if !loop_expr_ty.is_void() {
-            let result_mems_len = self.result_mems.len();
-            let result_mem_id = self.set_result_loc_to_local_mem(loop_expr.result_loc, || {
-                ResultMem::new(ResultMemId(result_mems_len as u32), loop_expr_ty)
-            });
+            let result_mem_id = self.set_result_loc_to_local_mem(
+                loop_expr.result_loc,
+                || loop_expr_ty
+            );
             Some(result_mem_id)
         } else {
             None
@@ -439,21 +447,54 @@ impl<'ast, 'c> Visitor<'ast> for CfgBuilder<'ast, 'c> {
         Self::default_result()
     }
 
+    /// Assumes read for now
+    /// IMPLEMENT: GET Result loc for tuples, if_exprs, loop_exprs etc.
+    fn visit_tuple_field_expr(
+        &mut self,
+        tuple_field_expr: &'ast ast::TupleFieldExpr<'ast>
+    ) -> Self::Result {
+        let lhs = self.visit_expr(tuple_field_expr.lhs);
+        let tuple_ty = match
+            self.icfg_builder.get_ty_from_node_id(get_node_id_from_expr(tuple_field_expr.lhs))
+        {
+            Ty::Tuple(tuple_ty) => tuple_ty,
+            _ => unreachable!("Should not be able to go here if previous pass was successfull"),
+        };
+
+        let temp_id = TempId(self.get_next_ssa_id());
+
+        let idx = tuple_field_expr.rhs.val as usize;
+        let elem_type = tuple_ty[idx];
+
+        // if idx == 0 {
+        //     self.push_node(Node::new(NodeKind::LoadNode(LoadNode::new(temp_id, loc_id, ty))));
+        // } else {
+        //     self.push_node();
+        // }
+
+        panic!("sdfsf");
+
+        Operand::new(OperandKind::Place(temp_id), elem_type)
+    }
+
     fn visit_assign_stmt(&mut self, assign_stmt: &'ast ast::AssignStmt<'ast>) -> Self::Result {
-        let (local_mem_id, ty) = match &assign_stmt.setter_expr.kind {
-            PlaceKind::IdentExpr(ident_expr) => {
+        let (local_mem_id, ty) = match assign_stmt.setter_expr {
+            PlaceExpr::IdentExpr(ident_expr) => {
                 let ty = self.icfg_builder.get_ty_from_node_id(ident_expr.ast_node_id);
                 let def_id = self.icfg_builder.get_def_id_from_node_id(ident_expr.ast_node_id);
                 let local_mem_id = self.get_local_mem_id_from_def_id(def_id);
                 (local_mem_id, ty)
             }
+            PlaceExpr::TupleFieldExpr(_) => panic!("Tuple field expr not yet supported"),
         };
 
         let result_operand = self.visit_expr(assign_stmt.value_expr);
 
         self.push_node(
             Node::new(
-                NodeKind::StoreNode(StoreNode::new(Either::Left(local_mem_id), ty, result_operand))
+                NodeKind::StoreNode(
+                    StoreNode::new(PlaceKind::LocalMemId(local_mem_id), ty, result_operand)
+                )
             )
         );
 
@@ -461,14 +502,14 @@ impl<'ast, 'c> Visitor<'ast> for CfgBuilder<'ast, 'c> {
     }
 
     fn visit_def_stmt(&mut self, def_stmt: &'ast ast::DefineStmt<'ast>) -> Self::Result {
-        let ty = self.icfg_builder.get_ty_from_node_id(def_stmt.value_expr.ast_node_id);
+        let ty = self.icfg_builder.get_ty_from_node_id(get_node_id_from_expr(def_stmt.value_expr));
 
         if ty.is_void() {
             return Self::default_result();
         }
 
-        let (local_mem_id, def_id) = match &def_stmt.setter_expr.kind {
-            PatKind::IdentPat(ident_pat) => {
+        let (local_mem_id, def_id) = match def_stmt.setter_expr {
+            Pat::IdentPat(ident_pat) => {
                 let local_mem_id = LocalMemId(self.local_mems.len() as u32);
                 let local_mem = LocalMem::new(
                     local_mem_id,
@@ -489,18 +530,78 @@ impl<'ast, 'c> Visitor<'ast> for CfgBuilder<'ast, 'c> {
 
         self.push_node(
             Node::new(
-                NodeKind::StoreNode(StoreNode::new(Either::Left(local_mem_id), ty, result_operand))
+                NodeKind::StoreNode(
+                    StoreNode::new(PlaceKind::LocalMemId(local_mem_id), ty, result_operand)
+                )
             )
         );
 
         Self::default_result()
     }
 
+    fn visit_tuple_expr(&mut self, tuple_expr: &'ast ast::TupleExpr<'ast>) -> Self::Result {
+        let tuple_ty = self.icfg_builder.get_ty_from_node_id(tuple_expr.ast_node_id);
+        let result_mem_id = ResultMemId(self.result_mems.len() as u32);
+        self.result_mems.push(ResultMem::new(result_mem_id, tuple_ty));
+
+        let mut byte_offset: usize = 0;
+
+        for expr in tuple_expr.fields.iter() {
+            let operand = self.visit_expr(*expr);
+
+            if byte_offset == 0 {
+                self.push_node(
+                    Node::new(
+                        NodeKind::StoreNode(
+                            StoreNode::new(
+                                PlaceKind::ResultMemId(result_mem_id),
+                                operand.ty,
+                                operand
+                            )
+                        )
+                    )
+                );
+            } else {
+                let temp_id = TempId(self.get_next_ssa_id() as u32);
+                self.push_node(
+                    Node::new(
+                        NodeKind::ByteAccessNode(
+                            ByteAccessNode::new(
+                                temp_id,
+                                PlaceKind::ResultMemId(result_mem_id),
+                                byte_offset
+                            )
+                        )
+                    )
+                );
+                self.push_node(
+                    Node::new(
+                        NodeKind::StoreNode(
+                            StoreNode::new(PlaceKind::TempId(temp_id), operand.ty, operand)
+                        )
+                    )
+                );
+            }
+
+            let operand_ty_attr = operand.ty.get_size_and_alignment();
+            byte_offset += operand_ty_attr.size_bytes;
+        }
+
+        let temp_id = TempId(self.get_next_ssa_id() as u32);
+        self.push_node(
+            Node::new(
+                NodeKind::LoadNode(LoadNode::new(temp_id, Either::Right(result_mem_id), tuple_ty))
+            )
+        );
+
+        Operand::new(OperandKind::Place(temp_id), tuple_ty)
+    }
+
     fn visit_binary_expr(&mut self, binary_expr: &'ast ast::BinaryExpr<'ast>) -> Self::Result {
         let lhs = self.visit_expr(binary_expr.lhs);
         let rhs = self.visit_expr(binary_expr.rhs);
 
-        let op_ty = self.icfg_builder.get_ty_from_node_id(binary_expr.lhs.ast_node_id);
+        let op_ty = self.icfg_builder.get_ty_from_node_id(get_node_id_from_expr(binary_expr.lhs));
         let result_ty = self.icfg_builder.get_ty_from_node_id(binary_expr.ast_node_id);
 
         let result_loc = TempId(self.get_next_ssa_id() as u32);

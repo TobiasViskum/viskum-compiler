@@ -1,4 +1,3 @@
-
 a := do
     k := 0
     a := 2
@@ -7,6 +6,7 @@ a := do
 end
 
 boolean := true
+
 
 a := (2 + 3) * 9
 b := 6 - (1 + a)

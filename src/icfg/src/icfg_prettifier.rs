@@ -152,19 +152,18 @@ impl<'b> CfgVisitor for IcfgPrettifier<'b> {
         )
     }
 
-    fn visit_init_node(&mut self, init_node: &crate::StoreNode, cfg: &crate::Cfg) -> Self::Result {
-        let place = &(match init_node.setter {
-            Either::Left(local_mem_id) => PlaceKind::LocalMemId(local_mem_id),
-            Either::Right(result_mem_id) => PlaceKind::ResultMemId(result_mem_id),
-        });
-
+    fn visit_store_node(
+        &mut self,
+        store_node: &crate::StoreNode,
+        cfg: &crate::Cfg
+    ) -> Self::Result {
         writeln!(
             self.buffer,
             "{}{}: {} = {}",
             " ".repeat(INDENTATION),
-            Self::display_place_kind(place, cfg),
-            init_node.result_ty,
-            Self::dislay_operand(&init_node.value, cfg)
+            Self::display_place_kind(&store_node.setter, cfg),
+            store_node.op_ty,
+            Self::dislay_operand(&store_node.value, cfg)
         )
     }
 }
