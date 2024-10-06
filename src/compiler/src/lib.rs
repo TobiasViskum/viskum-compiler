@@ -1,4 +1,5 @@
 use ast::{ AstArena, AstPrettifier };
+use bumpalo::Bump;
 use codegen::CodeGen;
 use icfg::{ Icfg, IcfgPrettifier };
 use icfg_builder::IcfgBuilder;
@@ -18,19 +19,26 @@ impl Compiler {
 
         // IcfgPrettifier::new(&icfg).print_icfg();
 
-        println!("Compilation took: {:?}", now.elapsed());
+        println!("Viskum compilation took: {:?}", now.elapsed());
 
+        let now = std::time::Instant::now();
         CodeGen::new(&icfg).gen_code("file");
+        println!("LLVM compilation took: {:?}", now.elapsed());
     }
 
     fn build_to_icfg(&self) -> Icfg {
         let file_content = Self::get_file_content();
         let ast_arena = AstArena::new();
+        let arena = Bump::new();
 
         let (resolved_information, ast) = {
             let parser = Parser::new(&file_content, &ast_arena);
 
-            let (mut resolver, ast) = Resolver::from_ast(&file_content, parser.parse_into_ast());
+            let (mut resolver, ast) = Resolver::from_ast(
+                &file_content,
+                parser.parse_into_ast(),
+                &arena
+            );
 
             let resolved_ast = resolver.resolve_ast(ast);
             let type_checked_ast = resolver.type_check_ast(resolved_ast);

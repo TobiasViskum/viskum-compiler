@@ -23,7 +23,7 @@ pub enum Precedence {
     PrecUnary,
     /// Precedence of `()` and `.` (infix)
     PrecCall,
-    /// Precedence of numbers. Used as an infix precedence
+    /// Used for tokens that can appear anywhere in expression and isn't tied to any precedence (e.g. `{` as a struct expression)
     PrecPrimary,
 }
 

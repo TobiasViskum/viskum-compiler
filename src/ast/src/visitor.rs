@@ -18,9 +18,9 @@ use crate::{
     Expr,
     ExprWithBlock,
     ExprWithoutBlock,
+    FieldExpr,
     GroupExpr,
-    IdentExpr,
-    IdentPat,
+    IdentNode,
     IfExpr,
     IfFalseBranchExpr,
     IntegerExpr,
@@ -29,6 +29,8 @@ use crate::{
     Pat,
     PlaceExpr,
     Stmt,
+    StructExpr,
+    StructItem,
     TupleExpr,
     TupleFieldExpr,
     ValueExpr,
@@ -46,7 +48,7 @@ pub trait Visitor<'ast>: Sized {
 
     /* Root nodes, uses a default implementation */
     #[allow(unused_variables)]
-    fn visit_ident_pat(&mut self, ident_pat: &'ast IdentPat) -> Self::Result {
+    fn visit_ident_pat(&mut self, ident_node: &'ast IdentNode) -> Self::Result {
         Self::default_result()
     }
     #[allow(unused_variables)]
@@ -58,7 +60,7 @@ pub trait Visitor<'ast>: Sized {
         Self::default_result()
     }
     #[allow(unused_variables)]
-    fn visit_ident_expr(&mut self, ident_expr: &'ast IdentExpr) -> Self::Result {
+    fn visit_ident_expr(&mut self, ident_node: &'ast IdentNode) -> Self::Result {
         Self::default_result()
     }
 
@@ -105,7 +107,14 @@ pub trait Visitor<'ast>: Sized {
     }
 
     fn visit_item(&mut self, item: ItemStmt<'ast>) -> Self::Result {
-        todo!()
+        match item {
+            ItemStmt::FnItem(fn_item) => todo!(),
+            ItemStmt::StructItem(struct_item) => self.visit_struct_item(struct_item),
+        }
+    }
+
+    fn visit_struct_item(&mut self, struct_item: &'ast StructItem<'ast>) -> Self::Result {
+        Self::default_result()
     }
 
     fn visit_if_false_branch_expr(&mut self, expr: IfFalseBranchExpr<'ast>) -> Self::Result {
@@ -122,6 +131,14 @@ pub trait Visitor<'ast>: Sized {
         tuple_field_expr: &'ast TupleFieldExpr<'ast>
     ) -> Self::Result {
         walk_tuple_field_expr(self, tuple_field_expr)
+    }
+
+    fn visit_field_expr(&mut self, field_expr: &'ast FieldExpr<'ast>) -> Self::Result {
+        walk_field_expr(self, field_expr)
+    }
+
+    fn visit_struct_expr(&mut self, struct_expr: &'ast StructExpr<'ast>) -> Self::Result {
+        walk_struct_expr(self, struct_expr)
     }
 
     fn visit_block_expr(&mut self, expr: &'ast BlockExpr<'ast>) -> Self::Result {
@@ -242,6 +259,7 @@ pub fn walk_place_expr<'a, V>(visitor: &mut V, place_expr: PlaceExpr<'a>) -> V::
         PlaceExpr::IdentExpr(ident_expr) => visitor.visit_ident_expr(ident_expr),
         PlaceExpr::TupleFieldExpr(tuple_field_expr) =>
             visitor.visit_tuple_field_expr(tuple_field_expr),
+        PlaceExpr::FieldExpr(field_expr) => visitor.visit_field_expr(field_expr),
     }
 }
 
@@ -255,6 +273,13 @@ pub fn walk_tuple_field_expr<'a, V>(
     visitor.visit_interger_expr(tuple_field_expr.rhs)
 }
 
+pub fn walk_field_expr<'a, V>(visitor: &mut V, field_expr: &'a FieldExpr<'a>) -> V::Result
+    where V: Visitor<'a>
+{
+    visitor.visit_expr(field_expr.lhs);
+    visitor.visit_ident_expr(field_expr.rhs)
+}
+
 pub fn walk_value_expr<'a, V>(visitor: &mut V, value_expr: ValueExpr<'a>) -> V::Result
     where V: Visitor<'a>
 {
@@ -263,7 +288,21 @@ pub fn walk_value_expr<'a, V>(visitor: &mut V, value_expr: ValueExpr<'a>) -> V::
         ValueExpr::BinaryExpr(binary_expr) => visitor.visit_binary_expr(binary_expr),
         ValueExpr::GroupExpr(group_expr) => visitor.visit_group_expr(group_expr),
         ValueExpr::ConstExpr(const_expr) => visitor.visit_const_expr(const_expr),
+        ValueExpr::StructExpr(struct_expr) => visitor.visit_struct_expr(struct_expr),
     }
+}
+
+pub fn walk_struct_expr<'a, V>(visitor: &mut V, struct_expr: &'a StructExpr<'a>) -> V::Result
+    where V: Visitor<'a>
+{
+    visitor.visit_ident_expr(struct_expr.ident_node);
+
+    struct_expr.field_initializations.iter().for_each(|field| {
+        visitor.visit_ident_expr(field.ident);
+        visitor.visit_expr(field.value);
+    });
+
+    V::default_result()
 }
 
 pub fn walk_tuple_expr<'a, V>(visitor: &mut V, tuple_expr: &'a TupleExpr<'a>) -> V::Result

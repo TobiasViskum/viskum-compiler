@@ -2,6 +2,8 @@ use std::{ cell::{ LazyCell, RefCell }, fmt::Display, hash::Hash, marker::Phanto
 
 use bumpalo::Bump;
 use fxhash::FxHashSet;
+use op::{ ArithmeticOp, BinaryOp, ComparisonOp };
+use symbol::Symbol;
 use typed_arena::Arena;
 
 pub const VOID_TY: Ty = Ty::PrimTy(PrimTy::Void);
@@ -48,15 +50,15 @@ impl GlobalCtx {
         }
     }
 
-    pub fn intern_vec_of_types(&self, types: Vec<Ty>) -> &'static [Ty] {
-        let interned_ty = with_type_arena(|type_arena| unsafe {
-            &*(type_arena.alloc_slice_fill_iter(types.into_iter()) as *mut [Ty])
+    fn intern_vec_of_types<T>(&self, types: Vec<T>) -> &'static [T] {
+        let interned_ty = with_type_arena(|type_arena: &Bump| unsafe {
+            &*(type_arena.alloc_slice_fill_iter(types.into_iter()) as *mut [T])
         });
 
         interned_ty
     }
 
-    pub fn intern_type(&self, ty: Ty) -> &'static Ty {
+    fn intern_type(&self, ty: Ty) -> &'static Ty {
         if let Some(found_type) = self.interned_types.borrow().get(&ty) {
             return found_type;
         }
@@ -84,25 +86,9 @@ impl TyCtx {
         with_global_ctx(|global| global.intern_type(ty))
     }
 
-    pub fn tuple_type(fields: Vec<Ty>) -> Ty {
-        let fields = with_global_ctx(|global| global.intern_vec_of_types(fields));
-
-        Ty::Tuple(fields)
+    pub fn intern_many_types<T>(types: Vec<T>) -> &'static [T] {
+        with_global_ctx(|global| global.intern_vec_of_types(types))
     }
-
-    // fn _intern_type(&mut self, ty: Ty) -> &'ctx Ty {
-    //     if let Some(found_type) = self.interned_types.get(&ty) {
-    //         return *found_type;
-    //     }
-
-    //     // This is safe, because the arena lives as long as the program
-    //     let interned_type = with_type_arena(|type_arena| unsafe {
-    //         &*(type_arena.alloc(ty) as *mut Ty)
-    //     });
-    //     self.interned_types.insert(interned_type);
-
-    //     interned_type
-    // }
 }
 
 pub struct TyAttr {
@@ -117,44 +103,130 @@ impl TyAttr {
 }
 
 pub trait GetTyAttr {
-    fn get_size_and_alignment(&self) -> TyAttr;
+    fn get_ty_attr(&self) -> TyAttr;
 }
 
 #[derive(Debug, Hash, Eq, PartialEq, Clone, Copy)]
 pub enum Ty {
     Tuple(&'static [Ty]),
+    Struct(Symbol, &'static [(Symbol, Ty)]),
+    Ptr(&'static Ty),
     PrimTy(PrimTy),
     Unkown,
 }
 
 impl Ty {
+    pub fn to_ptr_ty(&self) -> Ty {
+        match self {
+            Self::Unkown | Self::PrimTy(PrimTy::Void) => *self,
+            _ => Self::Ptr(TyCtx.intern_type(*self)),
+        }
+    }
+
     pub fn is_void(&self) -> bool {
-        *self == Ty::PrimTy(PrimTy::Void)
+        self.auto_deref() == VOID_TY
+    }
+
+    pub fn is_ptr(&self) -> bool {
+        if let Self::Ptr(_) = self { true } else { false }
+    }
+
+    pub fn test_eq(&self, other: Ty) -> bool {
+        self.auto_deref() == other.auto_deref()
+    }
+
+    pub fn test_binary(&self, other: Ty, op: BinaryOp) -> Option<Ty> {
+        let lhs = self.auto_deref();
+        let rhs = other.auto_deref();
+
+        match op {
+            BinaryOp::ArithmeticOp(arithmetic_op) => {
+                use ArithmeticOp::*;
+                match (lhs, arithmetic_op, rhs) {
+                    (INT_TY, Add | Sub | Mul | Div, INT_TY) => Some(INT_TY),
+                    _ => None,
+                }
+            }
+            BinaryOp::ComparisonOp(comparison_op) => {
+                use ComparisonOp::*;
+                match (lhs, comparison_op, rhs) {
+                    (INT_TY, Eq | Ne | Ge | Gt | Le | Lt, INT_TY) => Some(BOOL_TY),
+                    (BOOL_TY, Eq | Ne | Ge | Gt | Le | Lt, BOOL_TY) => Some(BOOL_TY),
+                    _ => None,
+                }
+            }
+        }
+    }
+
+    pub fn try_deref_as_tuple(&self) -> Option<&'static [Ty]> {
+        let ty = self.auto_deref();
+        match ty {
+            Ty::Tuple(tuple_ty) => Some(tuple_ty),
+            _ => None,
+        }
+    }
+
+    pub fn can_be_dereffed_to_bool(&self) -> bool {
+        self.auto_deref() == BOOL_TY
+    }
+
+    fn auto_deref(&self) -> Ty {
+        let mut ty = *self;
+        loop {
+            if let Ty::Ptr(inner_ty) = ty {
+                ty = *inner_ty;
+            } else {
+                break ty;
+            }
+        }
+    }
+
+    pub fn try_deref_once(&self) -> Option<Ty> {
+        if let Ty::Ptr(inner_ty) = *self { Some(*inner_ty) } else { None }
     }
 }
 
 impl GetTyAttr for Ty {
-    fn get_size_and_alignment(&self) -> TyAttr {
+    fn get_ty_attr(&self) -> TyAttr {
         match self {
             Self::Tuple(tuple) => {
                 let mut total_size = 0;
                 let mut alignment = None;
 
                 for ty in tuple.iter() {
-                    let ty_attr = ty.get_size_and_alignment();
+                    let ty_attr = ty.get_ty_attr();
                     total_size += ty_attr.size_bytes;
                     if let Some(alignment) = &mut alignment {
-                        if ty_attr.size_bytes < *alignment {
-                            *alignment = ty_attr.size_bytes;
+                        if ty_attr.alignment_bytes < *alignment {
+                            *alignment = ty_attr.alignment_bytes;
                         }
                     } else {
-                        alignment = Some(ty_attr.size_bytes);
+                        alignment = Some(ty_attr.alignment_bytes);
                     }
                 }
 
                 TyAttr::new(total_size, alignment.unwrap_or(0))
             }
-            Self::PrimTy(prim_ty) => prim_ty.get_size_and_alignment(),
+            Self::Struct(_, fields) => {
+                let mut total_size = 0;
+                let mut alignment = None;
+
+                for (_, ty) in fields.iter() {
+                    let ty_attr = ty.get_ty_attr();
+                    total_size += ty_attr.size_bytes;
+                    if let Some(alignment) = &mut alignment {
+                        if ty_attr.alignment_bytes < *alignment {
+                            *alignment = ty_attr.alignment_bytes;
+                        }
+                    } else {
+                        alignment = Some(ty_attr.alignment_bytes);
+                    }
+                }
+
+                TyAttr::new(total_size, alignment.unwrap_or(0))
+            }
+            Self::Ptr(_) => TyAttr::new(8, 8),
+            Self::PrimTy(prim_ty) => prim_ty.get_ty_attr(),
             Self::Unkown => panic!("Unkown has no size and alignment"),
         }
     }
@@ -163,8 +235,23 @@ impl GetTyAttr for Ty {
 impl Display for Ty {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::Ptr(inner) => write!(f, "*{}", inner),
             Self::Unkown => write!(f, "{{unkown}}"),
             Self::PrimTy(prim_ty) => prim_ty.fmt(f),
+            Self::Struct(struct_name, fields) => {
+                write!(f, "{} {{", struct_name.get())?;
+                for (i, (symbol, ty)) in fields.iter().enumerate() {
+                    let len = fields.len();
+                    write!(f, " {}: {}", symbol.get(), ty)?;
+                    if i != len - 1 {
+                        write!(f, ",")?;
+                    } else {
+                        write!(f, " ")?;
+                    }
+                }
+
+                write!(f, "}}")
+            }
             Self::Tuple(types) => {
                 write!(f, "(")?;
                 for (i, ty) in types.iter().enumerate() {
@@ -189,7 +276,7 @@ pub enum PrimTy {
 }
 
 impl GetTyAttr for PrimTy {
-    fn get_size_and_alignment(&self) -> TyAttr {
+    fn get_ty_attr(&self) -> TyAttr {
         match self {
             Self::Int => TyAttr::new(4, 4),
             Self::Bool => TyAttr::new(1, 1),

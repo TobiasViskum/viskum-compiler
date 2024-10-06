@@ -37,6 +37,10 @@ pub enum TokenKind {
     LeftParen,
     /// `)`
     RightParen,
+    /// `{`
+    LeftCurly,
+    /// `}`
+    RightCurly,
     /// `==`
     Eq,
     /// `!=`
@@ -90,6 +94,8 @@ pub enum TokenKind {
     Def,
     /// Keyword `class`
     Class,
+    /// Keyword `struct`
+    Struct,
     /// Keyword `if`
     If,
     /// Keyword `while`

@@ -4,9 +4,13 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+# Libs in project
 ast = { path = "../ast" }
 symbol = { path = "../symbol" }
 ty = { path = "../ty" }
 fxhash = "0.2.1"
 error = { path = "../error" }
 ir_defs = { path = "../ir_defs" }
+
+# Extern crates
+bumpalo = "3.1.16"

@@ -1,10 +1,8 @@
-use data_structures::Either;
 use fxhash::FxHashMap;
 use icfg::{
     walk_basic_block,
     walk_basic_blocks,
     walk_local_mems,
-    walk_node,
     walk_result_mems,
     BasicBlockId,
     Cfg,
@@ -12,7 +10,6 @@ use icfg::{
     Const,
     Icfg,
     Operand,
-    OperandKind,
     PlaceKind,
 };
 use op::{ ArithmeticOp, BinaryOp, ComparisonOp };
@@ -96,7 +93,7 @@ impl<'a> CfgVisitor for CodeGenUnitHelper<'a> {
         _cfg: &Cfg
     ) -> Self::Result {
         let next_ssa_id = self.get_next_ssa_id();
-        self.place_to_ssa_id.insert(PlaceKind::TempId(byte_access_node.result_place), next_ssa_id);
+        self.place_to_ssa_id.insert(byte_access_node.result_place, next_ssa_id);
     }
 }
 
@@ -136,37 +133,33 @@ impl<'a> CodeGenUnit<'a> {
     }
 
     pub(crate) fn get_llvm_ty(&self, ty: Ty) -> String {
-        match ty {
-            Ty::PrimTy(prim_ty) =>
+        match &ty {
+            Ty::PrimTy(prim_ty) => {
                 match prim_ty {
                     PrimTy::Bool => "i1".to_string(),
                     PrimTy::Int => "i32".to_string(),
                     PrimTy::Void => "void".to_string(),
                 }
-            Ty::Tuple(_) => {
-                let ty_attr = ty.get_size_and_alignment();
+            }
+            Ty::Ptr(_) => "ptr".to_string(),
+            ty @ Ty::Tuple(_) => {
+                let ty_attr = ty.get_ty_attr();
+                format!("[{} x i8]", ty_attr.size_bytes)
+            }
+            ty @ Ty::Struct(_, _) => {
+                let ty_attr = ty.get_ty_attr();
                 format!("[{} x i8]", ty_attr.size_bytes)
             }
             Ty::Unkown => panic!("Unkown type (should not be this far in compilation)"),
         }
     }
 
-    // pub(crate) fn get_declaration_llvm_ty(&self, ty: Ty) -> String {
-    //     let str = match ty {
-    //         Ty::PrimTy(primt_ty) => {
-    //             match primt_ty {
-    //                 PrimTy::Bool =>
-    //             }
-    //         }
-    //     }
-    // }
-
     pub(crate) fn get_llvm_operand(&self, operand: &Operand) -> String {
-        let string = match &operand.kind {
-            OperandKind::Place(place) => {
+        let string = match &operand {
+            Operand::TempId(place) => {
                 format!("%{}", self.get_ssa_id_from_place(&PlaceKind::TempId(*place)))
             }
-            OperandKind::Const(const_val) => {
+            Operand::Const(const_val) => {
                 match const_val {
                     Const::Bool(bool) =>
                         (
@@ -209,7 +202,7 @@ impl<'a> CfgVisitor for CodeGenUnit<'a> {
     fn visit_local_mem(&mut self, local_mem: &icfg::LocalMem) -> Self::Result {
         let ssa_id = self.get_ssa_id_from_place(&PlaceKind::LocalMemId(local_mem.local_mem_id));
 
-        let ty_attr = local_mem.ty.get_size_and_alignment();
+        let ty_attr = local_mem.ty.get_ty_attr();
 
         writeln!(
             self.buffer,
@@ -224,7 +217,7 @@ impl<'a> CfgVisitor for CodeGenUnit<'a> {
     fn visit_result_mem(&mut self, result_mem: &icfg::ResultMem) -> Self::Result {
         let ssa_id = self.get_ssa_id_from_place(&PlaceKind::ResultMemId(result_mem.result_mem_id));
 
-        let ty_attr = result_mem.ty.get_size_and_alignment();
+        let ty_attr = result_mem.ty.get_ty_attr();
 
         writeln!(
             self.buffer,
@@ -281,7 +274,7 @@ impl<'a> CfgVisitor for CodeGenUnit<'a> {
         byte_access_node: &icfg::ByteAccessNode,
         cfg: &Cfg
     ) -> Self::Result {
-        let temp_id = self.get_ssa_id_from_place(&PlaceKind::TempId(byte_access_node.result_place));
+        let temp_id = self.get_ssa_id_from_place(&byte_access_node.result_place);
         let array_id = self.get_ssa_id_from_place(&byte_access_node.access_place);
 
         writeln!(
@@ -300,15 +293,13 @@ impl<'a> CfgVisitor for CodeGenUnit<'a> {
         cfg: &Cfg
     ) -> Self::Result {
         let cond = self.get_llvm_operand(&branch_cond_node.condition);
-        let ty = self.get_llvm_ty(branch_cond_node.ty);
         let true_branch = self.get_bb_id(&branch_cond_node.true_branch);
         let false_branch = self.get_bb_id(&branch_cond_node.false_branch);
 
         writeln!(
             self.buffer,
-            "{}br {} {}, label %{}, label %{}",
+            "{}br i1 {}, label %{}, label %{}",
             " ".repeat(INDENTATION),
-            ty,
             cond,
             true_branch,
             false_branch
@@ -317,18 +308,13 @@ impl<'a> CfgVisitor for CodeGenUnit<'a> {
 
     fn visit_load_node(&mut self, load_node: &icfg::LoadNode, cfg: &Cfg) -> Self::Result {
         let ssa_id = self.get_ssa_id_from_place(&PlaceKind::TempId(load_node.result_place));
-        let var_place = match load_node.loc_id {
-            Either::Left(local_mem_id) =>
-                self.get_ssa_id_from_place(&PlaceKind::LocalMemId(local_mem_id)),
-            Either::Right(result_mem_id) =>
-                self.get_ssa_id_from_place(&PlaceKind::ResultMemId(result_mem_id)),
-        };
+        let var_place = self.get_ssa_id_from_place(&load_node.load_place);
         writeln!(
             self.buffer,
             "{}%{} = load {}, ptr %{}",
             " ".repeat(INDENTATION),
             ssa_id,
-            self.get_llvm_ty(load_node.ty),
+            self.get_llvm_ty(load_node.load_ty),
             var_place
         )
     }

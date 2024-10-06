@@ -2,14 +2,17 @@ use ast::{
     get_node_id_from_expr,
     Ast,
     AstTypeChecked,
-    FunctionStmt,
+    Expr,
+    FnItem,
+    IdentNode,
     IfExpr,
     IfFalseBranchExpr,
+    LoopExpr,
     Pat,
     PlaceExpr,
     Visitor,
 };
-use data_structures::Either;
+
 use fxhash::FxHashMap;
 use icfg::{
     BasicBlock,
@@ -19,28 +22,28 @@ use icfg::{
     BranchNode,
     ByteAccessNode,
     Cfg,
+    Const,
     Icfg,
-    IndexNode,
     LoadNode,
     LocalMem,
     LocalMemId,
     Node,
     NodeKind,
     Operand,
-    OperandKind,
     PlaceKind,
     ResultMem,
     ResultMemId,
+    StoreKind,
     StoreNode,
     TempId,
 };
-use ir_defs::{ DefId, Mutability, NodeId, ResultLoc };
+use ir_defs::{ DefId, Mutability, NodeId };
 use resolver::ResolvedInformation;
 use symbol::Symbol;
-use ty::{ GetTyAttr, PrimTy, Ty, TyCtx, VOID_TY };
+use ty::{ GetTyAttr, Ty, VOID_TY };
 
 pub struct IcfgBuilder<'ast> {
-    pending_functions: Vec<&'ast FunctionStmt<'ast>>,
+    pending_functions: Vec<&'ast FnItem<'ast>>,
     ast: Ast<'ast, AstTypeChecked>,
     cfgs: Vec<Cfg>,
     resolved_information: ResolvedInformation,
@@ -74,7 +77,7 @@ impl<'ast> IcfgBuilder<'ast> {
         CfgBuilder::new(self)
     }
 
-    pub(crate) fn append_function(&mut self, function: &'ast FunctionStmt<'ast>) {
+    pub(crate) fn append_function(&mut self, function: &'ast FnItem<'ast>) {
         self.pending_functions.push(function);
     }
 
@@ -93,8 +96,8 @@ impl<'ast> IcfgBuilder<'ast> {
     }
 }
 
-pub struct CfgBuilder<'ast, 'c> {
-    icfg_builder: &'c mut IcfgBuilder<'ast>,
+pub struct CfgBuilder<'ast, 'b> {
+    icfg_builder: &'b mut IcfgBuilder<'ast>,
 
     /* These is transfered over to the cfg */
     local_mems: Vec<LocalMem>,
@@ -102,20 +105,20 @@ pub struct CfgBuilder<'ast, 'c> {
     basic_blocks: Vec<BasicBlock>,
 
     def_id_to_local_mem_id: FxHashMap<DefId, LocalMemId>,
-    result_loc_to_result_mem_id: FxHashMap<ResultLoc, ResultMemId>,
+    node_id_to_result_mem_id: FxHashMap<NodeId, ResultMemId>,
 
     /* For loops */
     break_bb_ids: Vec<(BasicBlockId, Option<Operand>)>,
     continue_bb_ids: Vec<BasicBlockId>,
 
-    // entry_function: &'ast FunctionStmt<'ast>,
+    // entry_function: &'ast FnItem<'ast>,
     next_ssa_id: u32,
 }
 
-impl<'ast, 'c> CfgBuilder<'ast, 'c> {
+impl<'ast, 'b> CfgBuilder<'ast, 'b> {
     pub fn new(
-        icfg_builder: &'c mut IcfgBuilder<'ast>
-        // entry_function: &'ast FunctionStmt<'ast>
+        icfg_builder: &'b mut IcfgBuilder<'ast>
+        // entry_function: &'ast FnItem<'ast>
     ) -> Self {
         let mut basic_blocks = Vec::with_capacity(16);
         let basic_block = BasicBlock::new(BasicBlockId(0));
@@ -127,7 +130,7 @@ impl<'ast, 'c> CfgBuilder<'ast, 'c> {
             result_mems: Vec::with_capacity(8),
             basic_blocks,
             def_id_to_local_mem_id: Default::default(),
-            result_loc_to_result_mem_id: Default::default(),
+            node_id_to_result_mem_id: Default::default(),
             break_bb_ids: Default::default(),
             continue_bb_ids: Default::default(),
             // entry_function,
@@ -153,29 +156,16 @@ impl<'ast, 'c> CfgBuilder<'ast, 'c> {
         self.next_ssa_id - 1
     }
 
+    pub(crate) fn get_temp_id(&mut self) -> TempId {
+        TempId(self.get_next_ssa_id())
+    }
+
     pub(crate) fn get_local_mem_id_from_def_id(&self, def_id: DefId) -> LocalMemId {
         *self.def_id_to_local_mem_id.get(&def_id).expect("Expected LocalMem from DefId")
     }
 
     pub(crate) fn set_def_id_to_local_mem_id(&mut self, def_id: DefId, local_mem_id: LocalMemId) {
         self.def_id_to_local_mem_id.insert(def_id, local_mem_id);
-    }
-
-    pub(crate) fn set_result_loc_to_local_mem(
-        &mut self,
-        result_loc: ResultLoc,
-        make_result_mem_ty: impl Fn() -> Ty
-    ) -> ResultMemId {
-        if let Some(result_mem_id) = self.result_loc_to_result_mem_id.get(&result_loc) {
-            *result_mem_id
-        } else {
-            let result_mem_ty = make_result_mem_ty();
-            let result_mem_id = ResultMemId(self.result_mems.len() as u32);
-            let result_mem = ResultMem::new(result_mem_id, result_mem_ty);
-            self.result_mems.push(result_mem);
-            self.result_loc_to_result_mem_id.insert(result_loc, result_mem_id);
-            result_mem_id
-        }
     }
 
     pub(crate) fn get_curr_bb_id(&self) -> BasicBlockId {
@@ -213,71 +203,181 @@ impl<'ast, 'c> CfgBuilder<'ast, 'c> {
 
         basic_block.push_node(node);
     }
+
+    pub(crate) fn new_result_mem(&mut self, ty: Ty) -> ResultMemId {
+        let result_mem_id = ResultMemId(self.result_mems.len() as u32);
+        self.result_mems.push(ResultMem::new(result_mem_id, ty));
+        result_mem_id
+    }
+
+    pub(crate) fn set_result_mem_id_to_expr_result(
+        &mut self,
+        node_id: NodeId,
+        ty: Ty
+    ) -> ResultMemId {
+        if let Some(result_mem_id) = self.node_id_to_result_mem_id.get(&node_id) {
+            *result_mem_id
+        } else {
+            let result_mem_id = self.new_result_mem(ty);
+            self.node_id_to_result_mem_id.insert(node_id, result_mem_id);
+            result_mem_id
+        }
+    }
+
+    /// This function takes a VisitResult and tries to get a value from it.
+    ///
+    /// It will as insert many load (deref) instructions as needed to use it as a value
+    pub(crate) fn get_operand_from_visit_result(
+        &mut self,
+        visit_result: VisitResult
+    ) -> (Operand, Ty) {
+        match visit_result {
+            VisitResult::PlaceKind(place_kind, place_ty) => {
+                let (temp_id, ty) = match place_kind {
+                    PlaceKind::TempId(temp_id) => (temp_id, place_ty),
+                    // Now we have to load, because it refers to a stack allocated place
+                    required_load_place => {
+                        let temp_id = self.get_temp_id();
+                        let new_ty = place_ty.try_deref_once();
+
+                        if let Some(new_ty) = new_ty {
+                            self.push_node(
+                                Node::new(
+                                    NodeKind::LoadNode(
+                                        LoadNode::new(temp_id, required_load_place, new_ty)
+                                    )
+                                )
+                            );
+                            (temp_id, new_ty)
+                        } else {
+                            panic!("Stack allocated space should be able to be dereffed")
+                        }
+                    }
+                };
+
+                let (mut temp_id, mut ty) = (temp_id, ty);
+
+                loop {
+                    if let Ty::Ptr(inner_ty) = ty {
+                        let new_temp_id = self.get_temp_id();
+                        self.push_node(
+                            Node::new(
+                                NodeKind::LoadNode(
+                                    LoadNode::new(
+                                        new_temp_id,
+                                        PlaceKind::TempId(temp_id),
+                                        *inner_ty
+                                    )
+                                )
+                            )
+                        );
+                        temp_id = new_temp_id;
+                        ty = *inner_ty;
+                        continue;
+                    }
+                    break;
+                }
+
+                (Operand::TempId(temp_id), ty)
+            }
+            VisitResult::Const(const_val) => (Operand::Const(const_val), const_val.get_ty()),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum VisitResult {
+    PlaceKind(PlaceKind, Ty),
+    Const(Const),
+}
+
+impl VisitResult {
+    pub fn get_ty(&self) -> Ty {
+        match self {
+            Self::PlaceKind(_, ty) => *ty,
+            Self::Const(const_val) => const_val.get_ty(),
+        }
+    }
+}
+
+impl Default for VisitResult {
+    fn default() -> Self {
+        Self::Const(Const::Void)
+    }
 }
 
 impl<'ast, 'c> Visitor<'ast> for CfgBuilder<'ast, 'c> {
-    type Result = Operand;
+    /// This is a kind of "lazy-load" result. For example when visiting a variable, it just returns the place it lives in.
+    /// It doesn't add the load node before requesting so with the method `get_operand_from_visit_result`.
+    /// This useful because for example in a field expr, we don't necessarily want to add a load node (we may want to add a ByteAccessNode instead)
+    type Result = VisitResult;
 
     fn default_result() -> Self::Result {
-        Operand::new(Default::default(), VOID_TY)
+        Default::default()
     }
 
     fn visit_interger_expr(&mut self, integer_expr: &'ast ast::IntegerExpr) -> Self::Result {
-        let ty = self.icfg_builder.get_ty_from_node_id(integer_expr.ast_node_id);
-
-        Operand::new(OperandKind::from(integer_expr.val), ty)
+        VisitResult::Const(Const::Int(integer_expr.val))
     }
 
     fn visit_bool_expr(&mut self, bool_expr: &'ast ast::BoolExpr) -> Self::Result {
-        let ty = self.icfg_builder.get_ty_from_node_id(bool_expr.ast_node_id);
-
-        Operand::new(OperandKind::from(bool_expr.val), ty)
+        VisitResult::Const(Const::Bool(bool_expr.val))
     }
 
-    fn visit_ident_expr(&mut self, ident_expr: &'ast ast::IdentExpr) -> Self::Result {
-        let def_id = self.icfg_builder.get_def_id_from_node_id(ident_expr.ast_node_id);
-        let ty = self.icfg_builder.get_ty_from_node_id(ident_expr.ast_node_id);
+    fn visit_ident_expr(&mut self, ident_node: &'ast IdentNode) -> Self::Result {
+        let def_id = self.icfg_builder.get_def_id_from_node_id(ident_node.ast_node_id);
+        let ty = self.icfg_builder.get_ty_from_node_id(ident_node.ast_node_id);
         let local_mem_id = self.get_local_mem_id_from_def_id(def_id);
 
-        let result_place = TempId(self.get_next_ssa_id());
-        self.push_node(
-            Node::new(
-                NodeKind::LoadNode(LoadNode::new(result_place, Either::Left(local_mem_id), ty))
-            )
-        );
-
-        Operand::new(OperandKind::from(result_place), ty)
+        VisitResult::PlaceKind(PlaceKind::LocalMemId(local_mem_id), ty)
     }
 
     fn visit_if_expr(&mut self, if_expr: &'ast IfExpr<'ast>) -> Self::Result {
-        let if_expr_ty = self.icfg_builder.get_ty_from_node_id(if_expr.ast_node_id);
+        fn set_result_mem_id_to_if_expr_result<'ast, 'b>(
+            cfg_builder: &mut CfgBuilder<'ast, 'b>,
+            if_expr: &'ast IfExpr<'ast>
+        ) -> ResultMemId {
+            let result_mem_id = cfg_builder.set_result_mem_id_to_expr_result(
+                if_expr.ast_node_id,
+                cfg_builder.icfg_builder.get_ty_from_node_id(if_expr.ast_node_id)
+            );
 
-        let cond_ty = self.icfg_builder.get_ty_from_node_id(
-            get_node_id_from_expr(if_expr.condition)
-        );
+            if let Some(IfFalseBranchExpr::ElifExpr(elif_expr)) = if_expr.false_block {
+                cfg_builder.node_id_to_result_mem_id.insert(elif_expr.ast_node_id, result_mem_id);
+            }
+
+            result_mem_id
+        }
+
+        let if_expr_ty = self.icfg_builder.get_ty_from_node_id(if_expr.ast_node_id).to_ptr_ty();
 
         let result_mem_id = if !if_expr_ty.is_void() {
-            let result_mem_id = self.set_result_loc_to_local_mem(if_expr.result_loc, || if_expr_ty);
-            Some(result_mem_id)
+            Some(set_result_mem_id_to_if_expr_result(self, if_expr))
         } else {
             None
         };
 
         let bb_id_before_if_expr = BasicBlockId((self.basic_blocks.len() - 1) as u32);
-        let cond = self.visit_expr(if_expr.condition);
+
+        let (cond_operand, _) = {
+            let cond_visit_result = self.visit_expr(if_expr.condition);
+            self.get_operand_from_visit_result(cond_visit_result)
+        };
 
         let (first_true_bb_id, last_true_bb_id) = {
-            let if_expr_ty = self.icfg_builder.get_ty_from_node_id(if_expr.ast_node_id);
             let true_bb_id = self.new_basic_block();
-            let true_operand = self.visit_block_expr(if_expr.true_block);
+            let true_visit_result = self.visit_block_expr(if_expr.true_block);
             if let Some(result_mem_id) = result_mem_id {
+                let (true_operand, true_ty) = self.get_operand_from_visit_result(true_visit_result);
+
                 self.push_node(
                     Node::new(
                         NodeKind::StoreNode(
                             StoreNode::new(
                                 PlaceKind::ResultMemId(result_mem_id),
-                                if_expr_ty,
-                                true_operand
+                                true_ty,
+                                true_operand,
+                                StoreKind::Init
                             )
                         )
                     )
@@ -296,14 +396,14 @@ impl<'ast, 'c> Visitor<'ast> for CfgBuilder<'ast, 'c> {
             match false_branch {
                 IfFalseBranchExpr::ElifExpr(elif_expr) => {
                     self.visit_if_expr(elif_expr);
-                    let cond_ty = self.icfg_builder.get_ty_from_node_id(
-                        get_node_id_from_expr(elif_expr.condition)
-                    );
+                    // let cond_ty = self.icfg_builder.get_ty_from_node_id(
+                    //     get_node_id_from_expr(elif_expr.condition)
+                    // );
                     self.push_node_to(
                         bb_id_before_if_expr,
                         Node::new(
                             NodeKind::BranchCondNode(
-                                BranchCondNode::new(cond, cond_ty, first_true_bb_id, false_bb_id)
+                                BranchCondNode::new(cond_operand, first_true_bb_id, false_bb_id)
                             )
                         )
                     );
@@ -311,15 +411,18 @@ impl<'ast, 'c> Visitor<'ast> for CfgBuilder<'ast, 'c> {
                     self.push_node_to(false_bb_id, branch_out_node);
                 }
                 IfFalseBranchExpr::ElseExpr(else_expr) => {
-                    let false_operand = self.visit_block_expr(else_expr);
+                    let false_visit_result = self.visit_block_expr(else_expr);
+                    let (false_operand, false_ty) =
+                        self.get_operand_from_visit_result(false_visit_result);
                     if let Some(result_mem_id) = result_mem_id {
                         self.push_node(
                             Node::new(
                                 NodeKind::StoreNode(
                                     StoreNode::new(
                                         PlaceKind::ResultMemId(result_mem_id),
-                                        if_expr_ty,
-                                        false_operand
+                                        false_ty,
+                                        false_operand,
+                                        StoreKind::Init
                                     )
                                 )
                             )
@@ -329,7 +432,7 @@ impl<'ast, 'c> Visitor<'ast> for CfgBuilder<'ast, 'c> {
                         bb_id_before_if_expr,
                         Node::new(
                             NodeKind::BranchCondNode(
-                                BranchCondNode::new(cond, cond_ty, first_true_bb_id, false_bb_id)
+                                BranchCondNode::new(cond_operand, first_true_bb_id, false_bb_id)
                             )
                         )
                     );
@@ -346,7 +449,7 @@ impl<'ast, 'c> Visitor<'ast> for CfgBuilder<'ast, 'c> {
                 bb_id_before_if_expr,
                 Node::new(
                     NodeKind::BranchCondNode(
-                        BranchCondNode::new(cond, cond_ty, first_true_bb_id, bb_id_after_true_expr)
+                        BranchCondNode::new(cond_operand, first_true_bb_id, bb_id_after_true_expr)
                     )
                 )
             );
@@ -354,29 +457,27 @@ impl<'ast, 'c> Visitor<'ast> for CfgBuilder<'ast, 'c> {
         }
 
         if let Some(result_mem_id) = result_mem_id {
-            let result_place = TempId(self.get_next_ssa_id());
-            self.push_node(
-                Node::new(
-                    NodeKind::LoadNode(
-                        LoadNode::new(result_place, Either::Right(result_mem_id), if_expr_ty)
-                    )
-                )
-            );
-            Operand::new(OperandKind::from(result_place), if_expr_ty)
+            VisitResult::PlaceKind(PlaceKind::ResultMemId(result_mem_id), if_expr_ty)
         } else {
             Self::default_result()
         }
     }
 
-    fn visit_loop_expr(&mut self, loop_expr: &'ast ast::LoopExpr<'ast>) -> Self::Result {
-        let loop_expr_ty = self.icfg_builder.get_ty_from_node_id(loop_expr.ast_node_id);
+    fn visit_loop_expr(&mut self, loop_expr: &'ast LoopExpr<'ast>) -> Self::Result {
+        fn set_result_mem_id_to_loop_expr_result<'ast, 'b>(
+            cfg_builder: &mut CfgBuilder<'ast, 'b>,
+            loop_expr: &'ast LoopExpr<'ast>
+        ) -> ResultMemId {
+            cfg_builder.set_result_mem_id_to_expr_result(
+                loop_expr.ast_node_id,
+                cfg_builder.icfg_builder.get_ty_from_node_id(loop_expr.ast_node_id)
+            )
+        }
+
+        let loop_expr_ty = self.icfg_builder.get_ty_from_node_id(loop_expr.ast_node_id).to_ptr_ty();
 
         let result_mem_id = if !loop_expr_ty.is_void() {
-            let result_mem_id = self.set_result_loc_to_local_mem(
-                loop_expr.result_loc,
-                || loop_expr_ty
-            );
-            Some(result_mem_id)
+            Some(set_result_mem_id_to_loop_expr_result(self, loop_expr))
         } else {
             None
         };
@@ -416,16 +517,8 @@ impl<'ast, 'c> Visitor<'ast> for CfgBuilder<'ast, 'c> {
             );
         }
 
-        if !loop_expr_ty.is_void() {
-            let result_place = TempId(self.get_next_ssa_id());
-            // self.push_node(
-            //     Node::new(
-            //         NodeKind::LoadNode(
-            //             LoadNode::new(result_place, Either::Right(result_mem_id), loop_expr_ty)
-            //         )
-            //     )
-            // );
-            Operand::new(OperandKind::from(result_place), loop_expr_ty)
+        if let Some(result_mem_id) = result_mem_id {
+            VisitResult::PlaceKind(PlaceKind::ResultMemId(result_mem_id), loop_expr_ty)
         } else {
             Self::default_result()
         }
@@ -453,47 +546,79 @@ impl<'ast, 'c> Visitor<'ast> for CfgBuilder<'ast, 'c> {
         &mut self,
         tuple_field_expr: &'ast ast::TupleFieldExpr<'ast>
     ) -> Self::Result {
-        let lhs = self.visit_expr(tuple_field_expr.lhs);
-        let tuple_ty = match
-            self.icfg_builder.get_ty_from_node_id(get_node_id_from_expr(tuple_field_expr.lhs))
-        {
-            Ty::Tuple(tuple_ty) => tuple_ty,
-            _ => unreachable!("Should not be able to go here if previous pass was successfull"),
+        // This will always result in a plac
+        let lhs_visit_result = self.visit_expr(tuple_field_expr.lhs);
+        let lhs_place = match lhs_visit_result {
+            VisitResult::PlaceKind(place_kind, _) => place_kind,
+            _ => unreachable!("This should be unreachable if type checking was successful"),
         };
 
-        let temp_id = TempId(self.get_next_ssa_id());
+        let node_id = get_node_id_from_expr(tuple_field_expr.lhs);
+        self.node_id_to_result_mem_id.get(&node_id);
+
+        let tuple_ty = match
+            self.icfg_builder
+                .get_ty_from_node_id(get_node_id_from_expr(tuple_field_expr.lhs))
+                .try_deref_as_tuple()
+        {
+            Some(tuple_ty) => tuple_ty,
+            None => unreachable!("Should not be able to go here if previous pass was successfull"),
+        };
 
         let idx = tuple_field_expr.rhs.val as usize;
-        let elem_type = tuple_ty[idx];
 
-        // if idx == 0 {
-        //     self.push_node(Node::new(NodeKind::LoadNode(LoadNode::new(temp_id, loc_id, ty))));
-        // } else {
-        //     self.push_node();
-        // }
+        // We make it a pointer, because when accessing a field of a tuple, we are doing a
+        let elem_type = tuple_ty[idx].to_ptr_ty();
 
-        panic!("sdfsf");
+        if idx == 0 {
+            VisitResult::PlaceKind(lhs_place, elem_type)
+        } else {
+            let mut byte_offset = 0;
+            for (i, ty) in tuple_ty.iter().enumerate() {
+                byte_offset += ty.get_ty_attr().size_bytes;
 
-        Operand::new(OperandKind::Place(temp_id), elem_type)
+                if i == idx - 1 {
+                    break;
+                }
+            }
+
+            let temp_id = self.get_temp_id();
+            self.push_node(
+                Node::new(
+                    NodeKind::ByteAccessNode(
+                        ByteAccessNode::new(PlaceKind::TempId(temp_id), lhs_place, byte_offset)
+                    )
+                )
+            );
+
+            VisitResult::PlaceKind(PlaceKind::TempId(temp_id), elem_type)
+        }
     }
 
     fn visit_assign_stmt(&mut self, assign_stmt: &'ast ast::AssignStmt<'ast>) -> Self::Result {
-        let (local_mem_id, ty) = match assign_stmt.setter_expr {
+        let local_mem_id = match assign_stmt.setter_expr {
             PlaceExpr::IdentExpr(ident_expr) => {
-                let ty = self.icfg_builder.get_ty_from_node_id(ident_expr.ast_node_id);
+                // let ty = self.icfg_builder.get_ty_from_node_id(ident_expr.ast_node_id);
                 let def_id = self.icfg_builder.get_def_id_from_node_id(ident_expr.ast_node_id);
                 let local_mem_id = self.get_local_mem_id_from_def_id(def_id);
-                (local_mem_id, ty)
+                local_mem_id
             }
             PlaceExpr::TupleFieldExpr(_) => panic!("Tuple field expr not yet supported"),
+            PlaceExpr::FieldExpr(_) => panic!("Field expr not yet supported"),
         };
 
-        let result_operand = self.visit_expr(assign_stmt.value_expr);
+        let value_visit_result = self.visit_expr(assign_stmt.value_expr);
+        let (operand, op_ty) = self.get_operand_from_visit_result(value_visit_result);
 
         self.push_node(
             Node::new(
                 NodeKind::StoreNode(
-                    StoreNode::new(PlaceKind::LocalMemId(local_mem_id), ty, result_operand)
+                    StoreNode::new(
+                        PlaceKind::LocalMemId(local_mem_id),
+                        op_ty,
+                        operand,
+                        StoreKind::Assign
+                    )
                 )
             )
         );
@@ -524,14 +649,21 @@ impl<'ast, 'c> Visitor<'ast> for CfgBuilder<'ast, 'c> {
             }
         };
 
-        let result_operand = self.visit_expr(def_stmt.value_expr);
+        let value_visit_result = self.visit_expr(def_stmt.value_expr);
+
+        let (operand, op_ty) = self.get_operand_from_visit_result(value_visit_result);
 
         self.set_def_id_to_local_mem_id(def_id, local_mem_id);
 
         self.push_node(
             Node::new(
                 NodeKind::StoreNode(
-                    StoreNode::new(PlaceKind::LocalMemId(local_mem_id), ty, result_operand)
+                    StoreNode::new(
+                        PlaceKind::LocalMemId(local_mem_id),
+                        op_ty,
+                        operand,
+                        StoreKind::Init
+                    )
                 )
             )
         );
@@ -539,81 +671,112 @@ impl<'ast, 'c> Visitor<'ast> for CfgBuilder<'ast, 'c> {
         Self::default_result()
     }
 
+    fn visit_struct_expr(&mut self, struct_expr: &'ast ast::StructExpr<'ast>) -> Self::Result {
+        let struct_ty = self.icfg_builder.get_ty_from_node_id(struct_expr.ast_node_id);
+        let result_mem_id = self.new_result_mem(struct_ty);
+        self.node_id_to_result_mem_id.insert(struct_expr.ast_node_id, result_mem_id);
+
+        let mut byte_offset: usize = 0;
+
+        for field in struct_expr.field_initializations.iter() {
+            byte_offset = self.init_tuple_or_struct_field(field.value, result_mem_id, byte_offset);
+        }
+
+        VisitResult::PlaceKind(PlaceKind::ResultMemId(result_mem_id), struct_ty.to_ptr_ty())
+    }
+
     fn visit_tuple_expr(&mut self, tuple_expr: &'ast ast::TupleExpr<'ast>) -> Self::Result {
         let tuple_ty = self.icfg_builder.get_ty_from_node_id(tuple_expr.ast_node_id);
-        let result_mem_id = ResultMemId(self.result_mems.len() as u32);
-        self.result_mems.push(ResultMem::new(result_mem_id, tuple_ty));
+        let result_mem_id = self.new_result_mem(tuple_ty);
+        self.node_id_to_result_mem_id.insert(tuple_expr.ast_node_id, result_mem_id);
 
         let mut byte_offset: usize = 0;
 
         for expr in tuple_expr.fields.iter() {
-            let operand = self.visit_expr(*expr);
-
-            if byte_offset == 0 {
-                self.push_node(
-                    Node::new(
-                        NodeKind::StoreNode(
-                            StoreNode::new(
-                                PlaceKind::ResultMemId(result_mem_id),
-                                operand.ty,
-                                operand
-                            )
-                        )
-                    )
-                );
-            } else {
-                let temp_id = TempId(self.get_next_ssa_id() as u32);
-                self.push_node(
-                    Node::new(
-                        NodeKind::ByteAccessNode(
-                            ByteAccessNode::new(
-                                temp_id,
-                                PlaceKind::ResultMemId(result_mem_id),
-                                byte_offset
-                            )
-                        )
-                    )
-                );
-                self.push_node(
-                    Node::new(
-                        NodeKind::StoreNode(
-                            StoreNode::new(PlaceKind::TempId(temp_id), operand.ty, operand)
-                        )
-                    )
-                );
-            }
-
-            let operand_ty_attr = operand.ty.get_size_and_alignment();
-            byte_offset += operand_ty_attr.size_bytes;
+            byte_offset = self.init_tuple_or_struct_field(*expr, result_mem_id, byte_offset);
         }
 
-        let temp_id = TempId(self.get_next_ssa_id() as u32);
-        self.push_node(
-            Node::new(
-                NodeKind::LoadNode(LoadNode::new(temp_id, Either::Right(result_mem_id), tuple_ty))
-            )
-        );
-
-        Operand::new(OperandKind::Place(temp_id), tuple_ty)
+        VisitResult::PlaceKind(PlaceKind::ResultMemId(result_mem_id), tuple_ty.to_ptr_ty())
     }
 
     fn visit_binary_expr(&mut self, binary_expr: &'ast ast::BinaryExpr<'ast>) -> Self::Result {
-        let lhs = self.visit_expr(binary_expr.lhs);
-        let rhs = self.visit_expr(binary_expr.rhs);
+        let (lhs_operand, lhs_ty) = {
+            let lhs_visit_result = self.visit_expr(binary_expr.lhs);
+            self.get_operand_from_visit_result(lhs_visit_result)
+        };
+        let (rhs_operand, rhs_ty) = {
+            let rhs_visit_result = self.visit_expr(binary_expr.rhs);
+            self.get_operand_from_visit_result(rhs_visit_result)
+        };
 
-        let op_ty = self.icfg_builder.get_ty_from_node_id(get_node_id_from_expr(binary_expr.lhs));
-        let result_ty = self.icfg_builder.get_ty_from_node_id(binary_expr.ast_node_id);
+        let result_ty = lhs_ty.test_binary(rhs_ty, binary_expr.op).unwrap();
 
-        let result_loc = TempId(self.get_next_ssa_id() as u32);
+        let result_place = self.get_temp_id();
 
         self.push_node(
             Node::new(
                 NodeKind::BinaryNode(
-                    BinaryNode::new(result_loc, result_ty, op_ty, binary_expr.op, lhs, rhs)
+                    BinaryNode::new(result_place, lhs_ty, binary_expr.op, lhs_operand, rhs_operand)
                 )
             )
         );
 
-        Operand::new(OperandKind::Place(result_loc), result_ty)
+        VisitResult::PlaceKind(PlaceKind::TempId(result_place), result_ty)
+    }
+}
+
+impl<'ast, 'b> CfgBuilder<'ast, 'b> {
+    fn init_tuple_or_struct_field(
+        &mut self,
+        expr: Expr<'ast>,
+        result_mem_id: ResultMemId,
+        byte_offset: usize
+    ) -> usize {
+        let visit_result = self.visit_expr(expr);
+
+        let (operand, operand_ty) = self.get_operand_from_visit_result(visit_result);
+
+        if byte_offset == 0 {
+            self.push_node(
+                Node::new(
+                    NodeKind::StoreNode(
+                        StoreNode::new(
+                            PlaceKind::ResultMemId(result_mem_id),
+                            operand_ty,
+                            operand,
+                            StoreKind::Init
+                        )
+                    )
+                )
+            );
+        } else {
+            let temp_id = self.get_temp_id();
+            self.push_node(
+                Node::new(
+                    NodeKind::ByteAccessNode(
+                        ByteAccessNode::new(
+                            PlaceKind::TempId(temp_id),
+                            PlaceKind::ResultMemId(result_mem_id),
+                            byte_offset
+                        )
+                    )
+                )
+            );
+            self.push_node(
+                Node::new(
+                    NodeKind::StoreNode(
+                        StoreNode::new(
+                            PlaceKind::TempId(temp_id),
+                            operand_ty,
+                            operand,
+                            StoreKind::Init
+                        )
+                    )
+                )
+            );
+        }
+
+        let operand_ty_attr = operand_ty.get_ty_attr();
+        byte_offset + operand_ty_attr.size_bytes
     }
 }

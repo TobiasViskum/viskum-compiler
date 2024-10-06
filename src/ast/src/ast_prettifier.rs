@@ -7,6 +7,7 @@ use crate::{
     get_node_id_from_expr,
     visitor::{ walk_stmt, Visitor },
     Ast,
+    IdentNode,
     IfFalseBranchExpr,
     Stmt,
 };
@@ -184,14 +185,14 @@ impl<'ast, T> Visitor<'ast> for AstPrettifier<'ast, T> where T: AstState {
         Self::default_result()
     }
 
-    fn visit_ident_pat(&mut self, ident_pat: &'ast crate::IdentPat) -> Self::Result {
-        write!(self.buffer, "{}", &self.src[ident_pat.span.get_byte_range()])?;
+    fn visit_ident_pat(&mut self, ident_node: &'ast IdentNode) -> Self::Result {
+        write!(self.buffer, "{}", &self.src[ident_node.span.get_byte_range()])?;
 
         Self::default_result()
     }
 
-    fn visit_ident_expr(&mut self, ident_expr: &'ast crate::IdentExpr) -> Self::Result {
-        write!(self.buffer, "{}", &self.src[ident_expr.span.get_byte_range()])?;
+    fn visit_ident_expr(&mut self, ident_node: &'ast IdentNode) -> Self::Result {
+        write!(self.buffer, "{}", &self.src[ident_node.span.get_byte_range()])?;
 
         Self::default_result()
     }

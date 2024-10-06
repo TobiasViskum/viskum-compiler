@@ -1,13 +1,6 @@
 use data_structures::Either;
 
-use crate::{
-    cfg_visitor::{ walk_basic_block, CfgVisitor },
-    Cfg,
-    Icfg,
-    Operand,
-    OperandKind,
-    PlaceKind,
-};
+use crate::{ cfg_visitor::{ walk_basic_block, CfgVisitor }, Cfg, Icfg, Operand, PlaceKind };
 use std::fmt::{ Display, Write };
 
 const INDENTATION: usize = 4;
@@ -53,15 +46,16 @@ impl<'b> IcfgPrettifier<'b> {
         (|| -> Result<(), std::fmt::Error> {
             write!(temp_buffer, "(")?;
 
-            match &operand.kind {
-                OperandKind::Place(place) => {
+            match &operand {
+                Operand::TempId(place) => {
                     let displayed_place = Self::display_place_kind(&PlaceKind::TempId(*place), cfg);
-                    temp_buffer += displayed_place.as_str();
+                    write!(temp_buffer, "{}", displayed_place)?;
                 }
-                OperandKind::Const(const_val) => write!(temp_buffer, "{}", const_val)?,
+                Operand::Const(const_val) => write!(temp_buffer, "{}", const_val)?,
             }
 
-            write!(temp_buffer, " as {})", operand.ty)
+            // write!(temp_buffer, " as {})", operand.ty)
+            write!(temp_buffer, ")")
         })().expect("Unexpected write error");
 
         temp_buffer
@@ -110,7 +104,7 @@ impl<'b> CfgVisitor for IcfgPrettifier<'b> {
             "{}{}: {} = {} {} {}",
             " ".repeat(INDENTATION),
             binary_node.result_place,
-            binary_node.result_ty,
+            binary_node.op_ty,
             Self::dislay_operand(&binary_node.lhs, cfg),
             binary_node.op,
             Self::dislay_operand(&binary_node.rhs, cfg)
@@ -137,18 +131,13 @@ impl<'b> CfgVisitor for IcfgPrettifier<'b> {
     }
 
     fn visit_load_node(&mut self, load_node: &crate::LoadNode, cfg: &Cfg) -> Self::Result {
-        let place = &(match load_node.loc_id {
-            Either::Left(local_mem_id) => PlaceKind::LocalMemId(local_mem_id),
-            Either::Right(result_mem_id) => PlaceKind::ResultMemId(result_mem_id),
-        });
-
         writeln!(
             self.buffer,
             "{}{}: {} = load {}",
             " ".repeat(INDENTATION),
             load_node.result_place,
-            load_node.ty,
-            Self::display_place_kind(place, cfg)
+            load_node.load_ty,
+            Self::display_place_kind(&load_node.load_place, cfg)
         )
     }
 

@@ -1,0 +1,8 @@
+[package]
+name = "type_ir"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bumpalo = "3.1.16"
+data_structures = { path = "../data_structures" }

@@ -63,6 +63,7 @@ pub use ast_arena::AstArena;
 pub use ast_prettifier::AstPrettifier;
 pub use ast_query_system::{ AstQueryEntry, AstQuerySystem };
 pub use ast_visitor::{ AstVisitEmitter, AstVisitor };
+use bumpalo::Bump;
 pub use visitor::*;
 
 use std::{ cell::Cell, marker::PhantomData };
@@ -144,6 +145,11 @@ pub struct GlobalScope<'ast> {
 }
 
 #[derive(Debug, Clone, Copy)]
+pub enum Typing {
+    Ident(Span),
+}
+
+#[derive(Debug, Clone, Copy)]
 pub enum Stmt<'ast> {
     ItemStmt(ItemStmt<'ast>),
     DefineStmt(&'ast DefineStmt<'ast>),
@@ -153,14 +159,41 @@ pub enum Stmt<'ast> {
 
 #[derive(Debug, Clone, Copy)]
 pub enum ItemStmt<'ast> {
-    FunctionStmt(&'ast FunctionStmt<'ast>),
+    FnItem(&'ast FnItem<'ast>),
+    StructItem(&'ast StructItem<'ast>),
 }
 
 #[derive(Debug, new)]
-pub struct FunctionStmt<'ast> {
-    pub ident_expr: &'ast IdentExpr,
+pub struct FnItem<'ast> {
+    pub ident_node: &'ast IdentNode,
     pub body: Expr<'ast>,
     pub ast_node_id: NodeId,
+}
+
+#[derive(Debug, new)]
+pub struct StructItem<'ast> {
+    pub ident_node: &'ast IdentNode,
+    pub field_declarations: &'ast [&'ast FieldDeclaration<'ast>],
+    pub ast_node_id: NodeId,
+}
+
+#[derive(Debug, new)]
+pub struct FieldDeclaration<'ast> {
+    pub ident: &'ast IdentNode,
+    pub type_expr: Typing,
+}
+
+#[derive(Debug, new)]
+pub struct StructExpr<'ast> {
+    pub ident_node: &'ast IdentNode,
+    pub field_initializations: &'ast [&'ast FieldInitialization<'ast>],
+    pub ast_node_id: NodeId,
+}
+
+#[derive(Debug, new)]
+pub struct FieldInitialization<'ast> {
+    pub ident: &'ast IdentNode,
+    pub value: Expr<'ast>,
 }
 
 #[derive(Debug, new)]
@@ -182,7 +215,7 @@ pub struct AssignStmt<'ast> {
 
 #[derive(Debug, Clone, Copy)]
 pub enum Pat<'ast> {
-    IdentPat(&'ast IdentPat),
+    IdentPat(&'ast IdentNode),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -202,7 +235,6 @@ pub enum ExprWithBlock<'ast> {
 pub struct LoopExpr<'ast> {
     pub body: &'ast BlockExpr<'ast>,
     pub ast_node_id: NodeId,
-    pub result_loc: ResultLoc,
 }
 
 #[derive(Debug, new)]
@@ -218,8 +250,6 @@ pub struct IfExpr<'ast> {
     pub false_block: Option<IfFalseBranchExpr<'ast>>,
     pub ast_node_id: NodeId,
     pub span: Span,
-    /// Makes sure if and elif result goes into same place
-    pub result_loc: ResultLoc,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -249,8 +279,16 @@ pub struct ContinueExpr {
 
 #[derive(Debug, Clone, Copy)]
 pub enum PlaceExpr<'ast> {
-    IdentExpr(&'ast IdentExpr),
+    IdentExpr(&'ast IdentNode),
     TupleFieldExpr(&'ast TupleFieldExpr<'ast>),
+    FieldExpr(&'ast FieldExpr<'ast>),
+}
+
+#[derive(Debug, new)]
+pub struct FieldExpr<'ast> {
+    pub lhs: Expr<'ast>,
+    pub rhs: &'ast IdentNode,
+    pub ast_node_id: NodeId,
 }
 
 #[derive(Debug, new)]
@@ -261,20 +299,14 @@ pub struct TupleFieldExpr<'ast> {
 }
 
 #[derive(Debug, new)]
-pub struct IdentPat {
+pub struct IdentNode {
     pub span: Span,
     pub ast_node_id: NodeId,
 }
 
-#[derive(Debug, new)]
-pub struct IdentExpr {
-    pub span: Span,
-    pub ast_node_id: NodeId,
-}
-
-impl IdentExpr {
-    pub fn get_as_pat(&self) -> IdentPat {
-        IdentPat::new(self.span, self.ast_node_id)
+impl IdentNode {
+    pub fn get_copy(&self) -> Self {
+        Self::new(self.span, self.ast_node_id)
     }
 }
 
@@ -283,6 +315,7 @@ pub enum ValueExpr<'ast> {
     BinaryExpr(&'ast BinaryExpr<'ast>),
     GroupExpr(&'ast GroupExpr<'ast>),
     TupleExpr(&'ast TupleExpr<'ast>),
+    StructExpr(&'ast StructExpr<'ast>),
     ConstExpr(ConstExpr<'ast>),
 }
 
@@ -354,6 +387,7 @@ pub fn get_node_id_from_place_expr(place_expr: PlaceExpr) -> NodeId {
     match place_expr {
         PlaceExpr::IdentExpr(ident_expr) => ident_expr.ast_node_id,
         PlaceExpr::TupleFieldExpr(tuple_field_expr) => tuple_field_expr.ast_node_id,
+        PlaceExpr::FieldExpr(field_expr) => field_expr.ast_node_id,
     }
 }
 
@@ -362,6 +396,7 @@ pub fn get_node_id_from_value_expr(value_expr: ValueExpr) -> NodeId {
         ValueExpr::BinaryExpr(binary_expr) => binary_expr.ast_node_id,
         ValueExpr::GroupExpr(group_expr) => group_expr.ast_node_id,
         ValueExpr::TupleExpr(tuple_expr) => tuple_expr.ast_node_id,
+        ValueExpr::StructExpr(struct_expr) => struct_expr.ast_node_id,
         ValueExpr::ConstExpr(const_expr) => {
             match const_expr {
                 ConstExpr::BoolExpr(bool_expr) => bool_expr.ast_node_id,

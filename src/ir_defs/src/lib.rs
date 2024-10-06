@@ -1,5 +1,6 @@
 use std::fmt::Display;
 use symbol::Symbol;
+use ty::Ty;
 
 #[derive(PartialEq, Debug, Clone, Copy)]
 pub enum Mutability {
@@ -35,42 +36,67 @@ impl Display for NodeId {
 /// Refers to any definition
 #[derive(Hash, PartialEq, Eq, Debug, Clone, Copy)]
 pub struct DefId {
-    symbol: Symbol,
-    ast_node_id: NodeId,
+    pub symbol: Symbol,
+    pub node_id: NodeId,
 }
 
 impl DefId {
-    pub fn new(symbol: Symbol, ast_node_id: NodeId) -> Self {
-        Self { symbol, ast_node_id }
+    pub fn new(symbol: Symbol, node_id: NodeId) -> Self {
+        Self { symbol, node_id }
     }
 }
 
 /// Information about a definition
 #[derive(Debug, Clone, Copy)]
-pub struct NameBinding {
-    pub kind: NameBindingKind,
+pub struct NameBinding<'res> {
+    pub kind: NameBindingKind<'res>,
 }
 
-impl From<DefKind> for NameBinding {
-    fn from(value: DefKind) -> Self {
+impl<'res> NameBinding<'res> {
+    pub fn new(kind: NameBindingKind<'res>) -> Self {
+        Self { kind }
+    }
+
+    pub fn get_res_kind(&self) -> ResKind {
+        match self.kind {
+            NameBindingKind::DefKind(def_kind) => {
+                match def_kind {
+                    DefKind::Stuct(_) => ResKind::Struct,
+                    DefKind::Variable(_) => ResKind::Variable,
+                }
+            }
+        }
+    }
+}
+
+impl<'res> From<DefKind<'res>> for NameBinding<'res> {
+    fn from(value: DefKind<'res>) -> Self {
         Self { kind: NameBindingKind::DefKind(value) }
     }
 }
 
 #[derive(Debug, Clone, Copy)]
-pub enum NameBindingKind {
-    DefKind(DefKind),
+pub enum NameBindingKind<'res> {
+    DefKind(DefKind<'res>),
     // Module
     // Import
 }
 
 #[derive(Debug, Clone, Copy)]
-/// Resoluted def
-pub enum Res {
-    Def(DefKind),
+pub enum DefKind<'res> {
+    Variable(Mutability),
+    Stuct(&'res [(DefId, ResTy)]),
 }
 
 #[derive(Debug, Clone, Copy)]
-pub enum DefKind {
-    Variable(Mutability),
+pub enum ResTy {
+    UserDef(DefId),
+    Compiler(Ty),
+}
+
+/// Only difference between this and `DefKind`, is that this has no data
+#[derive(Hash, Eq, PartialEq, Debug, Clone, Copy)]
+pub enum ResKind {
+    Variable,
+    Struct,
 }

@@ -54,6 +54,7 @@ name = "compiler"
 version = "0.1.0"
 dependencies = [
  "ast",
+ "bumpalo",
  "codegen",
  "icfg",
  "icfg_builder",
@@ -120,6 +121,7 @@ checksum = "5443807d6dff69373d433ab9ef5378ad8df50ca6298caf15de6e52e24aaf54d5"
 name = "error"
 version = "0.1.0"
 dependencies = [
+ "ir_defs",
  "op",
  "span",
  "symbol",
@@ -185,6 +187,7 @@ name = "ir_defs"
 version = "0.1.0"
 dependencies = [
  "symbol",
+ "ty",
 ]
 
 [[package]]
@@ -245,6 +248,7 @@ name = "resolver"
 version = "0.1.0"
 dependencies = [
  "ast",
+ "bumpalo",
  "error",
  "fxhash",
  "ir_defs",
@@ -291,8 +295,17 @@ dependencies = [
  "bumpalo",
  "data_structures",
  "fxhash",
- "ir_defs",
+ "op",
+ "symbol",
  "typed-arena",
+]
+
+[[package]]
+name = "type_ir"
+version = "0.1.0"
+dependencies = [
+ "bumpalo",
+ "data_structures",
 ]
 
 [[package]]

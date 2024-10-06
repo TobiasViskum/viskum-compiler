@@ -14,7 +14,7 @@ use ir_defs::Mutability;
 use op::{ ArithmeticOp, BinaryOp };
 use span::Span;
 use symbol::Symbol;
-use ty::Ty;
+use ty::{ Ty, BOOL_TY, INT_TY, VOID_TY };
 mod icfg_prettifier;
 mod cfg_visitor;
 
@@ -185,16 +185,42 @@ pub enum NodeKind {
     ByteAccessNode(ByteAccessNode),
 }
 
+/// A hint to the optimizer whether or not the store is used for initializing a complicated data structure
+/// (e.g. a tuple, struct etc.) or if it's an assignment (the data structure has already been initialized)
+///
+/// **EXAMPLE:**
+///
+/// This code:
+/// ```
+/// mut tuple := (1, 2, 3)
+/// tuple.1 = 8
+/// ```
+/// Translates to (not valid code):
+/// ```
+/// mut tuple := Int(i32 * 3)
+/// tuple.0 = 1 // (StoreKind::Init)
+/// tuple.1 = 2 // (StoreKind::Init)
+/// tuple.2 = 3 // (StoreKind::Init)
+/// tuple.1 = 8 // (StoreKind::Assign)
+/// ```
+#[derive(Debug, Clone, Copy)]
+pub enum StoreKind {
+    /// Doesn't require target to be mutable
+    Init,
+    /// Requires target to be mutable
+    Assign,
+}
+
 /// If used with LoadNode, it can access fields of structs and tuples
 ///
 /// If used with StoreNode, it can write to fields of structs and tuples
 ///
 /// LLVM instruction:
 ///
-/// %{result_place} = getelementptr inbounds i8, ptr %{access_place}, i64 {byte_offset}
+/// `%{result_place} = getelementptr inbounds i8, ptr %{access_place}, i64 {byte_offset}`
 #[derive(Debug, new, Clone, Copy)]
 pub struct ByteAccessNode {
-    pub result_place: TempId,
+    pub result_place: PlaceKind,
     pub access_place: PlaceKind,
     pub byte_offset: usize,
 }
@@ -212,24 +238,22 @@ pub struct IndexNode {
 ///
 /// LLVM instruction:
 ///
-/// %{result_place} = load {ty}, ptr %{loc_id}
+/// `%{result_place} = load {load_ty}, ptr %{load_place}`
 #[derive(Debug, new, Clone, Copy)]
 pub struct LoadNode {
     pub result_place: TempId,
-    pub loc_id: Either<LocalMemId, ResultMemId>,
-    pub ty: Ty,
+    pub load_place: PlaceKind,
+    pub load_ty: Ty,
 }
 
 /// Used to goto either one of two basic blocks based on a condition
 ///
 /// LLVM instruction:
 ///
-/// br i1 {condition}, label %{true_branch}, label %{false_branch}
+/// `br i1 {condition}, label %{true_branch}, label %{false_branch}`
 #[derive(Debug, new, Clone, Copy)]
 pub struct BranchCondNode {
     pub condition: Operand,
-    /// Right now only Bool
-    pub ty: Ty,
     pub true_branch: BasicBlockId,
     pub false_branch: BasicBlockId,
 }
@@ -238,7 +262,7 @@ pub struct BranchCondNode {
 ///
 /// LLVM instruction:
 ///
-/// br label %{branch}
+/// `br label %{branch}`
 #[derive(Debug, new, Clone, Copy)]
 pub struct BranchNode {
     pub branch: BasicBlockId,
@@ -248,87 +272,73 @@ pub struct BranchNode {
 ///
 /// LLVM instruction:
 ///
-/// store {op_ty} {value}, ptr %{setter}
+/// `store {op_ty} {value}, ptr %{setter}`
 #[derive(Debug, new, Clone, Copy)]
 pub struct StoreNode {
     pub setter: PlaceKind,
     pub op_ty: Ty,
     pub value: Operand,
+    pub store_kind: StoreKind,
 }
 
 /// Translates to any binary instruction. That is, either an arithmetic instruction or a comparison
 ///
 /// LLVM instruction:
 ///
-/// %{result_place} = {op} {op_ty} {lhs}, {rhs}
+/// `%{result_place} = {op} {op_ty} {lhs}, {rhs}`
 #[derive(Debug, new, Clone, Copy)]
 pub struct BinaryNode {
     pub result_place: TempId,
-    /// This should be removed in the future
-    pub result_ty: Ty,
     pub op_ty: Ty,
     pub op: BinaryOp,
     pub lhs: Operand,
     pub rhs: Operand,
 }
 
-/// CHANGE:
-/// Remove type from this (necessary type information is already in nodes most of the times)
-///
-/// REASON:
-/// A lot of the times the necessary information is already inside the node,
-/// so the type in this struct is essentially 24 bytes wasted (e.g. BinaryNode could save 48 bytes from this)
-#[derive(Debug, Clone, Copy, new)]
-pub struct Operand {
-    pub kind: OperandKind,
-    pub ty: Ty,
+#[derive(Debug, Clone, Copy)]
+pub enum Operand {
+    TempId(TempId),
+    Const(Const),
 }
 
 impl Display for Operand {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "({} as {})", self.kind, self.ty)
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum OperandKind {
-    Place(TempId),
-    Const(Const),
-}
-
-impl Display for OperandKind {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Place(place) => write!(f, "{}", place),
+            Self::TempId(place) => write!(f, "{}", place),
             Self::Const(const_val) => write!(f, "{}", const_val),
         }
     }
 }
 
-impl From<TempId> for OperandKind {
+impl From<TempId> for Operand {
     fn from(value: TempId) -> Self {
-        Self::Place(value)
+        Self::TempId(value)
     }
 }
 
-impl From<i64> for OperandKind {
+impl From<i64> for Operand {
     fn from(value: i64) -> Self {
         Self::Const(Const::Int(value))
     }
 }
 
-impl From<bool> for OperandKind {
+impl From<bool> for Operand {
     fn from(value: bool) -> Self {
         Self::Const(Const::Bool(value))
     }
 }
 
-impl Default for OperandKind {
+impl Default for Operand {
     fn default() -> Self {
-        OperandKind::Const(Const::default())
+        Operand::Const(Const::default())
     }
 }
 
+/// LocalMemId: Memory location of an explicit variable (e.g. `a := value`)
+///
+/// ResultMemId: Memory location of an implicit variable (e.g. the result of an `IfExpr` or a `TupleExpr`)
+///
+/// TempId: Memory location usable only once and occurs as a result of many instructions (e.g. `tempId = 2 + 8` or `tempId = load a`)
 #[derive(Hash, Eq, PartialEq, Debug, Clone, Copy)]
 pub enum PlaceKind {
     LocalMemId(LocalMemId),
@@ -353,6 +363,16 @@ pub enum Const {
     Int(i64),
     Bool(bool),
     Void,
+}
+
+impl Const {
+    pub fn get_ty(&self) -> Ty {
+        match self {
+            Self::Void => VOID_TY,
+            Self::Int(_) => INT_TY,
+            Self::Bool(_) => BOOL_TY,
+        }
+    }
 }
 
 impl Display for Const {

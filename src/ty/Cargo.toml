@@ -4,8 +4,10 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+data_structures = { path = "../data_structures" }
+op = { path = "../op" }
+symbol = { path = "../symbol" }
+
 typed-arena = "2.0.2"
 bumpalo = "3.1.16"
 fxhash = "0.2.1"
-data_structures = { path = "../data_structures" }
-ir_defs = { path = "../ir_defs" }

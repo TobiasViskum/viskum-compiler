@@ -9,14 +9,17 @@ use ast::{
     Expr,
     ExprWithBlock,
     ExprWithoutBlock,
+    FieldExpr,
+    FieldInitialization,
     GroupExpr,
-    IdentExpr,
+    IdentNode,
     IfExpr,
     IntegerExpr,
     LoopExpr,
     Pat,
     PlaceExpr,
     Stmt,
+    StructExpr,
     TupleExpr,
     TupleFieldExpr,
     ValueExpr,
@@ -29,12 +32,12 @@ use crate::{ precedence::Precedence, ParserHandle };
 pub(crate) struct ExprBuilder<'ast> {
     final_stmt: Option<Stmt<'ast>>,
     exprs: Vec<Expr<'ast>>,
-    ast_arena: &'ast AstArena,
+    ast_arena: &'ast AstArena<'ast>,
     base_precedence: Precedence,
 }
 
 impl<'ast> ExprBuilder<'ast> {
-    pub fn new(ast_arena: &'ast AstArena) -> Self {
+    pub fn new(ast_arena: &'ast AstArena<'ast>) -> Self {
         Self {
             ast_arena,
             exprs: Vec::with_capacity(32),
@@ -57,10 +60,12 @@ impl<'ast> ExprBuilder<'ast> {
 
     pub fn emit_define_stmt(&mut self, parser_handle: &mut impl ParserHandle) {
         let value_expr = self.exprs.pop().expect("TODO: Error handling");
-        let setter_expr = self.exprs.pop().expect("TODO: Error handling");
-        let pattern_expr = self
-            .try_as_pattern_expr(setter_expr)
-            .expect("TODO: Error handling (invalid pattern expr)");
+        let pattern_expr = {
+            let setter_expr = self.exprs.pop().expect("TODO: Error handling");
+            self.try_as_pattern_expr(setter_expr).expect(
+                "TODO: Error handling (invalid pattern expr)"
+            )
+        };
 
         let define_stmt = self.ast_arena.alloc_expr_or_stmt(
             DefineStmt::new(pattern_expr, value_expr, parser_handle.get_ast_node_id())
@@ -69,24 +74,73 @@ impl<'ast> ExprBuilder<'ast> {
         self.final_stmt = Some(Stmt::DefineStmt(define_stmt));
     }
 
+    pub fn emit_field_expr(
+        &mut self,
+        ident_node: IdentNode,
+        parser_handle: &mut impl ParserHandle
+    ) {
+        let field_expr = {
+            let lhs = self.exprs.pop().expect("TODO: Error handling");
+            let field_expr = FieldExpr::new(
+                lhs,
+                self.ast_arena.alloc_expr_or_stmt(ident_node),
+                parser_handle.get_ast_node_id()
+            );
+            self.ast_arena.alloc_expr_or_stmt(field_expr)
+        };
+
+        let expr = Expr::ExprWithoutBlock(
+            ExprWithoutBlock::PlaceExpr(PlaceExpr::FieldExpr(field_expr))
+        );
+        self.exprs.push(expr);
+    }
+
     pub fn emit_tuple_field_expr(
         &mut self,
         integer_expr: IntegerExpr,
         parser_handle: &mut impl ParserHandle
     ) {
-        let lhs = self.exprs.pop().expect("TODO: Error handling");
-        let tuple_field_expr = TupleFieldExpr::new(
-            lhs,
-            self.ast_arena.alloc_expr_or_stmt(integer_expr),
-            parser_handle.get_ast_node_id()
-        );
+        let tuple_field_expr = {
+            let lhs = self.exprs.pop().expect("TODO: Error handling");
+            let tuple_field_expr = TupleFieldExpr::new(
+                lhs,
+                self.ast_arena.alloc_expr_or_stmt(integer_expr),
+                parser_handle.get_ast_node_id()
+            );
+            self.ast_arena.alloc_expr_or_stmt(tuple_field_expr)
+        };
 
         let expr = Expr::ExprWithoutBlock(
-            ExprWithoutBlock::PlaceExpr(
-                PlaceExpr::TupleFieldExpr(self.ast_arena.alloc_expr_or_stmt(tuple_field_expr))
-            )
+            ExprWithoutBlock::PlaceExpr(PlaceExpr::TupleFieldExpr(tuple_field_expr))
         );
         self.exprs.push(expr);
+    }
+
+    pub fn emit_struct_expr(
+        &mut self,
+        initialization_fields: Vec<&'ast FieldInitialization<'ast>>,
+        parser_handle: &mut impl ParserHandle
+    ) {
+        let ident_node = {
+            let ident_expr = self.exprs.pop().expect("TODO: Error handlings");
+            self.try_as_ident(ident_expr).expect(
+                "TODO: Error handling (expected ident in struct expr)"
+            )
+        };
+
+        let struct_expr = {
+            let struct_expr = StructExpr::new(
+                ident_node,
+                self.ast_arena.alloc_field_initialization_vec(initialization_fields),
+                parser_handle.get_ast_node_id()
+            );
+
+            self.ast_arena.alloc_expr_or_stmt(struct_expr)
+        };
+
+        self.exprs.push(
+            Expr::ExprWithoutBlock(ExprWithoutBlock::ValueExpr(ValueExpr::StructExpr(struct_expr)))
+        );
     }
 
     pub fn emit_assign_stmt(&mut self, parser_handle: &mut impl ParserHandle) {
@@ -135,7 +189,7 @@ impl<'ast> ExprBuilder<'ast> {
             );
             self.exprs.push(expr);
         } else {
-            let fields = self.ast_arena.alloc_vec_exprs(exprs);
+            let fields = self.ast_arena.alloc_expr_vec(exprs);
             let tuple_expr = self.ast_arena.alloc_expr_or_stmt(
                 TupleExpr::new(fields, parser_handle.get_ast_node_id())
             );
@@ -146,11 +200,11 @@ impl<'ast> ExprBuilder<'ast> {
         }
     }
 
-    pub fn emit_ident_expr(&mut self, ident_expr: IdentExpr) {
-        let ident_expr = self.ast_arena.alloc_expr_or_stmt(ident_expr);
+    pub fn emit_ident_expr(&mut self, ident_node: IdentNode) {
+        let ident_node = self.ast_arena.alloc_expr_or_stmt(ident_node);
 
         let expr = Expr::ExprWithoutBlock(
-            ExprWithoutBlock::PlaceExpr(PlaceExpr::IdentExpr(ident_expr))
+            ExprWithoutBlock::PlaceExpr(PlaceExpr::IdentExpr(ident_node))
         );
 
         self.exprs.push(expr);
@@ -207,10 +261,11 @@ impl<'ast> ExprBuilder<'ast> {
                     ExprWithoutBlock::PlaceExpr(expr) => {
                         match expr {
                             PlaceExpr::TupleFieldExpr(_) => None,
+                            PlaceExpr::FieldExpr(_) => None,
                             PlaceExpr::IdentExpr(ident_expr) =>
                                 Some(
                                     Pat::IdentPat(
-                                        self.ast_arena.alloc_expr_or_stmt(ident_expr.get_as_pat())
+                                        self.ast_arena.alloc_expr_or_stmt(ident_expr.get_copy())
                                     )
                                 ),
                         }
@@ -222,6 +277,7 @@ impl<'ast> ExprBuilder<'ast> {
                             ValueExpr::BinaryExpr(_) => None,
                             ValueExpr::ConstExpr(_) => None,
                             ValueExpr::GroupExpr(_) => None,
+                            ValueExpr::StructExpr(_) => None,
                             ValueExpr::TupleExpr(tuple_expr) =>
                                 todo!("As pattern: {:#?}", tuple_expr),
                         }
@@ -244,8 +300,29 @@ impl<'ast> ExprBuilder<'ast> {
                             ValueExpr::BinaryExpr(_) => None,
                             ValueExpr::ConstExpr(_) => None,
                             ValueExpr::GroupExpr(_) => None,
+                            ValueExpr::StructExpr(_) => None,
                             ValueExpr::TupleExpr(tuple_expr) =>
                                 todo!("As place expr: {:#?}", tuple_expr),
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn try_as_ident(&mut self, expr: Expr<'ast>) -> Option<&'ast IdentNode> {
+        match expr {
+            Expr::ExprWithBlock(_) => None,
+            Expr::ExprWithoutBlock(expr) => {
+                match expr {
+                    ExprWithoutBlock::BreakExpr(_) => None,
+                    ExprWithoutBlock::ContinueExpr(_) => None,
+                    ExprWithoutBlock::ValueExpr(_) => None,
+                    ExprWithoutBlock::PlaceExpr(expr) => {
+                        match expr {
+                            PlaceExpr::IdentExpr(expr) => Some(expr),
+                            PlaceExpr::TupleFieldExpr(_) => None,
+                            PlaceExpr::FieldExpr(_) => None,
                         }
                     }
                 }

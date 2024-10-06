@@ -8,12 +8,13 @@ use ast::{
     AstState3,
     AstTypeChecked,
     AstVisitEmitter,
-    IdentExpr,
-    IdentPat,
+    IdentNode,
+    StructItem,
 };
+use bumpalo::Bump;
 use error::{ Error, ErrorKind, Severity };
 use fxhash::FxHashMap;
-use ir_defs::{ DefId, NameBinding, NodeId, ScopeId };
+use ir_defs::{ DefId, DefKind, NameBinding, NodeId, ResKind, ScopeId };
 use symbol::Symbol;
 use ty::{ Ty, TyCtx };
 
@@ -29,15 +30,18 @@ pub struct Resolver<'a> {
     /// Only used during the first pass (name resolution)
     ///
     /// This is reset after the first pass to save some space
-    symbol_and_scope_to_def_id: FxHashMap<(Symbol, ScopeId), DefId>,
+    symbol_and_scope_to_def_id: FxHashMap<(Symbol, ScopeId, ResKind), DefId>,
     scope_stack: Vec<ScopeId>,
     next_scope_id: ScopeId,
 
     /// Built during the first pass (name resolution) and then used in the rest of the passes
     node_id_to_def_id: FxHashMap<NodeId, DefId>,
 
-    def_id_to_name_binding: FxHashMap<DefId, (NameBinding, Ty)>,
+    def_id_to_name_binding: FxHashMap<DefId, NameBinding<'a>>,
     node_id_to_ty: FxHashMap<NodeId, Ty>,
+
+    /* Arena */
+    arena: &'a Bump,
 
     /* Used for error reporting */
     src: &'a str,
@@ -58,7 +62,11 @@ impl<'a> Resolver<'a> {
     }
 
     /// Makes a Resolver and builds the query system in the Ast
-    pub fn from_ast(src: &'a str, ast: Ast<'a, AstState0>) -> (Self, Ast<'a, AstState1>) {
+    pub fn from_ast(
+        src: &'a str,
+        ast: Ast<'a, AstState0>,
+        arena: &'a Bump
+    ) -> (Self, Ast<'a, AstState1>) {
         /// Sets up query system
         fn build_ast_query_system<'a>(
             resolver: &mut Resolver<'a>,
@@ -80,6 +88,7 @@ impl<'a> Resolver<'a> {
             node_id_to_def_id: Default::default(),
             symbol_and_scope_to_def_id: Default::default(),
             node_id_to_ty: Default::default(),
+            arena,
             scope_stack,
             next_scope_id: ScopeId(1),
             src,
@@ -182,6 +191,9 @@ impl<'ctx, 'a, T> AstVisitEmitter<'ctx, 'a, T> for Resolver<'a> where T: AstStat
         self.errors.push(error);
     }
 
+    fn alloc_vec<K>(&self, vec: Vec<K>) -> &'a [K] {
+        self.arena.alloc_slice_fill_iter(vec.into_iter())
+    }
     /* Used during the first pass (name resolution) */
     fn start_scope(&mut self) {
         self.scope_stack.push(self.next_scope_id);
@@ -190,23 +202,38 @@ impl<'ctx, 'a, T> AstVisitEmitter<'ctx, 'a, T> for Resolver<'a> where T: AstStat
     fn end_scope(&mut self) {
         self.scope_stack.pop();
     }
-    fn define_var(&mut self, ident_pat: &'a IdentPat) {
-        let symbol = Symbol::new(&self.src[ident_pat.span.get_byte_range()]);
-        let def_id = DefId::new(symbol, ident_pat.ast_node_id);
-        self.symbol_and_scope_to_def_id.insert((symbol, self.get_current_scope_id()), def_id);
-        self.node_id_to_def_id.insert(ident_pat.ast_node_id, def_id);
+    fn define(&mut self, node_id: NodeId, symbol: Symbol, name_binding: NameBinding<'a>) -> DefId
+        where T: AstState<ThisState = AstState1>
+    {
+        let def_id = DefId::new(symbol, node_id);
+        self.node_id_to_def_id.insert(node_id, def_id);
+        self.def_id_to_name_binding.insert(def_id, name_binding);
+        self.symbol_and_scope_to_def_id.insert(
+            (symbol, self.get_current_scope_id(), name_binding.get_res_kind()),
+            def_id
+        );
+        def_id
     }
-    fn lookup_var(&mut self, ident_expr: &'a IdentExpr) {
-        let symbol = Symbol::new(&self.src[ident_expr.span.get_byte_range()]);
+
+    fn lookup_ident(
+        &mut self,
+        ident_node: &'a IdentNode,
+        kind: ResKind
+    ) -> Option<NameBinding<'a>> {
+        let symbol = Symbol::new(&self.src[ident_node.span.get_byte_range()]);
 
         for scope_id in self.scope_stack.iter().rev() {
-            if let Some(def_id) = self.symbol_and_scope_to_def_id.get(&(symbol, *scope_id)) {
-                self.node_id_to_def_id.insert(ident_expr.ast_node_id, *def_id);
-                return;
+            if let Some(def_id) = self.symbol_and_scope_to_def_id.get(&(symbol, *scope_id, kind)) {
+                self.node_id_to_def_id.insert(ident_node.ast_node_id, *def_id);
+                let name_binding = self.def_id_to_name_binding
+                    .get(def_id)
+                    .expect("Expected name to be binded");
+                return Some(*name_binding);
             }
         }
 
-        self.errors.push(Error::new(ErrorKind::UndefinedVariable(symbol), ident_expr.span))
+        self.errors.push(Error::new(ErrorKind::UndefinedLookup(symbol, kind), ident_node.span));
+        None
     }
 
     /* Used during the second pass (type checking) */
@@ -219,15 +246,14 @@ impl<'ctx, 'a, T> AstVisitEmitter<'ctx, 'a, T> for Resolver<'a> where T: AstStat
     fn get_def_id_from_node_id(&self, node_id: NodeId) -> DefId {
         *self.node_id_to_def_id.get(&node_id).expect("Expected DefId")
     }
-    fn get_namebinding_and_ty_from_def_id(&self, def_id: DefId) -> (NameBinding, Ty) {
-        self.def_id_to_name_binding.get(&def_id).copied().expect("Expected name to be binded")
+    fn get_ty_from_def_id(&self, def_id: DefId) -> Ty {
+        let ty = self.node_id_to_ty.get(&def_id.node_id).expect("Expected type to def id");
+        *ty
     }
-    fn set_namebinding_and_ty_to_def_id(
-        &mut self,
-        def_id: DefId,
-        name_binding: NameBinding,
-        ty: Ty
-    ) {
-        self.def_id_to_name_binding.insert(def_id, (name_binding, ty));
+    fn get_namebinding_from_def_id(&self, def_id: DefId) -> NameBinding<'a> {
+        let name_binding = self.def_id_to_name_binding
+            .get(&def_id)
+            .expect("Expected name to be binded");
+        *name_binding
     }
 }

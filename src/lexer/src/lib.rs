@@ -36,6 +36,8 @@ impl<'a> Lexer<'a> {
             '/' => self.make_token(TokenKind::Slash),
             '(' => self.make_token(TokenKind::LeftParen),
             ')' => self.make_token(TokenKind::RightParen),
+            '{' => self.make_token(TokenKind::LeftCurly),
+            '}' => self.make_token(TokenKind::RightCurly),
             '!' => self.make_token_or_other_if(TokenKind::Bang, '=', TokenKind::Ne),
             '>' => self.make_token_or_other_if(TokenKind::Gt, '=', TokenKind::Ge),
             '<' => self.make_token_or_other_if(TokenKind::Lt, '=', TokenKind::Le),
@@ -108,6 +110,7 @@ impl<'a> Lexer<'a> {
             "def" => TokenKind::Def,
             "mut" => TokenKind::Mut,
             "class" => TokenKind::Class,
+            "struct" => TokenKind::Struct,
             "end" => TokenKind::End,
             "do" => TokenKind::Do,
             "loop" => TokenKind::Loop,
@@ -132,7 +135,7 @@ impl<'a> Lexer<'a> {
     }
 
     fn make_number(&mut self) -> Token {
-        if self.eat_while_from_next(|c| Self::is_digit(c)) == '.' {
+        if self.eat_while_from_next(|c| Self::is_digit(c)) == '@' {
             self.advance();
             self.eat_while_from_next(|c| Self::is_digit(c));
             self.make_token(TokenKind::Float)

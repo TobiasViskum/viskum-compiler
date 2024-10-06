@@ -1,3 +1,5 @@
+use std::collections::VecDeque;
+
 use ast::{
     Ast,
     AstArena,
@@ -10,15 +12,20 @@ use ast::{
     Expr,
     ExprWithBlock,
     ExprWithoutBlock,
-    FunctionStmt,
+    FieldDeclaration,
+    FieldInitialization,
+    FnItem,
     GlobalScope,
-    IdentExpr,
+    IdentNode,
     IfExpr,
     IfFalseBranchExpr,
     IntegerExpr,
     ItemStmt,
     LoopExpr,
     Stmt,
+    StructExpr,
+    StructItem,
+    Typing,
 };
 use error::Error;
 use expr_builder::ExprBuilder;
@@ -28,6 +35,7 @@ use make_parse_rule::make_parse_rule;
 use op::{ ArithmeticOp, BinaryOp, ComparisonOp };
 use precedence::Precedence;
 use span::Span;
+use symbol::Symbol;
 use token::{ Token, TokenKind };
 mod make_parse_rule;
 mod expr_builder;
@@ -82,21 +90,19 @@ impl<'a> ParserHandle for Parser<'a> {
 pub struct Parser<'a> {
     parse_rules: [ParseRule; PARSE_RULE_COUNT],
     lexer: Lexer<'a>,
-    ast_arena: &'a AstArena,
+    ast_arena: &'a AstArena<'a>,
     src: &'a str,
     current: Token,
     prev: Token,
     next_ast_node_id: NodeId,
     forgotten_nodes: usize,
-    result_locs: Vec<ResultLoc>,
-    next_result_loc: ResultLoc,
 
     /// Used for error reporting
     errors: Vec<Error>,
 }
 
 impl<'a> Parser<'a> {
-    pub fn new(src: &'a str, ast_arena: &'a AstArena) -> Self {
+    pub fn new(src: &'a str, ast_arena: &'a AstArena<'a>) -> Self {
         let mut lexer = Lexer::new(src);
 
         Self {
@@ -108,8 +114,6 @@ impl<'a> Parser<'a> {
             prev: Token::dummy(),
             next_ast_node_id: NodeId(0),
             forgotten_nodes: 0,
-            result_locs: vec![],
-            next_result_loc: ResultLoc(0),
             errors: Vec::new(),
         }
     }
@@ -125,10 +129,49 @@ impl<'a> Parser<'a> {
     pub(crate) fn statement(&mut self) -> Stmt<'a> {
         match self.current.get_kind() {
             TokenKind::Def => self.function_statement(),
+            TokenKind::Struct => self.struct_item(),
             TokenKind::Mut => self.mut_stmt(),
             TokenKind::Break => self.break_expr(),
             TokenKind::Continue => self.continue_expr(),
             _ => self.expression_statement(),
+        }
+    }
+
+    pub(crate) fn struct_item(&mut self) -> Stmt<'a> {
+        self.advance();
+        let ident_node = self.consume_ident("Expected identifier after struct");
+        let mut fields = Vec::with_capacity(8);
+
+        while !self.is_eof() && !self.is_curr_kind(TokenKind::End) {
+            let field_name = self.consume_ident("Expected ident in field");
+            let ty = self.parse_typing().expect("TODO: Error handling, Expected type");
+            let field = FieldDeclaration::new(self.ast_arena.alloc_expr_or_stmt(field_name), ty);
+            fields.push(self.ast_arena.alloc_expr_or_stmt(field));
+
+            if self.is_curr_kind(TokenKind::Comma) {
+                self.advance();
+                continue;
+            }
+            break;
+        }
+        self.consume(TokenKind::End, "Expected `end` after struct");
+
+        let fields = self.ast_arena.alloc_field_declaration_vec(fields);
+        let struct_stmt = StructItem::new(
+            self.ast_arena.alloc_expr_or_stmt(ident_node),
+            fields,
+            self.get_ast_node_id()
+        );
+
+        Stmt::ItemStmt(ItemStmt::StructItem(self.ast_arena.alloc_expr_or_stmt(struct_stmt)))
+    }
+
+    pub(crate) fn parse_typing(&mut self) -> Option<Typing> {
+        if self.is_curr_kind(TokenKind::Ident) {
+            let ident = self.consume_ident_span("Expected ident");
+            Some(Typing::Ident(ident))
+        } else {
+            None
         }
     }
 
@@ -173,14 +216,10 @@ impl<'a> Parser<'a> {
         let expr = Expr::ExprWithBlock(ExprWithBlock::BlockExpr(body));
 
         let fn_stmt = self.ast_arena.alloc_expr_or_stmt(
-            FunctionStmt::new(
-                self.ast_arena.alloc_expr_or_stmt(ident_expr),
-                expr,
-                self.get_ast_node_id()
-            )
+            FnItem::new(self.ast_arena.alloc_expr_or_stmt(ident_expr), expr, self.get_ast_node_id())
         );
 
-        Stmt::ItemStmt(ItemStmt::FunctionStmt(fn_stmt))
+        Stmt::ItemStmt(ItemStmt::FnItem(fn_stmt))
     }
 
     pub(crate) fn mut_stmt(&mut self) -> Stmt<'a> {
@@ -251,7 +290,7 @@ impl<'a> Parser<'a> {
 
     /// Parse rule method: `ident`
     pub(crate) fn ident(&mut self, expr_builder: &mut ExprBuilder<'a>) {
-        let ident_expr = IdentExpr::new(self.prev.get_span(), self.get_ast_node_id());
+        let ident_expr = IdentNode::new(self.prev.get_span(), self.get_ast_node_id());
         expr_builder.emit_ident_expr(ident_expr);
     }
 
@@ -284,13 +323,42 @@ impl<'a> Parser<'a> {
         todo!()
     }
 
-    /// Parse rule method `dot_expr`
+    /// Parse rule method: `struct_expr`
+    pub(crate) fn struct_expr(&mut self, expr_builder: &mut ExprBuilder<'a>) {
+        let mut initialization_fields = Vec::with_capacity(8);
+        while !self.is_eof() && !self.is_curr_kind(TokenKind::RightCurly) {
+            let field_ident = self.consume_ident("Expected ident");
+            self.consume(TokenKind::Colon, "Expected colon");
+            let expr = self.parse_expr_and_take(Precedence::PrecAssign.get_next());
+            let field_init = self.ast_arena.alloc_expr_or_stmt(
+                FieldInitialization::new(self.ast_arena.alloc_expr_or_stmt(field_ident), expr)
+            );
+            initialization_fields.push(field_init);
+
+            if self.is_curr_kind(TokenKind::Comma) {
+                self.advance();
+                continue;
+            }
+
+            break;
+        }
+
+        self.consume(TokenKind::RightCurly, "Expected `}` after struct expression");
+
+        expr_builder.emit_struct_expr(initialization_fields, self)
+    }
+
+    /// Parse rule method: `dot_expr`
     pub(crate) fn field_expr(&mut self, expr_builder: &mut ExprBuilder<'a>) {
         match self.current.get_kind() {
             TokenKind::Integer => {
                 self.advance();
                 let integer_expr = self.parse_integer_expr();
                 expr_builder.emit_tuple_field_expr(integer_expr, self);
+            }
+            TokenKind::Ident => {
+                let ident_node = self.consume_ident("Unreachable");
+                expr_builder.emit_field_expr(ident_node, self);
             }
             _ => {
                 println!("{}", self.current.get_kind());
@@ -365,27 +433,21 @@ impl<'a> Parser<'a> {
 
     /// Parse rule method: `loop_expr`
     pub(crate) fn loop_expr(&mut self, expr_builder: &mut ExprBuilder<'a>) {
-        self.push_result_loc();
-
         let block = self.parse_block();
         self.consume(TokenKind::End, "Expected `end` after loop");
 
         let loop_expr = self.ast_arena.alloc_expr_or_stmt(
-            LoopExpr::new(block, self.get_ast_node_id(), self.read_result_loc())
+            LoopExpr::new(block, self.get_ast_node_id())
         );
 
         expr_builder.emit_loop_expr(loop_expr);
-
-        self.pop_result_loc();
     }
 
     /// Parse rule method: `if_expr`
     pub(crate) fn if_expr(&mut self, expr_builder: &mut ExprBuilder<'a>) {
-        self.push_result_loc();
         let if_expr = self.parse_if_expr();
 
         expr_builder.emit_if_expr(if_expr);
-        self.pop_result_loc();
     }
 
     pub fn parse_expr_and_take(&mut self, prec: Precedence) -> Expr<'a> {
@@ -416,26 +478,21 @@ impl<'a> Parser<'a> {
         };
 
         let if_expr = self.ast_arena.alloc_expr_or_stmt(
-            IfExpr::new(
-                cond,
-                true_block,
-                false_block,
-                self.get_ast_node_id(),
-                Span::dummy(),
-                self.read_result_loc()
-            )
+            IfExpr::new(cond, true_block, false_block, self.get_ast_node_id(), Span::dummy())
         );
 
         if_expr
     }
 
     fn parse_block(&mut self) -> &'a BlockExpr<'a> {
-        let mut stmts = Vec::with_capacity(32);
+        let mut stmts = VecDeque::with_capacity(32);
         while !self.current.get_kind().can_end_scope() && !self.is_eof() {
-            let stmt = self.statement();
-            stmts.push(stmt);
+            match self.statement() {
+                stmt @ Stmt::ItemStmt(_) => stmts.push_front(stmt),
+                stmt => stmts.push_back(stmt),
+            };
         }
-        let stmts = self.ast_arena.alloc_vec_stmts(stmts);
+        let stmts = self.ast_arena.alloc_stmt_vec(stmts);
 
         let block_expr = self.ast_arena.alloc_expr_or_stmt(
             BlockExpr::new(stmts, self.get_ast_node_id())
@@ -445,14 +502,16 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_global_scope(&mut self) -> GlobalScope<'a> {
-        let mut stmts = Vec::with_capacity(32);
+        let mut stmts = VecDeque::with_capacity(32);
 
         while !self.is_eof() {
-            let stmt = self.statement();
-            stmts.push(stmt);
+            match self.statement() {
+                stmt @ Stmt::ItemStmt(_) => stmts.push_front(stmt),
+                stmt => stmts.push_back(stmt),
+            };
         }
 
-        let stmts = self.ast_arena.alloc_vec_stmts(stmts);
+        let stmts = self.ast_arena.alloc_stmt_vec(stmts);
 
         GlobalScope::new(stmts)
     }
@@ -492,24 +551,6 @@ impl<'a> Parser<'a> {
         let prev = self.next_ast_node_id;
         self.next_ast_node_id = NodeId(prev.0 + 1);
         prev
-    }
-
-    pub(crate) fn push_result_loc(&mut self) {
-        let next_result_loc = {
-            let prev = self.next_result_loc;
-            self.next_result_loc = ResultLoc(prev.0 + 1);
-            prev
-        };
-
-        self.result_locs.push(next_result_loc);
-    }
-
-    pub(crate) fn pop_result_loc(&mut self) {
-        self.result_locs.pop();
-    }
-
-    pub(crate) fn read_result_loc(&mut self) -> ResultLoc {
-        *self.result_locs.last().expect("TODO: Error handling (read_result_loc)")
     }
 
     /// Converts e.g. `69` into `0.69` (this is a fast version by chat)
@@ -563,12 +604,22 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub(crate) fn consume_ident(&mut self, err_msg: &str) -> IdentExpr {
+    pub(crate) fn consume_ident(&mut self, err_msg: &str) -> IdentNode {
         match self.current.get_kind() {
             TokenKind::Ident => {
-                let ident_expr = IdentExpr::new(self.current.get_span(), self.get_ast_node_id());
+                let ident_expr = IdentNode::new(self.current.get_span(), self.get_ast_node_id());
                 self.advance();
                 ident_expr
+            }
+            _ => panic!("{}", err_msg),
+        }
+    }
+
+    pub(crate) fn consume_ident_span(&mut self, err_msg: &str) -> Span {
+        match self.current.get_kind() {
+            TokenKind::Ident => {
+                self.advance();
+                self.prev.get_span()
             }
             _ => panic!("{}", err_msg),
         }
@@ -592,10 +643,12 @@ impl<'a> Parser<'a> {
     pub(crate) const fn create_parse_rule(kind: TokenKind) -> ParseRule {
         make_parse_rule!(kind,
 
-    /*  TOKENKIND        INFIX                  PREFIX                              POSTFIX             */
+    /*  TOKENKIND        PREFIX                 INFIX                               POSTFIX             */
     /*                   method     prec        method      prec                    method      prec    */
         LeftParen   = { (grouping   None),      (None       None            ),      (None       None) },
         RightParen  = { (None       None),      (None       None            ),      (None       None) },
+        LeftCurly   = { (None       None),      (struct_expr PrecPrimary            ),      (None       None) },
+        RightCurly  = { (None       None),      (None       None            ),      (None       None) },
         Eq          = { (None       None),      (eq         PrecEquality    ),      (None       None) },
         Ne          = { (None       None),      (ne         PrecEquality    ),      (None       None) },
         Ge          = { (None       None),      (ge         PrecComparison  ),      (None       None) },
@@ -629,6 +682,7 @@ impl<'a> Parser<'a> {
         Def         = { (None       None),      (None       None            ),      (None       None) },
         Mut         = { (None       None),      (None       None            ),      (None       None) },
         Class       = { (None       None),      (None       None            ),      (None       None) },
+        Struct      = { (None       None),      (None       None            ),      (None       None) },
         While       = { (None       None),      (None       None            ),      (None       None) },
         If          = { (if_expr    None),      (None       None            ),      (None       None) },
         Loop        = { (loop_expr  None),      (None       None            ),      (None       None) },

@@ -14,6 +14,7 @@ use crate::{
     walk_assign_stmt,
     walk_break_expr,
     walk_loop_expr,
+    walk_struct_expr,
     walk_tuple_expr,
     walk_tuple_field_expr,
     AssignStmt,
@@ -24,16 +25,19 @@ use crate::{
     ContinueExpr,
     DefineStmt,
     GroupExpr,
-    IdentExpr,
-    IdentPat,
+    IdentNode,
     IfExpr,
     IntegerExpr,
     Pat,
     PlaceExpr,
+    StructExpr,
+    StructItem,
     TupleExpr,
+    Typing,
 };
+use bumpalo::Bump;
 use error::{ Error, ErrorKind };
-use ir_defs::{ DefId, DefKind, Mutability, NameBinding, NameBindingKind, NodeId };
+use ir_defs::{ DefId, DefKind, Mutability, NameBinding, NameBindingKind, NodeId, ResKind, ResTy };
 use op::{ ArithmeticOp, BinaryOp };
 use span::Span;
 use symbol::Symbol;
@@ -69,7 +73,7 @@ impl<'ctx, 'ast, 'b, E> AstVisitor<'ctx, 'ast, 'b, AstState0, E>
 }
 
 impl<'ctx, 'ast, 'b, E> AstVisitor<'ctx, 'ast, 'b, AstState1, E>
-    where E: AstVisitEmitter<'ctx, 'ast, AstState1>
+    where 'ctx: 'ast, E: AstVisitEmitter<'ctx, 'ast, AstState1>
 {
     pub fn visit(mut self) -> Ast<'ast, AstState2> {
         self.visit_stmts(self.ast.main_scope.stmts);
@@ -107,12 +111,23 @@ impl<'ctx, 'ast, 'b, T, E> AstVisitor<'ctx, 'ast, 'b, T, E>
 pub trait AstVisitEmitter<'ctx, 'ast, T>: Sized where T: AstState {
     /* Methods available during all passes  */
     fn report_error(&mut self, error: Error);
+    fn alloc_vec<K>(&self, vec: Vec<K>) -> &'ast [K];
 
     /* Methods for the first pass (name resolution) */
     fn start_scope(&mut self) where T: AstState<ThisState = AstState1>;
     fn end_scope(&mut self) where T: AstState<ThisState = AstState1>;
-    fn define_var(&mut self, ident_pat: &'ast IdentPat) where T: AstState<ThisState = AstState1>;
-    fn lookup_var(&mut self, ident_expr: &'ast IdentExpr) where T: AstState<ThisState = AstState1>;
+    // fn define_var(&mut self, ident_node: &'ast IdentNode) where T: AstState<ThisState = AstState1>;
+    // fn define_struct(&mut self, struct_item: &'ast StructItem<'ast>)
+    //     where T: AstState<ThisState = AstState1>;
+    fn define(&mut self, node_id: NodeId, symbol: Symbol, name_binding: NameBinding<'ast>) -> DefId
+        where T: AstState<ThisState = AstState1>;
+
+    fn lookup_ident(
+        &mut self,
+        ident_node: &'ast IdentNode,
+        kind: ResKind
+    ) -> Option<NameBinding<'ast>>
+        where T: AstState<ThisState = AstState1>;
 
     /* Methods for the second pass (type checking) */
     fn intern_type(&mut self, ty: Ty) -> &'ctx Ty where T: AstState<ThisState = AstState2>;
@@ -120,10 +135,11 @@ pub trait AstVisitEmitter<'ctx, 'ast, T>: Sized where T: AstState {
         where T: AstState<ThisState = AstState2>;
     fn get_def_id_from_node_id(&self, node_id: NodeId) -> DefId
         where T: AstState<ThisState = AstState2>;
-    fn set_namebinding_and_ty_to_def_id(&mut self, def_id: DefId, name_binding: NameBinding, ty: Ty)
+    // fn set_namebinding_and_ty_to_def_id(&mut self, def_id: DefId, name_binding: NameBinding, ty: Ty)
+    //     where T: AstState<ThisState = AstState2>;
+    fn get_namebinding_from_def_id(&self, def_id: DefId) -> NameBinding<'ast>
         where T: AstState<ThisState = AstState2>;
-    fn get_namebinding_and_ty_from_def_id(&self, def_id: DefId) -> (NameBinding, Ty)
-        where T: AstState<ThisState = AstState2>;
+    fn get_ty_from_def_id(&self, def_id: DefId) -> Ty where T: AstState<ThisState = AstState2>;
 }
 
 /// Implements the visitor trait for the pre-first pass (building the Ast query system)
@@ -179,6 +195,11 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
         walk_tuple_field_expr(self, tuple_field_expr)
     }
 
+    fn visit_struct_expr(&mut self, struct_expr: &'ast StructExpr<'ast>) -> Self::Result {
+        self.insert_query_entry(struct_expr.ast_node_id, AstQueryEntry::StructExpr(struct_expr));
+        walk_struct_expr(self, struct_expr)
+    }
+
     fn visit_assign_stmt(&mut self, assign_stmt: &'ast AssignStmt<'ast>) -> Self::Result {
         self.insert_query_entry(assign_stmt.ast_node_id, AstQueryEntry::AssignStmt(assign_stmt));
         walk_assign_stmt(self, assign_stmt)
@@ -201,12 +222,12 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
         walk_if_expr(self, if_expr)
     }
 
-    fn visit_ident_expr(&mut self, ident_expr: &'ast IdentExpr) -> Self::Result {
-        self.insert_query_entry(ident_expr.ast_node_id, AstQueryEntry::IdentExpr(ident_expr))
+    fn visit_ident_expr(&mut self, ident_node: &'ast IdentNode) -> Self::Result {
+        self.insert_query_entry(ident_node.ast_node_id, AstQueryEntry::IdentNode(ident_node))
     }
 
-    fn visit_ident_pat(&mut self, ident_pat: &'ast IdentPat) -> Self::Result {
-        self.insert_query_entry(ident_pat.ast_node_id, AstQueryEntry::IdentPat(ident_pat))
+    fn visit_ident_pat(&mut self, ident_node: &'ast IdentNode) -> Self::Result {
+        self.insert_query_entry(ident_node.ast_node_id, AstQueryEntry::IdentNode(ident_node))
     }
 
     fn visit_binary_expr(&mut self, binary_expr: &'ast BinaryExpr<'ast>) -> Self::Result {
@@ -218,12 +239,20 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
         self.insert_query_entry(group_expr.ast_node_id, AstQueryEntry::GroupExpr(group_expr));
         walk_group_expr(self, group_expr)
     }
+
+    fn visit_struct_item(&mut self, struct_item: &'ast StructItem<'ast>) -> Self::Result {
+        self.insert_query_entry(struct_item.ast_node_id, AstQueryEntry::StructItem(struct_item));
+        self.visit_ident_expr(struct_item.ident_node);
+        for field_decl in struct_item.field_declarations {
+            self.visit_ident_expr(field_decl.ident);
+        }
+    }
 }
 
 /// Implements the Visitor trait for the first pass (name resolution)
 impl<'ctx, 'ast, 'b, E> Visitor<'ast>
     for AstVisitor<'ctx, 'ast, 'b, AstState1, E>
-    where E: AstVisitEmitter<'ctx, 'ast, AstState1>
+    where 'ctx: 'ast, E: AstVisitEmitter<'ctx, 'ast, AstState1>
 {
     type Result = ();
 
@@ -231,12 +260,112 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
         ()
     }
 
-    fn visit_ident_pat(&mut self, ident_pat: &'ast IdentPat) -> Self::Result {
-        self.ast_visit_emitter.define_var(ident_pat)
+    fn visit_def_stmt(&mut self, def_stmt: &'ast DefineStmt<'ast>) -> Self::Result {
+        match def_stmt.setter_expr {
+            Pat::IdentPat(ident_pat) => {
+                let symbol = Symbol::new(&self.src[ident_pat.span.get_byte_range()]);
+                let mutability = if def_stmt.mut_span.get().is_some() {
+                    Mutability::Mutable
+                } else {
+                    Mutability::Immutable
+                };
+                self.ast_visit_emitter.define(
+                    ident_pat.ast_node_id,
+                    symbol,
+                    NameBinding::from(DefKind::Variable(mutability))
+                );
+            }
+        }
+
+        walk_def_stmt(self, def_stmt)
     }
 
-    fn visit_ident_expr(&mut self, ident_expr: &'ast IdentExpr) -> Self::Result {
-        self.ast_visit_emitter.lookup_var(ident_expr)
+    fn visit_struct_item(&mut self, struct_item: &'ast StructItem<'ast>) -> Self::Result {
+        let symbol = Symbol::new(&self.src[struct_item.ident_node.span.get_byte_range()]);
+
+        let mut struct_binding_fields = Vec::with_capacity(struct_item.field_declarations.len());
+        self.ast_visit_emitter.start_scope();
+        for field in struct_item.field_declarations {
+            let def_id = self.ast_visit_emitter.define(
+                field.ident.ast_node_id,
+                Symbol::new(&self.src[field.ident.span.get_byte_range()]),
+                NameBinding::new(NameBindingKind::DefKind(DefKind::Variable(Mutability::Immutable)))
+            );
+
+            let res_ty = match field.type_expr {
+                Typing::Ident(span) => {
+                    let lexeme = &self.src[span.get_byte_range()];
+                    let res_ty = match lexeme {
+                        "Int" => ResTy::Compiler(Ty::PrimTy(PrimTy::Int)),
+                        "Bool" => ResTy::Compiler(Ty::PrimTy(PrimTy::Bool)),
+                        _ => panic!("user defined types not yet implemented"),
+                    };
+                    res_ty
+                }
+            };
+
+            struct_binding_fields.push((def_id, res_ty));
+        }
+        self.ast_visit_emitter.end_scope();
+
+        let struct_binding_fields = self.ast_visit_emitter.alloc_vec(struct_binding_fields);
+
+        self.ast_visit_emitter.define(
+            struct_item.ident_node.ast_node_id,
+            symbol,
+            NameBinding::from(DefKind::Stuct(struct_binding_fields))
+        );
+    }
+
+    fn visit_struct_expr(&mut self, struct_expr: &'ast StructExpr<'ast>) -> Self::Result {
+        let name_binding = match
+            self.ast_visit_emitter.lookup_ident(struct_expr.ident_node, ResKind::Struct)
+        {
+            Some(name_binding) => name_binding,
+            None => {
+                return;
+            }
+        };
+
+        if let NameBindingKind::DefKind(DefKind::Stuct(struct_item)) = name_binding.kind {
+            let mut found_fields = Vec::with_capacity(struct_item.len());
+            'outer: for (def_id, _) in struct_item {
+                let lexeme = def_id.symbol.get();
+
+                for field in struct_expr.field_initializations {
+                    let given_field_lexeme = &self.src[field.ident.span.get_byte_range()];
+                    if lexeme == given_field_lexeme {
+                        self.visit_expr(field.value);
+                        found_fields.push(def_id.symbol);
+                        continue 'outer;
+                    }
+                }
+                self.ast_visit_emitter.report_error(
+                    Error::new(ErrorKind::MissingStructField(def_id.symbol), Span::dummy())
+                );
+            }
+
+            'outer: for field in struct_expr.field_initializations {
+                let given_field_lexeme = &self.src[field.ident.span.get_byte_range()];
+
+                for found_field in &found_fields {
+                    if found_field.get() == given_field_lexeme {
+                        continue 'outer;
+                    }
+                }
+
+                self.ast_visit_emitter.report_error(
+                    Error::new(
+                        ErrorKind::UndefinedStructField(Symbol::new(given_field_lexeme)),
+                        Span::dummy()
+                    )
+                );
+            }
+        }
+    }
+
+    fn visit_ident_expr(&mut self, ident_node: &'ast IdentNode) -> Self::Result {
+        self.ast_visit_emitter.lookup_ident(ident_node, ResKind::Variable);
     }
 
     fn visit_block_expr(&mut self, expr: &'ast BlockExpr<'ast>) -> Self::Result {
@@ -267,11 +396,86 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
         BOOL_TY
     }
 
-    fn visit_ident_expr(&mut self, ident_expr: &'ast IdentExpr) -> Self::Result {
-        let def_id = self.ast_visit_emitter.get_def_id_from_node_id(ident_expr.ast_node_id);
-        let (_, def_type) = self.ast_visit_emitter.get_namebinding_and_ty_from_def_id(def_id);
-        self.ast_visit_emitter.set_type_to_node_id(ident_expr.ast_node_id, def_type);
-        def_type
+    fn visit_ident_expr(&mut self, ident_node: &'ast IdentNode) -> Self::Result {
+        let def_id = self.ast_visit_emitter.get_def_id_from_node_id(ident_node.ast_node_id);
+        let def_type = self.ast_visit_emitter.get_ty_from_def_id(def_id);
+        let ident_ty = Ty::Ptr(TyCtx.intern_type(def_type));
+        self.ast_visit_emitter.set_type_to_node_id(ident_node.ast_node_id, ident_ty);
+        ident_ty
+    }
+
+    fn visit_struct_item(&mut self, struct_item: &'ast StructItem<'ast>) -> Self::Result {
+        let def_id = self.ast_visit_emitter.get_def_id_from_node_id(
+            struct_item.ident_node.ast_node_id
+        );
+        let name_binding = self.ast_visit_emitter.get_namebinding_from_def_id(def_id);
+
+        let mut struct_ty = Vec::with_capacity(struct_item.field_declarations.len());
+        if let NameBindingKind::DefKind(DefKind::Stuct(struct_def)) = name_binding.kind {
+            for (def_id, res_ty) in struct_def {
+                let ty = match res_ty {
+                    ResTy::Compiler(built_in_ty) => {
+                        self.ast_visit_emitter.set_type_to_node_id(def_id.node_id, *built_in_ty);
+                        *built_in_ty
+                    }
+                    ResTy::UserDef(user_def_ty) =>
+                        todo!("User types in struct is not implemented yet!"),
+                };
+
+                struct_ty.push((def_id.symbol, ty));
+            }
+        } else {
+            panic!("Expected struct");
+        }
+
+        let struct_item_ty = Ty::Struct(def_id.symbol, TyCtx::intern_many_types(struct_ty));
+        self.ast_visit_emitter.set_type_to_node_id(
+            struct_item.ident_node.ast_node_id,
+            struct_item_ty
+        );
+
+        self.ast_visit_emitter.set_type_to_node_id(struct_item.ast_node_id, VOID_TY);
+
+        VOID_TY
+    }
+
+    fn visit_struct_expr(&mut self, struct_expr: &'ast StructExpr<'ast>) -> Self::Result {
+        let def_id = self.ast_visit_emitter.get_def_id_from_node_id(
+            struct_expr.ident_node.ast_node_id
+        );
+        let struct_ty = self.ast_visit_emitter.get_ty_from_def_id(def_id);
+
+        if let Ty::Struct(struct_name, struct_fields) = struct_ty {
+            let tys_iter = struct_expr.field_initializations
+                .iter()
+                .map(|field| self.visit_expr(field.value))
+                .collect::<Vec<_>>();
+
+            for (i, given_ty) in tys_iter.iter().enumerate() {
+                let (field_name, ty) = struct_fields[i];
+
+                if !given_ty.test_eq(ty) {
+                    self.ast_visit_emitter.report_error(
+                        Error::new(
+                            ErrorKind::MismatchedFieldTypes(struct_name, field_name, ty, *given_ty),
+                            Span::dummy()
+                        )
+                    );
+                }
+
+                self.ast_visit_emitter.set_type_to_node_id(
+                    struct_expr.field_initializations[i].ident.ast_node_id,
+                    *given_ty
+                );
+            }
+        } else {
+            panic!("Should be true at this point");
+        }
+
+        self.ast_visit_emitter.set_type_to_node_id(struct_expr.ident_node.ast_node_id, struct_ty);
+        self.ast_visit_emitter.set_type_to_node_id(struct_expr.ast_node_id, struct_ty);
+
+        struct_ty
     }
 
     fn visit_tuple_field_expr(
@@ -281,11 +485,11 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
         let lhs_ty = self.visit_expr(tuple_field_expr.lhs);
         self.visit_interger_expr(tuple_field_expr.rhs);
 
-        let tuple_ty = match lhs_ty {
-            Ty::Tuple(tuple_ty) => tuple_ty,
-            ty => {
+        let tuple_ty = match lhs_ty.try_deref_as_tuple() {
+            Some(tuple_ty) => tuple_ty,
+            None => {
                 self.ast_visit_emitter.report_error(
-                    Error::new(ErrorKind::InvalidTuple(ty), Span::dummy())
+                    Error::new(ErrorKind::InvalidTuple(lhs_ty), Span::dummy())
                 );
                 self.ast_visit_emitter.set_type_to_node_id(
                     tuple_field_expr.ast_node_id,
@@ -320,13 +524,14 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
             PlaceExpr::IdentExpr(ident_expr) => {
                 let def_id = self.ast_visit_emitter.get_def_id_from_node_id(ident_expr.ast_node_id);
                 let symbol = Symbol::new(&self.src[ident_expr.span.get_byte_range()]);
-                let name_binding = self.ast_visit_emitter.get_namebinding_and_ty_from_def_id(
-                    def_id
-                ).0;
+                let name_binding = self.ast_visit_emitter.get_namebinding_from_def_id(def_id);
                 (name_binding, symbol)
             }
-            PlaceExpr::TupleFieldExpr(_) =>
-                panic!("Not working yet (tuple_field_expr in assignment)"),
+            PlaceExpr::TupleFieldExpr(_) => {
+                panic!("Not working yet (tuple_field_expr in assignment)")
+            }
+
+            PlaceExpr::FieldExpr(_) => { panic!("Not working yet (field_expr in assignment)") }
         };
 
         match &name_binding.kind {
@@ -342,16 +547,17 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
                             );
                         }
                     }
+                    _ => panic!("sfd"),
                 }
             }
         }
 
-        if setter_ty == value_ty {
+        if setter_ty.test_eq(value_ty) {
             self.ast_visit_emitter.set_type_to_node_id(assign_stmt.ast_node_id, VOID_TY);
             // Returns void type, because assignments in itself return void
             VOID_TY
         } else {
-            panic!("Not same type in assignment: {}, {}", setter_ty, value_ty)
+            panic!("Not same type in assignment: {}, {}", setter_ty, value_ty);
         }
     }
 
@@ -362,7 +568,7 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
             tuple_types.push(ty);
         }
 
-        let tuple_ty = TyCtx::tuple_type(tuple_types);
+        let tuple_ty = Ty::Tuple(TyCtx::intern_many_types(tuple_types));
 
         self.ast_visit_emitter.set_type_to_node_id(tuple_expr.ast_node_id, tuple_ty);
 
@@ -375,18 +581,8 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
 
         match &def_stmt.setter_expr {
             Pat::IdentPat(ident_pat) => {
-                let mutability = if def_stmt.mut_span.get().is_some() {
-                    Mutability::Mutable
-                } else {
-                    Mutability::Immutable
-                };
-                let def_id = self.ast_visit_emitter.get_def_id_from_node_id(ident_pat.ast_node_id);
+                // let def_id = self.ast_visit_emitter.get_def_id_from_node_id(ident_pat.ast_node_id);
                 self.ast_visit_emitter.set_type_to_node_id(ident_pat.ast_node_id, value_type);
-                self.ast_visit_emitter.set_namebinding_and_ty_to_def_id(
-                    def_id,
-                    NameBinding::from(DefKind::Variable(mutability)),
-                    value_type
-                );
             }
         }
 
@@ -417,9 +613,8 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
     }
 
     fn visit_continue_expr(&mut self, continue_expr: &'ast ContinueExpr) -> Self::Result {
-        let void_ty = Ty::PrimTy(PrimTy::Void);
-        self.ast_visit_emitter.set_type_to_node_id(continue_expr.ast_node_id, void_ty);
-        void_ty
+        self.ast_visit_emitter.set_type_to_node_id(continue_expr.ast_node_id, VOID_TY);
+        VOID_TY
     }
 
     fn visit_break_expr(&mut self, break_expr: &'ast crate::BreakExpr<'ast>) -> Self::Result {
@@ -429,7 +624,7 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
 
         if let Some(loop_ret_ty) = self.loop_ret_ty_stack.last_mut() {
             if let Some(expected_ty) = loop_ret_ty {
-                if break_ty != *expected_ty {
+                if !break_ty.test_eq(*expected_ty) {
                     self.ast_visit_emitter.report_error(
                         Error::new(ErrorKind::BreakTypeError(*expected_ty, break_ty), Span::dummy())
                     );
@@ -449,15 +644,11 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
     }
 
     fn visit_if_expr(&mut self, if_expr: &'ast IfExpr<'ast>) -> Self::Result {
-        self.visit_expr(if_expr.condition);
-
         let cond_type = self.visit_expr(if_expr.condition);
-        match cond_type {
-            Ty::PrimTy(PrimTy::Bool) => {}
-            _ =>
-                self.ast_visit_emitter.report_error(
-                    Error::new(ErrorKind::ExpectedBoolExpr(cond_type), if_expr.span)
-                ),
+        if !cond_type.can_be_dereffed_to_bool() {
+            self.ast_visit_emitter.report_error(
+                Error::new(ErrorKind::ExpectedBoolExpr(cond_type), if_expr.span)
+            );
         }
 
         let true_type = self.visit_block_expr(if_expr.true_block);
@@ -465,15 +656,16 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
             .as_ref()
             .map(|expr| self.visit_if_false_branch_expr(*expr));
 
-        let if_expr_type = if let Some(false_type) = false_type {
-            if true_type == false_type { true_type } else { Ty::Unkown }
+        let if_expr_ty = if let Some(false_type) = false_type {
+            if true_type.test_eq(false_type) { true_type } else { Ty::Unkown }
         } else {
             true_type
         };
 
-        self.ast_visit_emitter.set_type_to_node_id(if_expr.ast_node_id, if_expr_type);
+        self.ast_visit_emitter.set_type_to_node_id(if_expr.ast_node_id, if_expr_ty);
 
-        if_expr_type
+        // Returns a pointer to its type
+        if_expr_ty
     }
 
     fn visit_block_expr(&mut self, expr: &'ast BlockExpr<'ast>) -> Self::Result {
@@ -486,44 +678,21 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
         let lhs_type = self.visit_expr(binary_expr.lhs);
         let rhs_type = self.visit_expr(binary_expr.rhs);
 
-        let result_ty = match binary_expr.op {
-            | BinaryOp::ArithmeticOp(ArithmeticOp::Add)
-            | BinaryOp::ArithmeticOp(ArithmeticOp::Div)
-            | BinaryOp::ArithmeticOp(ArithmeticOp::Mul)
-            | BinaryOp::ArithmeticOp(ArithmeticOp::Sub) => {
-                match (lhs_type, rhs_type) {
-                    (INT_TY, INT_TY) => { lhs_type }
-                    _ => {
-                        self.ast_visit_emitter.report_error(
-                            Error::new(
-                                ErrorKind::BinaryExprTypeError(binary_expr.op, lhs_type, rhs_type),
-                                Span::dummy()
-                            )
-                        );
-                        Ty::Unkown
-                    }
-                }
-            }
-            BinaryOp::ComparisonOp(_) => {
-                match (lhs_type, rhs_type) {
-                    (INT_TY, INT_TY) => { BOOL_TY }
-                    (BOOL_TY, BOOL_TY) => { BOOL_TY }
-                    _ => {
-                        self.ast_visit_emitter.report_error(
-                            Error::new(
-                                ErrorKind::BinaryExprTypeError(binary_expr.op, lhs_type, rhs_type),
-                                Span::dummy()
-                            )
-                        );
-                        Ty::Unkown
-                    }
-                }
-            }
-        };
+        let result_ty = lhs_type.test_binary(rhs_type, binary_expr.op);
 
-        self.ast_visit_emitter.set_type_to_node_id(binary_expr.ast_node_id, result_ty);
+        if let Some(result_ty) = result_ty {
+            self.ast_visit_emitter.set_type_to_node_id(binary_expr.ast_node_id, result_ty);
 
-        result_ty
+            result_ty
+        } else {
+            self.ast_visit_emitter.report_error(
+                Error::new(
+                    ErrorKind::BinaryExprTypeError(binary_expr.op, lhs_type, rhs_type),
+                    Span::dummy()
+                )
+            );
+            Ty::Unkown
+        }
     }
 
     fn visit_group_expr(&mut self, group_expr: &'ast GroupExpr<'ast>) -> Self::Result {

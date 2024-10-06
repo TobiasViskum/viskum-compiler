@@ -20,12 +20,18 @@ members = [
     "src/ir_defs",
     "src/diagnostics",
     "src/icfg",
-    "src/icfg_builder"
-, "src/codegen"]
+    "src/icfg_builder",
+    "src/codegen"
+, "src/type_ir"]
 
 
 [dependencies]
 compiler = { path = "src/compiler"}
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"
 
 [cargo-new]
 vcs = "none"

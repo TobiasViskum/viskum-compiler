@@ -1,3 +1,9 @@
+struct Point
+    x Int,
+    y Int,
+    z Int
+end
+
 a := do
     k := 0
     a := 2
@@ -5,10 +11,15 @@ a := do
     a + k
 end
 
+abc := if true then 1 else 0 end
+
+point := Point { x: 3, y: 4, z: 5 }
+
 boolean := true
 
+tuple := (7, 8)
 
-a := (2 + 3) * 9
+a := (2 + 3) * 9 + tuple.1
 b := 6 - (1 + a)
 
 k := if a == 2 then
@@ -41,3 +52,4 @@ result := loop
         break
     end
 end
+

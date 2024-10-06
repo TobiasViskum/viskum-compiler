@@ -11,3 +11,5 @@ icfg_builder = { path = "../icfg_builder" }
 icfg = { path = "../icfg" }
 ty = { path = "../ty" }
 codegen = { path = "../codegen" }
+
+bumpalo = "3.1.16"
