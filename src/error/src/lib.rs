@@ -44,13 +44,14 @@ pub enum ErrorKind {
     UndefinedLookup(Symbol, ResKind),
     MismatchedFieldTypes(Symbol, Symbol, Ty, Ty),
     MissingStructField(Symbol),
-    UndefinedStructField(Symbol),
+    UndefinedStructField(Symbol, Symbol),
     ExpectedBoolExpr(Ty),
     AssignmentToImmutable(Symbol),
     BreakTypeError(Ty, Ty),
     BreakOutsideLoop,
     BinaryExprTypeError(BinaryOp, Ty, Ty),
     InvalidTuple(Ty),
+    InvalidStruct(Ty),
     TupleAccessOutOfBounds(&'static [Ty], usize),
     InvalidPattern,
 }
@@ -59,13 +60,14 @@ impl ErrorKind {
     fn get_severity(&self) -> Severity {
         match self {
             Self::InvalidTuple(_) => Severity::Fatal,
+            Self::InvalidStruct(_) => Severity::Fatal,
             Self::UndefinedLookup(_, _) => Severity::Fatal,
             Self::InvalidPattern => Severity::Fatal,
             Self::BinaryExprTypeError(_, _, _) => Severity::Fatal,
             Self::TupleAccessOutOfBounds(_, _) => Severity::Fatal,
             Self::MismatchedFieldTypes(_, _, _, _) => Severity::NoImpact,
             Self::MissingStructField(_) => Severity::NoImpact,
-            Self::UndefinedStructField(_) => Severity::NoImpact,
+            Self::UndefinedStructField(_, _) => Severity::NoImpact,
             Self::BreakOutsideLoop => Severity::NoImpact,
             Self::BreakTypeError(_, _) => Severity::NoImpact,
             Self::ExpectedBoolExpr(_) => Severity::NoImpact,
@@ -87,6 +89,9 @@ impl ErrorKind {
             Self::InvalidTuple(found_ty) => {
                 write!(buffer, "Expected tuple but found type `{}`", found_ty)
             }
+            Self::InvalidStruct(found_ty) => {
+                write!(buffer, "Expected struct but found type `{}`", found_ty)
+            }
             Self::MismatchedFieldTypes(struct_name, field_name, found_ty, expected_ty) => {
                 write!(
                     buffer,
@@ -100,8 +105,13 @@ impl ErrorKind {
             Self::MissingStructField(symbol) => {
                 write!(buffer, "Missing struct field: `{}`", symbol.get())
             }
-            Self::UndefinedStructField(symbol) => {
-                write!(buffer, "Struct field doesn't exist `{}`", symbol.get())
+            Self::UndefinedStructField(struct_symbol, field_symbol) => {
+                write!(
+                    buffer,
+                    "Field `{}` doesn't exist in struct `{}`",
+                    field_symbol.get(),
+                    struct_symbol.get()
+                )
             }
             Self::BreakTypeError(expected_ty, found_ty) => {
                 write!(buffer, "Expected type `{}` but found type `{}`", expected_ty, found_ty)

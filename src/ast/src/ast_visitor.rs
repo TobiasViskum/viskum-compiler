@@ -13,6 +13,7 @@ use crate::{
     },
     walk_assign_stmt,
     walk_break_expr,
+    walk_field_expr,
     walk_loop_expr,
     walk_struct_expr,
     walk_tuple_expr,
@@ -195,6 +196,11 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
         walk_tuple_field_expr(self, tuple_field_expr)
     }
 
+    fn visit_field_expr(&mut self, field_expr: &'ast crate::FieldExpr<'ast>) -> Self::Result {
+        self.insert_query_entry(field_expr.ast_node_id, AstQueryEntry::FieldExpr(field_expr));
+        walk_field_expr(self, field_expr)
+    }
+
     fn visit_struct_expr(&mut self, struct_expr: &'ast StructExpr<'ast>) -> Self::Result {
         self.insert_query_entry(struct_expr.ast_node_id, AstQueryEntry::StructExpr(struct_expr));
         walk_struct_expr(self, struct_expr)
@@ -354,14 +360,22 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
                     }
                 }
 
+                let struct_name = &self.src[struct_expr.ident_node.span.get_byte_range()];
                 self.ast_visit_emitter.report_error(
                     Error::new(
-                        ErrorKind::UndefinedStructField(Symbol::new(given_field_lexeme)),
+                        ErrorKind::UndefinedStructField(
+                            Symbol::new(struct_name),
+                            Symbol::new(given_field_lexeme)
+                        ),
                         Span::dummy()
                     )
                 );
             }
         }
+    }
+
+    fn visit_field_expr(&mut self, field_expr: &'ast crate::FieldExpr<'ast>) -> Self::Result {
+        self.visit_expr(field_expr.lhs)
     }
 
     fn visit_ident_expr(&mut self, ident_node: &'ast IdentNode) -> Self::Result {
@@ -476,6 +490,42 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
         self.ast_visit_emitter.set_type_to_node_id(struct_expr.ast_node_id, struct_ty);
 
         struct_ty
+    }
+
+    fn visit_field_expr(&mut self, field_expr: &'ast crate::FieldExpr<'ast>) -> Self::Result {
+        let lhs_ty = self.visit_expr(field_expr.lhs);
+
+        let (struct_name, struct_fields) = match lhs_ty.try_deref_as_struct() {
+            Some(struct_ty) => struct_ty,
+            None => {
+                self.ast_visit_emitter.report_error(
+                    Error::new(ErrorKind::InvalidTuple(lhs_ty), Span::dummy())
+                );
+                self.ast_visit_emitter.set_type_to_node_id(field_expr.rhs.ast_node_id, Ty::Unkown);
+                self.ast_visit_emitter.set_type_to_node_id(field_expr.ast_node_id, Ty::Unkown);
+                return Ty::Unkown;
+            }
+        };
+
+        let field_access_symbol = Symbol::new(&self.src[field_expr.rhs.span.get_byte_range()]);
+
+        for (field_symbol, field_ty) in struct_fields {
+            if field_symbol.get() == field_access_symbol.get() {
+                self.ast_visit_emitter.set_type_to_node_id(field_expr.ast_node_id, *field_ty);
+                self.ast_visit_emitter.set_type_to_node_id(field_expr.rhs.ast_node_id, *field_ty);
+                return *field_ty;
+            }
+        }
+
+        self.ast_visit_emitter.report_error(
+            Error::new(
+                ErrorKind::UndefinedStructField(struct_name, field_access_symbol),
+                Span::dummy()
+            )
+        );
+        self.ast_visit_emitter.set_type_to_node_id(field_expr.ast_node_id, Ty::Unkown);
+        self.ast_visit_emitter.set_type_to_node_id(field_expr.rhs.ast_node_id, Ty::Unkown);
+        Ty::Unkown
     }
 
     fn visit_tuple_field_expr(

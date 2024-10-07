@@ -166,6 +166,14 @@ impl Ty {
         }
     }
 
+    pub fn try_deref_as_struct(&self) -> Option<(Symbol, &'static [(Symbol, Ty)])> {
+        let ty = self.auto_deref();
+        match ty {
+            Ty::Struct(struct_name, fields) => Some((struct_name, fields)),
+            _ => None,
+        }
+    }
+
     pub fn can_be_dereffed_to_bool(&self) -> bool {
         self.auto_deref() == BOOL_TY
     }

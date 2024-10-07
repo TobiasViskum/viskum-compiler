@@ -58,65 +58,68 @@ define i32 @main() {
     %38 = getelementptr inbounds i8, ptr %8, i64 4
     %39 = load i32, ptr %38
     %40 = add nsw i32 %37, %39
-    store i32 %40, ptr %9
-    %41 = load i32, ptr %9
-    %42 = add nsw i32 1, %41
-    %43 = sub nsw i32 6, %42
-    store i32 %43, ptr %10
+    %41 = getelementptr inbounds i8, ptr %6, i64 8
+    %42 = load i32, ptr %41
+    %43 = add nsw i32 %40, %42
+    store i32 %43, ptr %9
     %44 = load i32, ptr %9
-    %45 = icmp eq i32 %44, 2
-    br i1 %45, label %46, label %47
-46:
+    %45 = add nsw i32 1, %44
+    %46 = sub nsw i32 6, %45
+    store i32 %46, ptr %10
+    %47 = load i32, ptr %9
+    %48 = icmp eq i32 %47, 2
+    br i1 %48, label %49, label %50
+49:
     store i32 2, ptr %12
     store i32 2, ptr %21
-    br label %50
-47:
-    %48 = load i32, ptr %9
-    %49 = icmp eq i32 %48, 9
-    br i1 %49, label %50, label %51
+    br label %53
 50:
+    %51 = load i32, ptr %9
+    %52 = icmp eq i32 %51, 9
+    br i1 %52, label %53, label %54
+53:
     store i32 3, ptr %13
     store i32 99, ptr %21
-    br label %52
-51:
+    br label %55
+54:
     store i32 4, ptr %14
     store i32 7, ptr %21
-    br label %52
-52:
-    %53 = load i32, ptr %21
-    store i32 %53, ptr %11
-    %54 = load i32, ptr %9
-    %55 = load i32, ptr %10
-    %56 = add nsw i32 %54, %55
-    %57 = load i32, ptr %11
-    %58 = add nsw i32 %56, %57
-    store i32 %58, ptr %15
+    br label %55
+55:
+    %56 = load i32, ptr %21
+    store i32 %56, ptr %11
+    %57 = load i32, ptr %9
+    %58 = load i32, ptr %10
+    %59 = add nsw i32 %57, %58
+    %60 = load i32, ptr %11
+    %61 = add nsw i32 %59, %60
+    store i32 %61, ptr %15
     store i32 2, ptr %15
-    %59 = icmp eq i1 1, 1
-    br i1 %59, label %60, label %61
-60:
-    store i32 1, ptr %22
-    br label %63
-61:
-    %62 = load i32, ptr %15
-    store i32 %62, ptr %22
-    br label %63
+    %62 = icmp eq i1 1, 1
+    br i1 %62, label %63, label %64
 63:
-    %64 = load i32, ptr %22
-    store i32 %64, ptr %16
+    store i32 1, ptr %22
+    br label %66
+64:
     %65 = load i32, ptr %15
-    %66 = add nsw i32 928, %65
-    store i32 %66, ptr %15
+    store i32 %65, ptr %22
+    br label %66
+66:
+    %67 = load i32, ptr %22
+    store i32 %67, ptr %16
+    %68 = load i32, ptr %15
+    %69 = add nsw i32 928, %68
+    store i32 %69, ptr %15
     store i32 0, ptr %17
-    %67 = load i32, ptr %17
-    %68 = icmp eq i32 %67, 10
-    br i1 %68, label %69, label %72
-69:
     %70 = load i32, ptr %17
-    %71 = add nsw i32 %70, 1
-    store i32 %71, ptr %17
-    br label %72
+    %71 = icmp eq i32 %70, 10
+    br i1 %71, label %72, label %75
 72:
+    %73 = load i32, ptr %17
+    %74 = add nsw i32 %73, 1
+    store i32 %74, ptr %17
+    br label %75
+75:
     ret i32 0
 }
 

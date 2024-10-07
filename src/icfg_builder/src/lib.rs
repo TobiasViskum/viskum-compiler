@@ -541,7 +541,6 @@ impl<'ast, 'c> Visitor<'ast> for CfgBuilder<'ast, 'c> {
     }
 
     /// Assumes read for now
-    /// IMPLEMENT: GET Result loc for tuples, if_exprs, loop_exprs etc.
     fn visit_tuple_field_expr(
         &mut self,
         tuple_field_expr: &'ast ast::TupleFieldExpr<'ast>
@@ -552,9 +551,6 @@ impl<'ast, 'c> Visitor<'ast> for CfgBuilder<'ast, 'c> {
             VisitResult::PlaceKind(place_kind, _) => place_kind,
             _ => unreachable!("This should be unreachable if type checking was successful"),
         };
-
-        let node_id = get_node_id_from_expr(tuple_field_expr.lhs);
-        self.node_id_to_result_mem_id.get(&node_id);
 
         let tuple_ty = match
             self.icfg_builder
@@ -592,6 +588,58 @@ impl<'ast, 'c> Visitor<'ast> for CfgBuilder<'ast, 'c> {
             );
 
             VisitResult::PlaceKind(PlaceKind::TempId(temp_id), elem_type)
+        }
+    }
+
+    /// Assumes read for now
+    fn visit_field_expr(&mut self, field_expr: &'ast ast::FieldExpr<'ast>) -> Self::Result {
+        let lhs_visit_result = self.visit_expr(field_expr.lhs);
+        let lhs_place = match lhs_visit_result {
+            VisitResult::PlaceKind(place_kind, _) => place_kind,
+            _ => unreachable!("This should be unreachable if type checking was successful"),
+        };
+
+        let access_symbol = Symbol::new(
+            &self.icfg_builder.src[field_expr.rhs.span.get_byte_range()]
+        );
+
+        let (struct_name, struct_fields) = match
+            self.icfg_builder
+                .get_ty_from_node_id(get_node_id_from_expr(field_expr.lhs))
+                .try_deref_as_struct()
+        {
+            Some(struct_ty) => struct_ty,
+            None => unreachable!("Should not be able to go here if previous pass was successfull"),
+        };
+
+        let mut byte_offset = 0;
+        let elem_ty = struct_fields
+            .iter()
+            .find(|(symbol, ty)| (
+                if symbol.get() == access_symbol.get() {
+                    true
+                } else {
+                    byte_offset += ty.get_ty_attr().size_bytes;
+                    false
+                }
+            ))
+            .map(|x| x.1)
+            .expect("Expected field")
+            .to_ptr_ty();
+
+        if byte_offset == 0 {
+            VisitResult::PlaceKind(lhs_place, elem_ty)
+        } else {
+            let temp_id = self.get_temp_id();
+            self.push_node(
+                Node::new(
+                    NodeKind::ByteAccessNode(
+                        ByteAccessNode::new(PlaceKind::TempId(temp_id), lhs_place, byte_offset)
+                    )
+                )
+            );
+
+            VisitResult::PlaceKind(PlaceKind::TempId(temp_id), elem_ty)
         }
     }
 
@@ -678,8 +726,26 @@ impl<'ast, 'c> Visitor<'ast> for CfgBuilder<'ast, 'c> {
 
         let mut byte_offset: usize = 0;
 
-        for field in struct_expr.field_initializations.iter() {
-            byte_offset = self.init_tuple_or_struct_field(field.value, result_mem_id, byte_offset);
+        let (_, struct_fields) = self.icfg_builder
+            .get_ty_from_node_id(struct_expr.ast_node_id)
+            .try_deref_as_struct()
+            .expect("Expected ty to be struct");
+
+        'outer: for (field_symbol, _) in struct_fields {
+            for field in struct_expr.field_initializations.iter() {
+                let access_field_symbol = Symbol::new(
+                    &self.icfg_builder.src[field.ident.span.get_byte_range()]
+                );
+                if access_field_symbol.get() == field_symbol.get() {
+                    byte_offset = self.init_tuple_or_struct_field(
+                        field.value,
+                        result_mem_id,
+                        byte_offset
+                    );
+                    continue 'outer;
+                }
+            }
+            unreachable!("Should not be hit if validation of the Ast was correct");
         }
 
         VisitResult::PlaceKind(PlaceKind::ResultMemId(result_mem_id), struct_ty.to_ptr_ty())
