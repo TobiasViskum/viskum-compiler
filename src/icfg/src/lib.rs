@@ -10,11 +10,9 @@ use std::fmt::Display;
 
 use data_structures::Either;
 use derive_new::new;
-use ir_defs::Mutability;
 use op::{ ArithmeticOp, BinaryOp };
 use span::Span;
-use symbol::Symbol;
-use ty::{ Ty, BOOL_TY, INT_TY, VOID_TY };
+use ir::{ Mutability, Symbol, Ty, BOOL_TY, INT_TY, VOID_TY };
 mod icfg_prettifier;
 mod cfg_visitor;
 

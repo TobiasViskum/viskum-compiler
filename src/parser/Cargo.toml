@@ -6,14 +6,13 @@ edition = "2021"
 
 
 [dependencies]
-enum-iterator = "2.1.0"
-array-init = "2.1.0"
 lexer = { path = "../lexer" }
 token = { path = "../token" }
 op = { path = "../op" }
 ast = { path = "../ast" }
 span = { path = "../span" }
-symbol = { path = "../symbol" }
-ty = { path = "../ty" }
-ir_defs = { path = "../ir_defs" }
 error = { path = "../error" }
+ir = { path = "../ir" }
+
+enum-iterator = "2.1.0"
+array-init = "2.1.0"

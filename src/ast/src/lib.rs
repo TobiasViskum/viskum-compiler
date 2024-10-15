@@ -63,11 +63,10 @@ pub use ast_arena::AstArena;
 pub use ast_prettifier::AstPrettifier;
 pub use ast_query_system::{ AstQueryEntry, AstQuerySystem };
 pub use ast_visitor::{ AstVisitEmitter, AstVisitor };
-use bumpalo::Bump;
 pub use visitor::*;
 
 use std::{ cell::Cell, marker::PhantomData };
-use ir_defs::{ NodeId, ResultLoc };
+use ir::NodeId;
 use op::BinaryOp;
 use span::Span;
 use derive_new::new;
@@ -145,8 +144,9 @@ pub struct GlobalScope<'ast> {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub enum Typing {
+pub enum Typing<'ast> {
     Ident(Span),
+    Tuple(&'ast [Typing<'ast>]),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -161,26 +161,36 @@ pub enum Stmt<'ast> {
 pub enum ItemStmt<'ast> {
     FnItem(&'ast FnItem<'ast>),
     StructItem(&'ast StructItem<'ast>),
+    TypedefItem(&'ast TypedefItem<'ast>),
+}
+
+#[derive(Debug, new)]
+pub struct TypedefItem<'ast> {
+    pub ident_node: &'ast IdentNode,
+    pub type_expr: Typing<'ast>,
+    pub ast_node_id: NodeId,
 }
 
 #[derive(Debug, new)]
 pub struct FnItem<'ast> {
     pub ident_node: &'ast IdentNode,
-    pub body: Expr<'ast>,
+    pub body: &'ast BlockExpr<'ast>,
+    pub args: &'ast [&'ast Field<'ast>],
+    pub return_ty: Option<Typing<'ast>>,
     pub ast_node_id: NodeId,
 }
 
 #[derive(Debug, new)]
 pub struct StructItem<'ast> {
     pub ident_node: &'ast IdentNode,
-    pub field_declarations: &'ast [&'ast FieldDeclaration<'ast>],
+    pub field_declarations: &'ast [&'ast Field<'ast>],
     pub ast_node_id: NodeId,
 }
 
 #[derive(Debug, new)]
-pub struct FieldDeclaration<'ast> {
+pub struct Field<'ast> {
     pub ident: &'ast IdentNode,
-    pub type_expr: Typing,
+    pub type_expr: Typing<'ast>,
 }
 
 #[derive(Debug, new)]
@@ -264,10 +274,17 @@ pub enum ExprWithoutBlock<'ast> {
     ValueExpr(ValueExpr<'ast>),
     BreakExpr(&'ast BreakExpr<'ast>),
     ContinueExpr(&'ast ContinueExpr),
+    ReturnExpr(&'ast ReturnExpr<'ast>),
 }
 
 #[derive(Debug, new)]
 pub struct BreakExpr<'ast> {
+    pub value: Option<Expr<'ast>>,
+    pub ast_node_id: NodeId,
+}
+
+#[derive(Debug, new)]
+pub struct ReturnExpr<'ast> {
     pub value: Option<Expr<'ast>>,
     pub ast_node_id: NodeId,
 }
@@ -376,6 +393,7 @@ pub fn get_node_id_from_expr(expr: Expr) -> NodeId {
             match expr_without_block {
                 ExprWithoutBlock::BreakExpr(break_expr) => break_expr.ast_node_id,
                 ExprWithoutBlock::ContinueExpr(continue_expr) => continue_expr.ast_node_id,
+                ExprWithoutBlock::ReturnExpr(return_expr) => return_expr.ast_node_id,
                 ExprWithoutBlock::PlaceExpr(place_expr) => get_node_id_from_place_expr(place_expr),
                 ExprWithoutBlock::ValueExpr(value_expr) => get_node_id_from_value_expr(value_expr),
             }

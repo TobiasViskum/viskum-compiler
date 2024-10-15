@@ -6,12 +6,10 @@ edition = "2021"
 [dependencies]
 # Libs in project
 ast = { path = "../ast" }
-ir_defs = { path = "../ir_defs" }
 icfg = { path = "../icfg" }
-ty = { path = "../ty" }
 resolver = { path = "../resolver" }
 span = { path = "../span" }
-symbol = { path = "../symbol" }
+ir = { path = "../ir" }
 op = { path = "../op" }
 data_structures = { path = "../data_structures" }
 

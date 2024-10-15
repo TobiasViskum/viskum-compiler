@@ -17,12 +17,10 @@ dependencies = [
  "derive-new",
  "error",
  "fxhash",
- "ir_defs",
+ "ir",
  "op",
  "paste",
  "span",
- "symbol",
- "ty",
  "typed-arena",
 ]
 
@@ -45,8 +43,8 @@ dependencies = [
  "data_structures",
  "fxhash",
  "icfg",
+ "ir",
  "op",
- "ty",
 ]
 
 [[package]]
@@ -58,9 +56,9 @@ dependencies = [
  "codegen",
  "icfg",
  "icfg_builder",
+ "ir",
  "parser",
  "resolver",
- "ty",
 ]
 
 [[package]]
@@ -86,9 +84,8 @@ dependencies = [
 name = "diagnostics"
 version = "0.1.0"
 dependencies = [
+ "ir",
  "span",
- "symbol",
- "ty",
 ]
 
 [[package]]
@@ -121,11 +118,9 @@ checksum = "5443807d6dff69373d433ab9ef5378ad8df50ca6298caf15de6e52e24aaf54d5"
 name = "error"
 version = "0.1.0"
 dependencies = [
- "ir_defs",
+ "ir",
  "op",
  "span",
- "symbol",
- "ty",
 ]
 
 [[package]]
@@ -149,11 +144,9 @@ version = "0.1.0"
 dependencies = [
  "data_structures",
  "derive-new",
- "ir_defs",
+ "ir",
  "op",
  "span",
- "symbol",
- "ty",
 ]
 
 [[package]]
@@ -164,12 +157,10 @@ dependencies = [
  "data_structures",
  "fxhash",
  "icfg",
- "ir_defs",
+ "ir",
  "op",
  "resolver",
  "span",
- "symbol",
- "ty",
 ]
 
 [[package]]
@@ -183,11 +174,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "ir_defs"
+name = "ir"
 version = "0.1.0"
 dependencies = [
- "symbol",
- "ty",
+ "bumpalo",
+ "data_structures",
+ "fxhash",
+ "op",
 ]
 
 [[package]]
@@ -210,13 +203,11 @@ dependencies = [
  "ast",
  "enum-iterator",
  "error",
- "ir_defs",
+ "ir",
  "lexer",
  "op",
  "span",
- "symbol",
  "token",
- "ty",
 ]
 
 [[package]]
@@ -251,23 +242,13 @@ dependencies = [
  "bumpalo",
  "error",
  "fxhash",
- "ir_defs",
- "symbol",
- "ty",
+ "ir",
+ "span",
 ]
 
 [[package]]
 name = "span"
 version = "0.1.0"
-
-[[package]]
-name = "symbol"
-version = "0.1.0"
-dependencies = [
- "bumpalo",
- "data_structures",
- "typed-arena",
-]
 
 [[package]]
 name = "syn"
@@ -286,26 +267,6 @@ version = "0.1.0"
 dependencies = [
  "enum-iterator",
  "span",
-]
-
-[[package]]
-name = "ty"
-version = "0.1.0"
-dependencies = [
- "bumpalo",
- "data_structures",
- "fxhash",
- "op",
- "symbol",
- "typed-arena",
-]
-
-[[package]]
-name = "type_ir"
-version = "0.1.0"
-dependencies = [
- "bumpalo",
- "data_structures",
 ]
 
 [[package]]

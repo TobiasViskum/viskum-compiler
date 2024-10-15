@@ -1,6 +1,8 @@
 use std::fmt::Display;
-use symbol::Symbol;
-use ty::Ty;
+
+use fxhash::FxHashMap;
+
+use crate::{ Symbol, Ty };
 
 #[derive(PartialEq, Debug, Clone, Copy)]
 pub enum Mutability {
@@ -18,10 +20,6 @@ pub struct ContextId(pub u32);
 /// Used during the first pass of name resolution
 #[derive(Eq, Hash, PartialEq, Debug, Clone, Copy)]
 pub struct ScopeId(pub u32);
-
-/// Used as a temporary location for where ExprWithBlock results go (e.g. IfExpr, MatchExpr, etc.)
-#[derive(Eq, Hash, PartialEq, Debug, Clone, Copy)]
-pub struct ResultLoc(pub u32);
 
 /// NodeId is used both as AstNodeId and CfgNodeId
 #[derive(Eq, Hash, PartialEq, Debug, Clone, Copy)]
@@ -59,44 +57,63 @@ impl<'res> NameBinding<'res> {
 
     pub fn get_res_kind(&self) -> ResKind {
         match self.kind {
-            NameBindingKind::DefKind(def_kind) => {
-                match def_kind {
-                    DefKind::Stuct(_) => ResKind::Struct,
-                    DefKind::Variable(_) => ResKind::Variable,
-                }
-            }
+            NameBindingKind::Variable(_) => ResKind::Variable,
+            NameBindingKind::Adt(_) => ResKind::Adt,
         }
-    }
-}
-
-impl<'res> From<DefKind<'res>> for NameBinding<'res> {
-    fn from(value: DefKind<'res>) -> Self {
-        Self { kind: NameBindingKind::DefKind(value) }
     }
 }
 
 #[derive(Debug, Clone, Copy)]
 pub enum NameBindingKind<'res> {
-    DefKind(DefKind<'res>),
+    Variable(Mutability),
+    Adt(Adt<'res>),
     // Module
     // Import
 }
 
+/// Algebraic data type (e.g. structs, enums etc.)
+#[derive(Debug, Clone, Copy)]
+pub enum Adt<'res> {
+    Struct(&'res [(DefId, Ty)]),
+    Typedef(Ty),
+}
+
+#[derive(Eq, Hash, PartialEq, Debug, Clone, Copy)]
+pub struct AdtId(pub DefId);
+
 #[derive(Debug, Clone, Copy)]
 pub enum DefKind<'res> {
     Variable(Mutability),
-    Stuct(&'res [(DefId, ResTy)]),
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum ResTy {
-    UserDef(DefId),
-    Compiler(Ty),
+    Stuct(&'res [(DefId, Ty)]),
 }
 
 /// Only difference between this and `DefKind`, is that this has no data
 #[derive(Hash, Eq, PartialEq, Debug, Clone, Copy)]
 pub enum ResKind {
     Variable,
-    Struct,
+    Adt,
+}
+
+pub type NodeIdToTy = FxHashMap<NodeId, Ty>;
+pub type NodeIdToDefId = FxHashMap<NodeId, DefId>;
+pub type DefIdToNameBinding<'res> = FxHashMap<DefId, NameBinding<'res>>;
+
+pub struct ResolvedInformation<'res> {
+    pub node_id_to_ty: NodeIdToTy,
+    pub node_id_to_def_id: NodeIdToDefId,
+    pub def_id_to_name_binding: DefIdToNameBinding<'res>,
+}
+
+impl<'res> ResolvedInformation<'res> {
+    pub fn get_ty_from_node_id(&self, node_id: &NodeId) -> Ty {
+        *self.node_id_to_ty.get(node_id).expect("Expected type to node id")
+    }
+
+    pub fn get_def_id_from_node_id(&self, node_id: &NodeId) -> DefId {
+        *self.node_id_to_def_id.get(node_id).expect("Expected DefId to node id")
+    }
+
+    pub fn get_name_binding_from_def_id(&self, def_id: &DefId) -> NameBinding<'res> {
+        *self.def_id_to_name_binding.get(def_id).expect("Expected name to be binded to def id")
+    }
 }

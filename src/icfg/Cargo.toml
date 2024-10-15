@@ -5,11 +5,9 @@ edition = "2021"
 
 [dependencies]
 # Libs in project
-ty = { path = "../ty" }
 op = { path = "../op" }
-ir_defs = { path = "../ir_defs" }
+ir = { path = "../ir" }
 span = { path = "../span" }
-symbol = { path = "../symbol" }
 data_structures = { path = "../data_structures" }
 
 # Extern crate

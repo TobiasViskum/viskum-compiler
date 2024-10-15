@@ -91,6 +91,8 @@ pub enum TokenKind {
     Ident,
 
     /// Keyword `def`
+    Fn,
+    /// Keyword `def`
     Def,
     /// Keyword `class`
     Class,
@@ -120,6 +122,8 @@ pub enum TokenKind {
     Mut,
     /// Keyword `ret`
     Return,
+    /// Keyword `typedef`
+    Typedef,
 
     /// End of ofile
     Eof,
@@ -131,7 +135,7 @@ impl TokenKind {
     }
 
     pub fn can_end_scope(&self) -> bool {
-        matches!(self, Self::End | Self::Else | Self::Elif)
+        matches!(self, Self::RightCurly | Self::End | Self::Else | Self::Elif)
     }
 }
 

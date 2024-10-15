@@ -13,7 +13,7 @@ use icfg::{
     PlaceKind,
 };
 use op::{ ArithmeticOp, BinaryOp, ComparisonOp };
-use ty::{ GetTyAttr, PrimTy, Ty };
+use ir::{ GetTyAttr, PrimTy, ResolvedInformation, Ty };
 use std::{ fmt::Write, fs::File, process::Command };
 
 const INDENTATION: usize = 4;
@@ -23,15 +23,17 @@ const INDENTATION: usize = 4;
 /// Used to allocate places (e.g. results of operations, variables, etc.) before the actual code gen
 pub(crate) struct CodeGenUnitHelper<'a> {
     cfg: &'a Cfg,
+    resolved_information: &'a ResolvedInformation<'a>,
     next_ssa_id: usize,
     place_to_ssa_id: FxHashMap<PlaceKind, usize>,
     basic_block_id_to_ssa_id: FxHashMap<BasicBlockId, usize>,
 }
 
 impl<'a> CodeGenUnitHelper<'a> {
-    pub(crate) fn new(cfg: &'a Cfg) -> Self {
+    pub(crate) fn new(cfg: &'a Cfg, resolved_information: &'a ResolvedInformation) -> Self {
         Self {
             cfg,
+            resolved_information,
             next_ssa_id: 1,
             place_to_ssa_id: Default::default(),
             basic_block_id_to_ssa_id: Default::default(),
@@ -99,19 +101,21 @@ impl<'a> CfgVisitor for CodeGenUnitHelper<'a> {
 
 pub(crate) struct CodeGenUnit<'a> {
     cfg: &'a Cfg,
+    resolved_information: &'a ResolvedInformation<'a>,
     buffer: String,
     place_to_ssa_id: FxHashMap<PlaceKind, usize>,
     basic_block_id_to_ssa_id: FxHashMap<BasicBlockId, usize>,
 }
 
 impl<'a> CodeGenUnit<'a> {
-    pub(crate) fn new(cfg: &'a Cfg) -> Self {
+    pub(crate) fn new(cfg: &'a Cfg, resolved_information: &'a ResolvedInformation<'a>) -> Self {
         let (place_to_ssa_id, basic_block_id_to_ssa_id) = {
-            CodeGenUnitHelper::new(cfg).allocate_places()
+            CodeGenUnitHelper::new(cfg, resolved_information).allocate_places()
         };
 
         Self {
             cfg,
+            resolved_information,
             buffer: String::with_capacity(2048),
             place_to_ssa_id,
             basic_block_id_to_ssa_id,
@@ -143,13 +147,14 @@ impl<'a> CodeGenUnit<'a> {
             }
             Ty::Ptr(_) => "ptr".to_string(),
             ty @ Ty::Tuple(_) => {
-                let ty_attr = ty.get_ty_attr();
+                let ty_attr = ty.get_ty_attr(self.resolved_information);
                 format!("[{} x i8]", ty_attr.size_bytes)
             }
-            ty @ Ty::Struct(_, _) => {
-                let ty_attr = ty.get_ty_attr();
+            ty @ Ty::Adt(_) => {
+                let ty_attr = ty.get_ty_attr(self.resolved_information);
                 format!("[{} x i8]", ty_attr.size_bytes)
             }
+
             Ty::Unkown => panic!("Unkown type (should not be this far in compilation)"),
         }
     }
@@ -202,7 +207,7 @@ impl<'a> CfgVisitor for CodeGenUnit<'a> {
     fn visit_local_mem(&mut self, local_mem: &icfg::LocalMem) -> Self::Result {
         let ssa_id = self.get_ssa_id_from_place(&PlaceKind::LocalMemId(local_mem.local_mem_id));
 
-        let ty_attr = local_mem.ty.get_ty_attr();
+        let ty_attr = local_mem.ty.get_ty_attr(self.resolved_information);
 
         writeln!(
             self.buffer,
@@ -217,7 +222,7 @@ impl<'a> CfgVisitor for CodeGenUnit<'a> {
     fn visit_result_mem(&mut self, result_mem: &icfg::ResultMem) -> Self::Result {
         let ssa_id = self.get_ssa_id_from_place(&PlaceKind::ResultMemId(result_mem.result_mem_id));
 
-        let ty_attr = result_mem.ty.get_ty_attr();
+        let ty_attr = result_mem.ty.get_ty_attr(self.resolved_information);
 
         writeln!(
             self.buffer,
@@ -360,13 +365,13 @@ impl<'icfg> CodeGen<'icfg> {
         Self { icfg }
     }
 
-    pub fn gen_code(self, file_name: &str) {
+    pub fn gen_code(self, file_name: &str, resolved_information: &ResolvedInformation) {
         use std::io::Write;
 
         let file_name_with_extension = format!("{}.ll", file_name);
 
         let mut buffer = String::with_capacity(4096);
-        CodeGenUnit::new(&self.icfg.cfgs[0]).gen_code(&mut buffer);
+        CodeGenUnit::new(&self.icfg.cfgs[0], resolved_information).gen_code(&mut buffer);
 
         let mut file = File::create(&file_name_with_extension).expect("Error creating file");
         file.write_all(buffer.as_bytes()).expect("Error writing to file");

@@ -19,6 +19,7 @@ use crate::{
     ExprWithBlock,
     ExprWithoutBlock,
     FieldExpr,
+    FnItem,
     GroupExpr,
     IdentNode,
     IfExpr,
@@ -33,6 +34,7 @@ use crate::{
     StructItem,
     TupleExpr,
     TupleFieldExpr,
+    TypedefItem,
     ValueExpr,
 };
 
@@ -108,9 +110,18 @@ pub trait Visitor<'ast>: Sized {
 
     fn visit_item(&mut self, item: ItemStmt<'ast>) -> Self::Result {
         match item {
-            ItemStmt::FnItem(fn_item) => todo!(),
+            ItemStmt::FnItem(fn_item) => self.visit_fn_item(fn_item),
             ItemStmt::StructItem(struct_item) => self.visit_struct_item(struct_item),
+            ItemStmt::TypedefItem(typedef_item) => self.visit_typedef_item(typedef_item),
         }
+    }
+
+    fn visit_typedef_item(&mut self, typedef_item: &'ast TypedefItem<'ast>) -> Self::Result {
+        Self::default_result()
+    }
+
+    fn visit_fn_item(&mut self, fn_item: &'ast FnItem<'ast>) -> Self::Result {
+        self.visit_block_expr(fn_item.body)
     }
 
     fn visit_struct_item(&mut self, struct_item: &'ast StructItem<'ast>) -> Self::Result {
@@ -225,6 +236,7 @@ pub fn walk_expr_without_block<'a, V>(
         ExprWithoutBlock::ValueExpr(expr) => visitor.visit_value_expr(expr),
         ExprWithoutBlock::BreakExpr(break_expr) => visitor.visit_break_expr(break_expr),
         ExprWithoutBlock::ContinueExpr(continue_expr) => visitor.visit_continue_expr(continue_expr),
+        ExprWithoutBlock::ReturnExpr(return_expr) => todo!(),
     }
 }
 

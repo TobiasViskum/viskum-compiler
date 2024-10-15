@@ -37,23 +37,21 @@ use icfg::{
     StoreNode,
     TempId,
 };
-use ir_defs::{ DefId, Mutability, NodeId };
-use resolver::ResolvedInformation;
-use symbol::Symbol;
-use ty::{ GetTyAttr, Ty, VOID_TY };
+
+use ir::{ DefId, GetTyAttr, Mutability, NodeId, ResolvedInformation, Symbol, Ty, VOID_TY };
 
 pub struct IcfgBuilder<'ast> {
     pending_functions: Vec<&'ast FnItem<'ast>>,
     ast: Ast<'ast, AstTypeChecked>,
     cfgs: Vec<Cfg>,
-    resolved_information: ResolvedInformation,
+    resolved_information: &'ast ResolvedInformation<'ast>,
     src: &'ast str,
 }
 
 impl<'ast> IcfgBuilder<'ast> {
     pub fn new(
         ast: Ast<'ast, AstTypeChecked>,
-        resolved_information: ResolvedInformation,
+        resolved_information: &'ast ResolvedInformation<'ast>,
         src: &'ast str
     ) -> Self {
         Self {
@@ -571,7 +569,7 @@ impl<'ast, 'c> Visitor<'ast> for CfgBuilder<'ast, 'c> {
         } else {
             let mut byte_offset = 0;
             for (i, ty) in tuple_ty.iter().enumerate() {
-                byte_offset += ty.get_ty_attr().size_bytes;
+                byte_offset += ty.get_ty_attr(&self.icfg_builder.resolved_information).size_bytes;
 
                 if i == idx - 1 {
                     break;
@@ -606,7 +604,7 @@ impl<'ast, 'c> Visitor<'ast> for CfgBuilder<'ast, 'c> {
         let (struct_name, struct_fields) = match
             self.icfg_builder
                 .get_ty_from_node_id(get_node_id_from_expr(field_expr.lhs))
-                .try_deref_as_struct()
+                .try_deref_as_struct(&self.icfg_builder.resolved_information.def_id_to_name_binding)
         {
             Some(struct_ty) => struct_ty,
             None => unreachable!("Should not be able to go here if previous pass was successfull"),
@@ -616,10 +614,12 @@ impl<'ast, 'c> Visitor<'ast> for CfgBuilder<'ast, 'c> {
         let elem_ty = struct_fields
             .iter()
             .find(|(symbol, ty)| (
-                if symbol.get() == access_symbol.get() {
+                if symbol.symbol.get() == access_symbol.get() {
                     true
                 } else {
-                    byte_offset += ty.get_ty_attr().size_bytes;
+                    byte_offset += ty.get_ty_attr(
+                        &self.icfg_builder.resolved_information
+                    ).size_bytes;
                     false
                 }
             ))
@@ -728,7 +728,7 @@ impl<'ast, 'c> Visitor<'ast> for CfgBuilder<'ast, 'c> {
 
         let (_, struct_fields) = self.icfg_builder
             .get_ty_from_node_id(struct_expr.ast_node_id)
-            .try_deref_as_struct()
+            .try_deref_as_struct(&self.icfg_builder.resolved_information.def_id_to_name_binding)
             .expect("Expected ty to be struct");
 
         'outer: for (field_symbol, _) in struct_fields {
@@ -736,7 +736,7 @@ impl<'ast, 'c> Visitor<'ast> for CfgBuilder<'ast, 'c> {
                 let access_field_symbol = Symbol::new(
                     &self.icfg_builder.src[field.ident.span.get_byte_range()]
                 );
-                if access_field_symbol.get() == field_symbol.get() {
+                if access_field_symbol.get() == field_symbol.symbol.get() {
                     byte_offset = self.init_tuple_or_struct_field(
                         field.value,
                         result_mem_id,
@@ -842,7 +842,7 @@ impl<'ast, 'b> CfgBuilder<'ast, 'b> {
             );
         }
 
-        let operand_ty_attr = operand_ty.get_ty_attr();
+        let operand_ty_attr = operand_ty.get_ty_attr(&self.icfg_builder.resolved_information);
         byte_offset + operand_ty_attr.size_bytes
     }
 }

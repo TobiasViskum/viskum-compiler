@@ -9,9 +9,7 @@ edition = "2021"
 # Libs in project
 op = { path = "../op" }
 span = { path = "../span" }
-symbol = { path = "../symbol" }
-ty = { path = "../ty" }
-ir_defs = { path = "../ir_defs" }
+ir = { path = "../ir" }
 error = { path = "../error" }
 data_structures = { path = "../data_structures" }
 

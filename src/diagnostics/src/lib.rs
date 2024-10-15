@@ -1,6 +1,5 @@
+use ir::{ Symbol, Ty };
 use span::Span;
-use symbol::Symbol;
-use ty::Ty;
 use std::{ fmt::Write, marker::PhantomData };
 
 pub struct ProgramDiagnostics<'ctx> {

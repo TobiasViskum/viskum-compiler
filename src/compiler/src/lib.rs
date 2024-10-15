@@ -3,6 +3,7 @@ use bumpalo::Bump;
 use codegen::CodeGen;
 use icfg::{ Icfg, IcfgPrettifier };
 use icfg_builder::IcfgBuilder;
+use ir::ResolvedInformation;
 use parser::Parser;
 use resolver::Resolver;
 
@@ -15,21 +16,22 @@ impl Compiler {
 
     pub fn compile_entry(&self) {
         let now = std::time::Instant::now();
-        let icfg = self.build_to_icfg();
+
+        let arena = Bump::new();
+        let (icfg, resolved_information) = self.build_to_icfg(&arena);
 
         // IcfgPrettifier::new(&icfg).print_icfg();
 
         println!("Viskum compilation took: {:?}", now.elapsed());
 
         let now = std::time::Instant::now();
-        CodeGen::new(&icfg).gen_code("file");
+        CodeGen::new(&icfg).gen_code("file", &resolved_information);
         println!("LLVM compilation took: {:?}", now.elapsed());
     }
 
-    fn build_to_icfg(&self) -> Icfg {
+    fn build_to_icfg<'a>(&self, arena: &'a Bump) -> (Icfg, ResolvedInformation<'a>) {
         let file_content = Self::get_file_content();
         let ast_arena = AstArena::new();
-        let arena = Bump::new();
 
         let (resolved_information, ast) = {
             let parser = Parser::new(&file_content, &ast_arena);
@@ -52,9 +54,9 @@ impl Compiler {
         //     Some(&resolved_information.node_id_to_ty)
         // ).print_ast();
 
-        let icfg_builder = IcfgBuilder::new(ast, resolved_information, &file_content);
+        let icfg_builder = IcfgBuilder::new(ast, &resolved_information, &file_content);
         let icfg = icfg_builder.build();
-        icfg
+        (icfg, resolved_information)
     }
 
     fn get_file_content() -> String {

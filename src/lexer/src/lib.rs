@@ -107,6 +107,7 @@ impl<'a> Lexer<'a> {
     fn match_keyword_or_ident(ident: &str) -> TokenKind {
         // Make a faster way than a match statement here (match a char at a time)
         match ident {
+            "fn" => TokenKind::Fn,
             "def" => TokenKind::Def,
             "mut" => TokenKind::Mut,
             "class" => TokenKind::Class,
@@ -124,6 +125,7 @@ impl<'a> Lexer<'a> {
             "true" => TokenKind::True,
             "false" => TokenKind::False,
             "then" => TokenKind::Then,
+            "typedef" => TokenKind::Typedef,
             _ => TokenKind::Ident,
         }
     }

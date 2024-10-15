@@ -1,5 +1,5 @@
 use fxhash::FxHashMap;
-use ir_defs::NodeId;
+use ir::NodeId;
 
 use crate::{
     AssignStmt,
@@ -23,6 +23,7 @@ use crate::{
     StructItem,
     TupleExpr,
     TupleFieldExpr,
+    TypedefItem,
 };
 
 /// Used to lookup any node inside the ast and get a reference to it
@@ -68,6 +69,7 @@ impl<'ast> AstQuerySystem<'ast> {
 #[derive(Debug, Clone, Copy)]
 pub enum AstQueryEntry<'ast> {
     TupleExpr(&'ast TupleExpr<'ast>),
+    TypedefItem(&'ast TypedefItem<'ast>),
     LoopExpr(&'ast LoopExpr<'ast>),
     BreakExpr(&'ast BreakExpr<'ast>),
     StructExpr(&'ast StructExpr<'ast>),

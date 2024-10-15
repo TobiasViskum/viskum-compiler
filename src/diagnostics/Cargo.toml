@@ -5,5 +5,4 @@ edition = "2021"
 
 [dependencies]
 span = { path = "../span" }
-symbol = { path = "../symbol" }
-ty = { path = "../ty" }
+ir = { path = "../ir" }

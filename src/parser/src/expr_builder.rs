@@ -32,12 +32,12 @@ use crate::{ precedence::Precedence, ParserHandle };
 pub(crate) struct ExprBuilder<'ast> {
     final_stmt: Option<Stmt<'ast>>,
     exprs: Vec<Expr<'ast>>,
-    ast_arena: &'ast AstArena<'ast>,
+    ast_arena: &'ast AstArena,
     base_precedence: Precedence,
 }
 
 impl<'ast> ExprBuilder<'ast> {
-    pub fn new(ast_arena: &'ast AstArena<'ast>) -> Self {
+    pub fn new(ast_arena: &'ast AstArena) -> Self {
         Self {
             ast_arena,
             exprs: Vec::with_capacity(32),
@@ -131,7 +131,7 @@ impl<'ast> ExprBuilder<'ast> {
         let struct_expr = {
             let struct_expr = StructExpr::new(
                 ident_node,
-                self.ast_arena.alloc_field_initialization_vec(initialization_fields),
+                self.ast_arena.alloc_vec(initialization_fields),
                 parser_handle.get_ast_node_id()
             );
 
@@ -189,7 +189,7 @@ impl<'ast> ExprBuilder<'ast> {
             );
             self.exprs.push(expr);
         } else {
-            let fields = self.ast_arena.alloc_expr_vec(exprs);
+            let fields = self.ast_arena.alloc_vec(exprs);
             let tuple_expr = self.ast_arena.alloc_expr_or_stmt(
                 TupleExpr::new(fields, parser_handle.get_ast_node_id())
             );
@@ -272,6 +272,7 @@ impl<'ast> ExprBuilder<'ast> {
                     }
                     ExprWithoutBlock::BreakExpr(_) => None,
                     ExprWithoutBlock::ContinueExpr(_) => None,
+                    ExprWithoutBlock::ReturnExpr(_) => None,
                     ExprWithoutBlock::ValueExpr(expr) => {
                         match expr {
                             ValueExpr::BinaryExpr(_) => None,
@@ -294,6 +295,7 @@ impl<'ast> ExprBuilder<'ast> {
                 match expr {
                     ExprWithoutBlock::PlaceExpr(expr) => { Some(expr) }
                     ExprWithoutBlock::BreakExpr(_) => None,
+                    ExprWithoutBlock::ReturnExpr(_) => None,
                     ExprWithoutBlock::ContinueExpr(_) => None,
                     ExprWithoutBlock::ValueExpr(expr) => {
                         match expr {
@@ -316,6 +318,7 @@ impl<'ast> ExprBuilder<'ast> {
             Expr::ExprWithoutBlock(expr) => {
                 match expr {
                     ExprWithoutBlock::BreakExpr(_) => None,
+                    ExprWithoutBlock::ReturnExpr(_) => None,
                     ExprWithoutBlock::ContinueExpr(_) => None,
                     ExprWithoutBlock::ValueExpr(_) => None,
                     ExprWithoutBlock::PlaceExpr(expr) => {

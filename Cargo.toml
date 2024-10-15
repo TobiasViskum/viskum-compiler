@@ -13,16 +13,14 @@ members = [
     "src/span",
     "src/token" ,
     "src/resolver",
-    "src/symbol",
-    "src/ty",
     "src/error",
     "src/data_structures",
-    "src/ir_defs",
     "src/diagnostics",
     "src/icfg",
     "src/icfg_builder",
-    "src/codegen"
-, "src/type_ir"]
+    "src/codegen",
+    "src/ir"
+]
 
 
 [dependencies]

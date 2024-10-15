@@ -6,7 +6,7 @@ edition = "2021"
 [dependencies]
 # Libs in project
 icfg = { path = "../icfg" }
-ty = { path = "../ty" }
+ir = { path = "../ir" }
 op = { path = "../op" }
 data_structures = { path = "../data_structures" }
 

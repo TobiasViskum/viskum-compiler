@@ -1,8 +1,6 @@
-use ir_defs::ResKind;
+use ir::{ ResKind, Symbol, Ty };
 use op::BinaryOp;
 use span::Span;
-use symbol::Symbol;
-use ty::Ty;
 use std::fmt::Write;
 
 /// Describes how serious an error is
@@ -127,7 +125,7 @@ impl ErrorKind {
             }
             Self::UndefinedLookup(symbol, kind) => {
                 let kind_str = match kind {
-                    ResKind::Struct => "struct",
+                    ResKind::Adt => "struct",
                     ResKind::Variable => "varable",
                 };
 

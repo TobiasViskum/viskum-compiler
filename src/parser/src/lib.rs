@@ -10,9 +10,8 @@ use ast::{
     BreakExpr,
     ContinueExpr,
     Expr,
-    ExprWithBlock,
     ExprWithoutBlock,
-    FieldDeclaration,
+    Field,
     FieldInitialization,
     FnItem,
     GlobalScope,
@@ -22,20 +21,20 @@ use ast::{
     IntegerExpr,
     ItemStmt,
     LoopExpr,
+    ReturnExpr,
     Stmt,
-    StructExpr,
     StructItem,
+    TypedefItem,
     Typing,
 };
 use error::Error;
 use expr_builder::ExprBuilder;
-use ir_defs::{ NodeId, ResultLoc };
+use ir::NodeId;
 use lexer::Lexer;
 use make_parse_rule::make_parse_rule;
 use op::{ ArithmeticOp, BinaryOp, ComparisonOp };
 use precedence::Precedence;
 use span::Span;
-use symbol::Symbol;
 use token::{ Token, TokenKind };
 mod make_parse_rule;
 mod expr_builder;
@@ -90,7 +89,7 @@ impl<'a> ParserHandle for Parser<'a> {
 pub struct Parser<'a> {
     parse_rules: [ParseRule; PARSE_RULE_COUNT],
     lexer: Lexer<'a>,
-    ast_arena: &'a AstArena<'a>,
+    ast_arena: &'a AstArena,
     src: &'a str,
     current: Token,
     prev: Token,
@@ -102,7 +101,7 @@ pub struct Parser<'a> {
 }
 
 impl<'a> Parser<'a> {
-    pub fn new(src: &'a str, ast_arena: &'a AstArena<'a>) -> Self {
+    pub fn new(src: &'a str, ast_arena: &'a AstArena) -> Self {
         let mut lexer = Lexer::new(src);
 
         Self {
@@ -129,12 +128,33 @@ impl<'a> Parser<'a> {
     pub(crate) fn statement(&mut self) -> Stmt<'a> {
         match self.current.get_kind() {
             TokenKind::Def => self.function_statement(),
+            TokenKind::Typedef => self.typedef_statement(),
             TokenKind::Struct => self.struct_item(),
             TokenKind::Mut => self.mut_stmt(),
             TokenKind::Break => self.break_expr(),
             TokenKind::Continue => self.continue_expr(),
+            TokenKind::Fn => self.function_statement(),
+            TokenKind::Return => self.return_expr(),
             _ => self.expression_statement(),
         }
+    }
+
+    pub(crate) fn typedef_statement(&mut self) -> Stmt<'a> {
+        self.advance();
+        let ident_node = self.consume_ident("Expected ident after `typedef`");
+        let ty = self.parse_typing().expect("TODO: Error handling, Expected type");
+
+        let typedef_stmt = ItemStmt::TypedefItem(
+            self.ast_arena.alloc_expr_or_stmt(
+                TypedefItem::new(
+                    self.ast_arena.alloc_expr_or_stmt(ident_node),
+                    ty,
+                    self.get_ast_node_id()
+                )
+            )
+        );
+
+        Stmt::ItemStmt(typedef_stmt)
     }
 
     pub(crate) fn struct_item(&mut self) -> Stmt<'a> {
@@ -142,10 +162,13 @@ impl<'a> Parser<'a> {
         let ident_node = self.consume_ident("Expected identifier after struct");
         let mut fields = Vec::with_capacity(8);
 
-        while !self.is_eof() && !self.is_curr_kind(TokenKind::End) {
+        self.consume(TokenKind::LeftCurly, "Expected `{` before struct fields");
+
+        while !self.is_eof() && !self.is_curr_kind(TokenKind::RightCurly) {
             let field_name = self.consume_ident("Expected ident in field");
             let ty = self.parse_typing().expect("TODO: Error handling, Expected type");
-            let field = FieldDeclaration::new(self.ast_arena.alloc_expr_or_stmt(field_name), ty);
+            let field = Field::new(self.ast_arena.alloc_expr_or_stmt(field_name), ty);
+
             fields.push(self.ast_arena.alloc_expr_or_stmt(field));
 
             if self.is_curr_kind(TokenKind::Comma) {
@@ -154,9 +177,9 @@ impl<'a> Parser<'a> {
             }
             break;
         }
-        self.consume(TokenKind::End, "Expected `end` after struct");
+        self.consume(TokenKind::RightCurly, "Expected `}` after struct");
 
-        let fields = self.ast_arena.alloc_field_declaration_vec(fields);
+        let fields = self.ast_arena.alloc_vec(fields);
         let struct_stmt = StructItem::new(
             self.ast_arena.alloc_expr_or_stmt(ident_node),
             fields,
@@ -166,10 +189,36 @@ impl<'a> Parser<'a> {
         Stmt::ItemStmt(ItemStmt::StructItem(self.ast_arena.alloc_expr_or_stmt(struct_stmt)))
     }
 
-    pub(crate) fn parse_typing(&mut self) -> Option<Typing> {
+    pub(crate) fn parse_typing(&mut self) -> Option<Typing<'a>> {
         if self.is_curr_kind(TokenKind::Ident) {
             let ident = self.consume_ident_span("Expected ident");
             Some(Typing::Ident(ident))
+        } else if self.is_curr_kind(TokenKind::LeftParen) {
+            self.advance();
+            let typing = self.parse_typing().expect("Expected typing");
+
+            match self.current.get_kind() {
+                TokenKind::RightParen => {
+                    self.advance();
+                    Some(typing)
+                }
+                TokenKind::Comma => {
+                    self.advance();
+                    let mut tuple_typing = vec![typing];
+                    while !self.is_eof() && !self.is_curr_kind(TokenKind::RightParen) {
+                        let typing = self.parse_typing().expect("Expected typing");
+                        tuple_typing.push(typing);
+                        if self.is_curr_kind(TokenKind::Comma) {
+                            self.advance();
+                            continue;
+                        }
+                        break;
+                    }
+                    self.consume(TokenKind::RightParen, "Expected `)` after tuple typing");
+                    Some(Typing::Tuple(self.ast_arena.alloc_vec(tuple_typing)))
+                }
+                t => panic!("Unexpected token in typing: {}", t),
+            }
         } else {
             None
         }
@@ -206,20 +255,69 @@ impl<'a> Parser<'a> {
         let ident_expr = self.consume_ident("Expected ident after `def`");
 
         self.consume(TokenKind::LeftParen, "Expected '(' after function name");
-        // Args here
-        self.consume(TokenKind::RightParen, "Expected ')' after function name");
+
+        let mut args = Vec::with_capacity(8);
+        while !self.is_eof() && !self.is_curr_kind(TokenKind::RightParen) {
+            let arg = {
+                let arg_ident = self.consume_ident("Expected ident in function args");
+                let arg_ty = self.parse_typing().expect("Expected type in function args");
+                let arg = Field::new(self.ast_arena.alloc_expr_or_stmt(arg_ident), arg_ty);
+                self.ast_arena.alloc_expr_or_stmt(arg)
+            };
+            args.push(arg);
+
+            if self.is_curr_kind(TokenKind::Comma) {
+                self.advance();
+                continue;
+            }
+
+            break;
+        }
+        let args = self.ast_arena.alloc_vec(args);
+
+        self.consume(TokenKind::RightParen, "Expected ')' after function args");
+
+        let return_ty = if self.is_curr_kind(TokenKind::Ident) {
+            self.parse_typing()
+        } else {
+            None
+        };
+
+        self.consume(TokenKind::LeftCurly, "Expected `{` before function body");
 
         let body = self.parse_block();
 
-        self.consume(TokenKind::End, "Expected `end` after function def");
-
-        let expr = Expr::ExprWithBlock(ExprWithBlock::BlockExpr(body));
+        self.consume(TokenKind::RightCurly, "Expected `}` after function body");
 
         let fn_stmt = self.ast_arena.alloc_expr_or_stmt(
-            FnItem::new(self.ast_arena.alloc_expr_or_stmt(ident_expr), expr, self.get_ast_node_id())
+            FnItem::new(
+                self.ast_arena.alloc_expr_or_stmt(ident_expr),
+                body,
+                args,
+                return_ty,
+                self.get_ast_node_id()
+            )
         );
 
         Stmt::ItemStmt(ItemStmt::FnItem(fn_stmt))
+    }
+
+    fn return_expr(&mut self) -> Stmt<'a> {
+        self.advance();
+
+        let ret_value_expr = if self.get_parse_rule_of_current().prefix_method.is_some() {
+            Some(self.parse_expr_and_take(Precedence::PrecAssign.get_next()))
+        } else {
+            None
+        };
+
+        let return_expr = self.ast_arena.alloc_expr_or_stmt(
+            ReturnExpr::new(ret_value_expr, self.get_ast_node_id())
+        );
+
+        let expr = Expr::ExprWithoutBlock(ExprWithoutBlock::ReturnExpr(return_expr));
+
+        Stmt::ExprStmt(expr)
     }
 
     pub(crate) fn mut_stmt(&mut self) -> Stmt<'a> {
@@ -492,7 +590,7 @@ impl<'a> Parser<'a> {
                 stmt => stmts.push_back(stmt),
             };
         }
-        let stmts = self.ast_arena.alloc_stmt_vec(stmts);
+        let stmts = self.ast_arena.alloc_vec(stmts.into());
 
         let block_expr = self.ast_arena.alloc_expr_or_stmt(
             BlockExpr::new(stmts, self.get_ast_node_id())
@@ -511,7 +609,7 @@ impl<'a> Parser<'a> {
             };
         }
 
-        let stmts = self.ast_arena.alloc_stmt_vec(stmts);
+        let stmts = self.ast_arena.alloc_vec(stmts.into());
 
         GlobalScope::new(stmts)
     }
@@ -680,6 +778,8 @@ impl<'a> Parser<'a> {
 
         // Keywords
         Def         = { (None       None),      (None       None            ),      (None       None) },
+        Fn          = { (None       None),      (None       None            ),      (None       None) },
+        Typedef     = { (None       None),      (None       None            ),      (None       None) },
         Mut         = { (None       None),      (None       None            ),      (None       None) },
         Class       = { (None       None),      (None       None            ),      (None       None) },
         Struct      = { (None       None),      (None       None            ),      (None       None) },

@@ -1,6 +1,5 @@
 use fxhash::FxHashMap;
-use ir_defs::NodeId;
-use ty::Ty;
+use ir::{ NodeId, Ty };
 
 use crate::{
     ast_state::AstState,

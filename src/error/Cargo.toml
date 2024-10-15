@@ -4,8 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-symbol = { path = "../symbol" }
 span = { path = "../span" }
-ty = { path = "../ty" }
 op = { path = "../op" }
-ir_defs ={ path = "../ir_defs" }
+ir = { path = "../ir" }
