@@ -1,14 +1,14 @@
+typedef Data (Int, Int, (Bool, Bool, Int))
+
 struct Point {
-    x MyInt,
+    x Int,
     y Int,
     z Int,
-    data (Int, Int, (Bool, Bool, Int)),
+    data Data,
 }
 
-typedef MyInt Int
-
-fn add(x Int, y Int) Int {
-    ret x + y
+fn addNoReturn(x Int, y Int) {
+    x + y
 }
 
 fn main() {
@@ -61,3 +61,5 @@ fn main() {
         end
     end
 }
+
+

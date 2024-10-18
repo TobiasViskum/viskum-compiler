@@ -7,6 +7,7 @@ use crate::{
     Adt,
     DefId,
     DefIdToNameBinding,
+    FnSig,
     NameBindingKind,
     ResolvedInformation,
     Symbol,
@@ -51,11 +52,19 @@ pub trait GetTyAttr {
 
 #[derive(Debug, Hash, Eq, PartialEq, Clone, Copy)]
 pub enum Ty {
+    /// `(T, K, ...)`
     Tuple(&'static [Ty]),
-    /// Symbol is for display purposes
+    /// `fn(T, ...) -> K`
+    FnSig(FnSig),
+    /// Reference to a function definition
+    FnDef(DefId),
+    /// Reference to an algebraic data type definition
     Adt(DefId),
+    /// Used internally by the compiler `*Ty`
     Ptr(&'static Ty),
+    /// Compiler types e.g. `Int, Uint, Float, String, etc.`
     PrimTy(PrimTy),
+    /// If the resulting type of an operation is unkown (error)
     Unkown,
 }
 
@@ -65,6 +74,10 @@ impl Ty {
             Self::Unkown | Self::PrimTy(PrimTy::Void) => *self,
             _ => Self::Ptr(TyCtx::intern_type(*self)),
         }
+    }
+
+    pub fn is_unkown(&self) -> bool {
+        self.auto_deref() == Ty::Unkown
     }
 
     pub fn is_void(&self) -> bool {
@@ -109,9 +122,14 @@ impl Ty {
         }
     }
 
-    pub fn test_binary(&self, other: Ty, op: BinaryOp) -> Option<Ty> {
-        let lhs = self.auto_deref();
-        let rhs = other.auto_deref();
+    pub fn test_binary(
+        &self,
+        other: Ty,
+        op: BinaryOp,
+        def_id_to_name_binding: &DefIdToNameBinding
+    ) -> Option<Ty> {
+        let lhs = self.auto_deref().get_expanded_ty(def_id_to_name_binding);
+        let rhs = other.auto_deref().get_expanded_ty(def_id_to_name_binding);
 
         match op {
             BinaryOp::ArithmeticOp(arithmetic_op) => {
@@ -132,8 +150,11 @@ impl Ty {
         }
     }
 
-    pub fn try_deref_as_tuple(&self) -> Option<&'static [Ty]> {
-        let ty = self.auto_deref();
+    pub fn try_deref_as_tuple(
+        &self,
+        def_id_to_name_binding: &DefIdToNameBinding
+    ) -> Option<&'static [Ty]> {
+        let ty = self.auto_deref().get_expanded_ty(def_id_to_name_binding);
         match ty {
             Ty::Tuple(tuple_ty) => Some(tuple_ty),
             _ => None,
@@ -180,6 +201,8 @@ impl Ty {
 impl GetTyAttr for Ty {
     fn get_ty_attr(&self, resolved_information: &ResolvedInformation) -> TyAttr {
         match self {
+            Self::FnDef(_) => TyAttr::new(8, 8),
+            Self::FnSig(_) => TyAttr::new(8, 8),
             Self::Tuple(tuple) => {
                 let mut total_size = 0;
                 let mut alignment = None;
@@ -241,6 +264,8 @@ impl GetTyAttr for Ty {
 impl Display for Ty {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::FnDef(def_id) => write!(f, "FnDef({})", def_id.symbol.get()),
+            Self::FnSig(_) => write!(f, "FnSig"),
             Self::Ptr(inner) => write!(f, "*{}", inner),
             Self::Unkown => write!(f, "{{unkown}}"),
             Self::PrimTy(prim_ty) => prim_ty.fmt(f),

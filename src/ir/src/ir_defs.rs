@@ -10,11 +10,33 @@ pub enum Mutability {
     Immutable,
 }
 
-pub enum LexicalContext {
-    GlobalScope,
-    Context(ContextId, ScopeId),
+#[derive(Eq, Hash, PartialEq, Debug, Clone, Copy)]
+pub struct LexicalBinding {
+    pub lexical_context: LexicalContext,
+    pub symbol: Symbol,
+    pub res_kind: ResKind,
 }
 
+impl LexicalBinding {
+    pub fn new(lexical_context: LexicalContext, symbol: Symbol, res_kind: ResKind) -> Self {
+        Self { lexical_context, symbol, res_kind }
+    }
+}
+
+#[derive(Eq, Hash, PartialEq, Debug, Clone, Copy)]
+pub struct LexicalContext {
+    pub context_id: ContextId,
+    pub scope_id: ScopeId,
+}
+
+impl LexicalContext {
+    pub fn new(context_id: ContextId, scope_id: ScopeId) -> Self {
+        Self { context_id, scope_id }
+    }
+}
+
+/// Used during the first pass of name resolution
+#[derive(Eq, Hash, PartialEq, Debug, Clone, Copy)]
 pub struct ContextId(pub u32);
 
 /// Used during the first pass of name resolution
@@ -59,6 +81,7 @@ impl<'res> NameBinding<'res> {
         match self.kind {
             NameBindingKind::Variable(_) => ResKind::Variable,
             NameBindingKind::Adt(_) => ResKind::Adt,
+            NameBindingKind::Fn(_) => ResKind::Fn,
         }
     }
 }
@@ -67,6 +90,7 @@ impl<'res> NameBinding<'res> {
 pub enum NameBindingKind<'res> {
     Variable(Mutability),
     Adt(Adt<'res>),
+    Fn(FnSig),
     // Module
     // Import
 }
@@ -76,6 +100,18 @@ pub enum NameBindingKind<'res> {
 pub enum Adt<'res> {
     Struct(&'res [(DefId, Ty)]),
     Typedef(Ty),
+}
+
+#[derive(Debug, Hash, Eq, PartialEq, Clone, Copy)]
+pub struct FnSig {
+    pub args: &'static [(DefId, Ty)],
+    pub ret_ty: &'static Ty,
+}
+
+impl FnSig {
+    pub fn new(args: &'static [(DefId, Ty)], ret_ty: &'static Ty) -> Self {
+        Self { args, ret_ty }
+    }
 }
 
 #[derive(Eq, Hash, PartialEq, Debug, Clone, Copy)]
@@ -92,6 +128,7 @@ pub enum DefKind<'res> {
 pub enum ResKind {
     Variable,
     Adt,
+    Fn,
 }
 
 pub type NodeIdToTy = FxHashMap<NodeId, Ty>;
@@ -116,4 +153,10 @@ impl<'res> ResolvedInformation<'res> {
     pub fn get_name_binding_from_def_id(&self, def_id: &DefId) -> NameBinding<'res> {
         *self.def_id_to_name_binding.get(def_id).expect("Expected name to be binded to def id")
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum CfgFnKind {
+    Main,
+    Fn(DefId),
 }

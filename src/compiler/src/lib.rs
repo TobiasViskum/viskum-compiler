@@ -33,7 +33,7 @@ impl Compiler {
         let file_content = Self::get_file_content();
         let ast_arena = AstArena::new();
 
-        let (resolved_information, ast) = {
+        let (resolved, ast) = {
             let parser = Parser::new(&file_content, &ast_arena);
 
             let (mut resolver, ast) = Resolver::from_ast(
@@ -54,9 +54,9 @@ impl Compiler {
         //     Some(&resolved_information.node_id_to_ty)
         // ).print_ast();
 
-        let icfg_builder = IcfgBuilder::new(ast, &resolved_information, &file_content);
-        let icfg = icfg_builder.build();
-        (icfg, resolved_information)
+        let icfg_builder = IcfgBuilder::new(ast, &resolved.1, &file_content);
+        let icfg = icfg_builder.build(resolved.0);
+        (icfg, resolved.1)
     }
 
     fn get_file_content() -> String {

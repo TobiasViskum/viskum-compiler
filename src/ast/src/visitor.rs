@@ -29,6 +29,7 @@ use crate::{
     LoopExpr,
     Pat,
     PlaceExpr,
+    ReturnExpr,
     Stmt,
     StructExpr,
     StructItem,
@@ -69,6 +70,10 @@ pub trait Visitor<'ast>: Sized {
     #[allow(unused_variables)]
     fn visit_continue_expr(&mut self, continue_expr: &'ast ContinueExpr) -> Self::Result {
         Self::default_result()
+    }
+
+    fn visit_return_expr(&mut self, return_expr: &'ast ReturnExpr) -> Self::Result {
+        walk_return_expr(self, return_expr)
     }
 
     /* Traversel of enums (not nodes) */
@@ -121,7 +126,7 @@ pub trait Visitor<'ast>: Sized {
     }
 
     fn visit_fn_item(&mut self, fn_item: &'ast FnItem<'ast>) -> Self::Result {
-        self.visit_block_expr(fn_item.body)
+        self.visit_stmts(fn_item.body)
     }
 
     fn visit_struct_item(&mut self, struct_item: &'ast StructItem<'ast>) -> Self::Result {
@@ -236,7 +241,7 @@ pub fn walk_expr_without_block<'a, V>(
         ExprWithoutBlock::ValueExpr(expr) => visitor.visit_value_expr(expr),
         ExprWithoutBlock::BreakExpr(break_expr) => visitor.visit_break_expr(break_expr),
         ExprWithoutBlock::ContinueExpr(continue_expr) => visitor.visit_continue_expr(continue_expr),
-        ExprWithoutBlock::ReturnExpr(return_expr) => todo!(),
+        ExprWithoutBlock::ReturnExpr(return_expr) => visitor.visit_return_expr(return_expr),
     }
 }
 
@@ -250,6 +255,12 @@ pub fn walk_break_expr<'a, V>(visitor: &mut V, break_expr: &'a BreakExpr<'a>) ->
     where V: Visitor<'a>
 {
     break_expr.value.map(|expr| visitor.visit_expr(expr)).unwrap_or(V::default_result())
+}
+
+pub fn walk_return_expr<'a, V>(visitor: &mut V, return_expr: &'a ReturnExpr<'a>) -> V::Result
+    where V: Visitor<'a>
+{
+    return_expr.value.map(|expr| visitor.visit_expr(expr)).unwrap_or(V::default_result())
 }
 
 pub fn walk_if_expr<'a, V>(visitor: &mut V, if_expr: &'a IfExpr<'a>) -> V::Result
@@ -357,6 +368,29 @@ pub fn walk_stmts<'a, V>(visitor: &mut V, stmts: &'a [Stmt<'a>]) -> V::Result wh
 
     for stmt in stmts.iter() {
         result = Some(visitor.visit_stmt(*stmt));
+    }
+
+    if let Some(result) = result {
+        result
+    } else {
+        V::default_result()
+    }
+}
+
+pub fn walk_stmts_none_items<'a, V>(visitor: &mut V, stmts: &'a [Stmt<'a>]) -> V::Result
+    where V: Visitor<'a>
+{
+    let mut result: Option<V::Result> = None;
+
+    for stmt in stmts.iter() {
+        match stmt {
+            Stmt::ItemStmt(_) => {
+                continue;
+            }
+            stmt => {
+                result = Some(visitor.visit_stmt(*stmt));
+            }
+        }
     }
 
     if let Some(result) = result {

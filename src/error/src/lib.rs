@@ -127,6 +127,7 @@ impl ErrorKind {
                 let kind_str = match kind {
                     ResKind::Adt => "struct",
                     ResKind::Variable => "varable",
+                    ResKind::Fn => "function",
                 };
 
                 write!(

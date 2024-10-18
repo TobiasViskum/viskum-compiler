@@ -12,7 +12,7 @@ use data_structures::Either;
 use derive_new::new;
 use op::{ ArithmeticOp, BinaryOp };
 use span::Span;
-use ir::{ Mutability, Symbol, Ty, BOOL_TY, INT_TY, VOID_TY };
+use ir::{ CfgFnKind, Mutability, Symbol, Ty, BOOL_TY, INT_TY, VOID_TY };
 mod icfg_prettifier;
 mod cfg_visitor;
 
@@ -36,20 +36,34 @@ impl Icfg {
 /// One Cfg is constructed for each function
 pub struct Cfg {
     /// All variables used in the function
+    pub args: Vec<(TempId, Ty)>,
     pub local_mems: Vec<LocalMem>,
     pub result_mems: Vec<ResultMem>,
     pub basic_blocks: Vec<BasicBlock>,
     /// Based on if the function is called or not
     liveness: Liveness,
+    pub cfg_fn_kind: CfgFnKind,
+    pub ret_ty: Ty,
 }
 
 impl Cfg {
     pub fn new(
+        args: Vec<(TempId, Ty)>,
         local_mems: Vec<LocalMem>,
         result_mems: Vec<ResultMem>,
-        basic_blocks: Vec<BasicBlock>
+        basic_blocks: Vec<BasicBlock>,
+        cfg_fn_kind: CfgFnKind,
+        ret_ty: Ty
     ) -> Self {
-        Self { local_mems, result_mems, basic_blocks, liveness: Liveness::Dead }
+        Self {
+            args,
+            local_mems,
+            result_mems,
+            basic_blocks,
+            cfg_fn_kind,
+            ret_ty,
+            liveness: Liveness::Dead,
+        }
     }
 
     pub fn get_local_mem(&self, local_mem_id: LocalMemId) -> &LocalMem {
@@ -69,6 +83,7 @@ pub struct LocalMem {
     pub span: Span,
     pub ty: Ty,
     pub mutability: Mutability,
+    pub is_arg: bool,
 }
 
 impl Display for LocalMem {

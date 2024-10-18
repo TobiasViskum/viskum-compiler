@@ -76,15 +76,17 @@ type Stmts<'ast> = &'ast [Stmt<'ast>];
 #[derive(Debug, new)]
 pub struct Ast<'ast, T> where T: AstState {
     pub main_scope: GlobalScope<'ast>,
+    pub fn_count: usize,
     query_system: AstQuerySystem<'ast>,
     _state: PhantomData<T>,
 }
 
 impl<'ast, T> Ast<'ast, T> where T: AstState {
-    pub(crate) fn next_state<N>(self) -> Ast<'ast, N> where T: AstState<NextState = N>, N: AstState {
+    pub fn next_state<N>(self) -> Ast<'ast, N> where T: AstState<NextState = N>, N: AstState {
         Ast {
             main_scope: self.main_scope,
             query_system: self.query_system,
+            fn_count: self.fn_count,
             _state: PhantomData,
         }
     }
@@ -174,7 +176,7 @@ pub struct TypedefItem<'ast> {
 #[derive(Debug, new)]
 pub struct FnItem<'ast> {
     pub ident_node: &'ast IdentNode,
-    pub body: &'ast BlockExpr<'ast>,
+    pub body: Stmts<'ast>,
     pub args: &'ast [&'ast Field<'ast>],
     pub return_ty: Option<Typing<'ast>>,
     pub ast_node_id: NodeId,

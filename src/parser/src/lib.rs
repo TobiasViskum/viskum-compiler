@@ -29,7 +29,8 @@ use ast::{
 };
 use error::Error;
 use expr_builder::ExprBuilder;
-use ir::NodeId;
+use fxhash::FxHashMap;
+use ir::{ DefId, NodeId, Symbol };
 use lexer::Lexer;
 use make_parse_rule::make_parse_rule;
 use op::{ ArithmeticOp, BinaryOp, ComparisonOp };
@@ -95,6 +96,7 @@ pub struct Parser<'a> {
     prev: Token,
     next_ast_node_id: NodeId,
     forgotten_nodes: usize,
+    parsed_fn_count: usize,
 
     /// Used for error reporting
     errors: Vec<Error>,
@@ -110,8 +112,10 @@ impl<'a> Parser<'a> {
             parse_rules: Self::create_parse_rules(),
             ast_arena,
             lexer,
+            parsed_fn_count: 0,
             prev: Token::dummy(),
             next_ast_node_id: NodeId(0),
+
             forgotten_nodes: 0,
             errors: Vec::new(),
         }
@@ -122,7 +126,11 @@ impl<'a> Parser<'a> {
 
         let nodes_count = (self.next_ast_node_id.0 as usize) - self.forgotten_nodes;
 
-        Ast::new(global_scope, AstQuerySystem::new(nodes_count))
+        Ast::new(global_scope, self.parsed_fn_count, AstQuerySystem::new(nodes_count))
+    }
+
+    fn get_symbol_from_ident_node(&self, ident_node: &IdentNode) -> Symbol {
+        Symbol::new(&self.src[ident_node.span.get_byte_range()])
     }
 
     pub(crate) fn statement(&mut self) -> Stmt<'a> {
@@ -175,8 +183,17 @@ impl<'a> Parser<'a> {
                 self.advance();
                 continue;
             }
+
+            match self.current.get_kind() {
+                TokenKind::RightCurly => {}
+                TokenKind::Ident =>
+                    todo!("Error: You are probably missing a `,` in struct declaration"),
+                t =>
+                    todo!("Error: Unexpected token `{}` in struct declaration. Expected `,` or `}}`", t),
+            }
             break;
         }
+
         self.consume(TokenKind::RightCurly, "Expected `}` after struct");
 
         let fields = self.ast_arena.alloc_vec(fields);
@@ -285,7 +302,7 @@ impl<'a> Parser<'a> {
 
         self.consume(TokenKind::LeftCurly, "Expected `{` before function body");
 
-        let body = self.parse_block();
+        let body = self.parse_block_as_stmts();
 
         self.consume(TokenKind::RightCurly, "Expected `}` after function body");
 
@@ -298,6 +315,8 @@ impl<'a> Parser<'a> {
                 self.get_ast_node_id()
             )
         );
+
+        self.parsed_fn_count += 1;
 
         Stmt::ItemStmt(ItemStmt::FnItem(fn_stmt))
     }
@@ -582,15 +601,17 @@ impl<'a> Parser<'a> {
         if_expr
     }
 
-    fn parse_block(&mut self) -> &'a BlockExpr<'a> {
+    fn parse_block_as_stmts(&mut self) -> &'a [Stmt<'a>] {
         let mut stmts = VecDeque::with_capacity(32);
         while !self.current.get_kind().can_end_scope() && !self.is_eof() {
-            match self.statement() {
-                stmt @ Stmt::ItemStmt(_) => stmts.push_front(stmt),
-                stmt => stmts.push_back(stmt),
-            };
+            Self::push_stmt(&mut stmts, self.statement());
         }
-        let stmts = self.ast_arena.alloc_vec(stmts.into());
+
+        self.ast_arena.alloc_vec(stmts.into())
+    }
+
+    fn parse_block(&mut self) -> &'a BlockExpr<'a> {
+        let stmts = self.parse_block_as_stmts();
 
         let block_expr = self.ast_arena.alloc_expr_or_stmt(
             BlockExpr::new(stmts, self.get_ast_node_id())
@@ -603,15 +624,21 @@ impl<'a> Parser<'a> {
         let mut stmts = VecDeque::with_capacity(32);
 
         while !self.is_eof() {
-            match self.statement() {
-                stmt @ Stmt::ItemStmt(_) => stmts.push_front(stmt),
-                stmt => stmts.push_back(stmt),
-            };
+            Self::push_stmt(&mut stmts, self.statement());
         }
 
         let stmts = self.ast_arena.alloc_vec(stmts.into());
 
         GlobalScope::new(stmts)
+    }
+
+    fn push_stmt(vec_deque: &mut VecDeque<Stmt<'a>>, stmt: Stmt<'a>) {
+        match stmt {
+            Stmt::ItemStmt(ItemStmt::StructItem(_) | ItemStmt::TypedefItem(_)) => {
+                vec_deque.push_front(stmt);
+            }
+            stmt => vec_deque.push_back(stmt),
+        }
     }
 
     pub(crate) fn parse_precedence(

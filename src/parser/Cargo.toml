@@ -14,5 +14,6 @@ span = { path = "../span" }
 error = { path = "../error" }
 ir = { path = "../ir" }
 
+fxhash = "0.2.1"
 enum-iterator = "2.1.0"
 array-init = "2.1.0"

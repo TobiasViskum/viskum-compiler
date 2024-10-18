@@ -19,6 +19,7 @@ use crate::{
     LoopExpr,
     Pat,
     PlaceExpr,
+    ReturnExpr,
     StructExpr,
     StructItem,
     TupleExpr,
@@ -85,6 +86,7 @@ pub enum AstQueryEntry<'ast> {
     IntegerExpr(&'ast IntegerExpr),
     BoolExpr(&'ast BoolExpr),
     IdentNode(&'ast IdentNode),
+    ReturnExpr(&'ast ReturnExpr<'ast>),
     BlockExpr(&'ast BlockExpr<'ast>),
     IfExpr(&'ast IfExpr<'ast>),
 }

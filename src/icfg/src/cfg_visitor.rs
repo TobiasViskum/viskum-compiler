@@ -1,3 +1,5 @@
+use ir::Ty;
+
 use crate::{
     BasicBlock,
     BinaryNode,
@@ -12,6 +14,7 @@ use crate::{
     NodeKind,
     ResultMem,
     StoreNode,
+    TempId,
 };
 
 struct Linear;
@@ -38,6 +41,10 @@ pub trait CfgVisitor: Sized {
 
     fn visit_cfg(&mut self, cfg: &Cfg) -> Self::Result {
         walk_cfg(self, cfg)
+    }
+
+    fn visit_arg(&mut self, arg: &(TempId, Ty)) -> Self::Result {
+        Self::default_result()
     }
 
     fn visit_local_mem(&mut self, local_mem: &LocalMem) -> Self::Result {
@@ -101,9 +108,18 @@ pub trait CfgVisitor: Sized {
 }
 
 pub fn walk_cfg<'ctx, V>(visitor: &mut V, cfg: &Cfg) -> V::Result where V: CfgVisitor {
+    walk_args(visitor, cfg);
     walk_local_mems(visitor, cfg);
     walk_result_mems(visitor, cfg);
     walk_basic_blocks(visitor, cfg);
+    V::default_result()
+}
+
+pub fn walk_args<'ctx, V>(visitor: &mut V, cfg: &Cfg) -> V::Result where V: CfgVisitor {
+    cfg.args.iter().for_each(|arg| {
+        visitor.visit_arg(arg);
+    });
+
     V::default_result()
 }
 

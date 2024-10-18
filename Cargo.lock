@@ -203,6 +203,7 @@ dependencies = [
  "ast",
  "enum-iterator",
  "error",
+ "fxhash",
  "ir",
  "lexer",
  "op",

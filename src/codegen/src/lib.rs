@@ -1,7 +1,9 @@
 use fxhash::FxHashMap;
 use icfg::{
+    walk_args,
     walk_basic_block,
     walk_basic_blocks,
+    walk_cfg,
     walk_local_mems,
     walk_result_mems,
     BasicBlockId,
@@ -13,7 +15,7 @@ use icfg::{
     PlaceKind,
 };
 use op::{ ArithmeticOp, BinaryOp, ComparisonOp };
-use ir::{ GetTyAttr, PrimTy, ResolvedInformation, Ty };
+use ir::{ CfgFnKind, GetTyAttr, PrimTy, ResolvedInformation, Ty };
 use std::{ fmt::Write, fs::File, process::Command };
 
 const INDENTATION: usize = 4;
@@ -58,10 +60,23 @@ impl<'a> CfgVisitor for CodeGenUnitHelper<'a> {
     type Result = ();
     fn default_result() -> Self::Result {}
 
+    fn visit_cfg(&mut self, cfg: &Cfg) -> Self::Result {
+        walk_args(self, cfg);
+        self.next_ssa_id += 1;
+        walk_local_mems(self, cfg);
+        walk_result_mems(self, cfg);
+        walk_basic_blocks(self, cfg)
+    }
+
     fn visit_basic_block(&mut self, basic_block: &icfg::BasicBlock, cfg: &Cfg) -> Self::Result {
         let next_ssa_id = self.get_next_ssa_id();
         self.basic_block_id_to_ssa_id.insert(basic_block.basic_block_id, next_ssa_id);
         walk_basic_block(self, basic_block, cfg)
+    }
+
+    fn visit_arg(&mut self, arg: &(icfg::TempId, Ty)) -> Self::Result {
+        let next_ssa_id = self.get_next_ssa_id();
+        self.place_to_ssa_id.insert(PlaceKind::TempId(arg.0), next_ssa_id);
     }
 
     fn visit_local_mem(&mut self, local_mem: &icfg::LocalMem) -> Self::Result {
@@ -154,6 +169,10 @@ impl<'a> CodeGenUnit<'a> {
                 let ty_attr = ty.get_ty_attr(self.resolved_information);
                 format!("[{} x i8]", ty_attr.size_bytes)
             }
+            Ty::FnSig(_) => { todo!("Yay I got this far") }
+            Ty::FnDef(_) => {
+                todo!("Yay I got this far (pretty much the same functionality as above, I think)")
+            }
 
             Ty::Unkown => panic!("Unkown type (should not be this far in compilation)"),
         }
@@ -190,7 +209,33 @@ impl<'a> CfgVisitor for CodeGenUnit<'a> {
     }
 
     fn visit_cfg(&mut self, cfg: &Cfg) -> Self::Result {
-        writeln!(self.buffer, "define i32 @main() {{")?;
+        match cfg.cfg_fn_kind {
+            CfgFnKind::Main => writeln!(self.buffer, "define i32 @main() {{")?,
+            CfgFnKind::Fn(def_id) => {
+                write!(
+                    self.buffer,
+                    "define {} @{}{}(",
+                    self.get_llvm_ty(cfg.ret_ty),
+                    def_id.symbol.get(),
+                    def_id.node_id.0
+                )?;
+
+                for (i, (temp_id, arg_ty)) in cfg.args.iter().enumerate() {
+                    write!(
+                        self.buffer,
+                        "{} noundef %{}",
+                        self.get_llvm_ty(*arg_ty),
+                        self.get_ssa_id_from_place(&PlaceKind::TempId(*temp_id))
+                    )?;
+                    if i != cfg.args.len() - 1 {
+                        write!(self.buffer, ", ")?;
+                    }
+                }
+
+                writeln!(self.buffer, ") {{")?;
+            }
+        }
+
         walk_local_mems(self, cfg)?;
         walk_result_mems(self, cfg)?;
 
@@ -200,7 +245,11 @@ impl<'a> CfgVisitor for CodeGenUnit<'a> {
         writeln!(self.buffer, "{}br label %{}", " ".repeat(INDENTATION), first_bb_id)?;
 
         walk_basic_blocks(self, cfg)?;
-        writeln!(self.buffer, "{}ret i32 0", " ".repeat(INDENTATION))?;
+        if cfg.cfg_fn_kind == CfgFnKind::Main {
+            writeln!(self.buffer, "{}ret i32 0", " ".repeat(INDENTATION))?;
+        } else if cfg.ret_ty.is_void() {
+            writeln!(self.buffer, "{}ret void", " ".repeat(INDENTATION))?;
+        }
         writeln!(self.buffer, "}}")
     }
 
@@ -371,7 +420,10 @@ impl<'icfg> CodeGen<'icfg> {
         let file_name_with_extension = format!("{}.ll", file_name);
 
         let mut buffer = String::with_capacity(4096);
-        CodeGenUnit::new(&self.icfg.cfgs[0], resolved_information).gen_code(&mut buffer);
+
+        for cfg in self.icfg.cfgs.iter() {
+            CodeGenUnit::new(cfg, resolved_information).gen_code(&mut buffer);
+        }
 
         let mut file = File::create(&file_name_with_extension).expect("Error creating file");
         file.write_all(buffer.as_bytes()).expect("Error writing to file");
