@@ -25,22 +25,28 @@ use ast::{
     TupleFieldExpr,
     ValueExpr,
 };
-use op::BinaryOp;
+use op::{ ArithmeticOp, BinaryOp };
 use span::Span;
+use token::TokenKind;
 
 use crate::{ precedence::Precedence, ParserHandle };
 
 pub(crate) struct ExprBuilder<'ast> {
     final_stmt: Option<Stmt<'ast>>,
     exprs: Vec<Expr<'ast>>,
+    /// Token that can be used to stop parsing the current expression
+    /// Primarily used for parsing if|while <Expr> { ... }, since we don't want to parse '{' as an infix operator,
+    /// And therefore terminate the expression at the '{' token
+    pub terminate_infix_token: Option<TokenKind>,
     ast_arena: &'ast AstArena,
     base_precedence: Precedence,
 }
 
 impl<'ast> ExprBuilder<'ast> {
-    pub fn new(ast_arena: &'ast AstArena) -> Self {
+    pub fn new(ast_arena: &'ast AstArena, terminate_infix_token: Option<TokenKind>) -> Self {
         Self {
             ast_arena,
+            terminate_infix_token,
             exprs: Vec::with_capacity(32),
             final_stmt: None,
             base_precedence: Precedence::PrecAssign,
@@ -257,6 +263,87 @@ impl<'ast> ExprBuilder<'ast> {
         let expr = Expr::ExprWithoutBlock(
             ExprWithoutBlock::ValueExpr(ValueExpr::BinaryExpr(binary_expr))
         );
+
+        self.exprs.push(expr);
+    }
+
+    pub fn emit_post_inc_expr(&mut self, parser_handle: &mut impl ParserHandle) {
+        let expr = self.exprs.pop().expect("TODO: Error handling");
+
+        let assign_stmt = Stmt::AssignStmt(
+            self.ast_arena.alloc_expr_or_stmt(
+                AssignStmt::new(
+                    self.try_as_place_expr(expr).expect("TODO: Error handling"),
+                    Expr::ExprWithoutBlock(
+                        ExprWithoutBlock::ValueExpr(
+                            ValueExpr::BinaryExpr(
+                                self.ast_arena.alloc_expr_or_stmt(
+                                    BinaryExpr::new(
+                                        expr,
+                                        BinaryOp::ArithmeticOp(ArithmeticOp::Add),
+                                        Expr::ExprWithoutBlock(
+                                            ExprWithoutBlock::ValueExpr(
+                                                ValueExpr::ConstExpr(
+                                                    ConstExpr::IntegerExpr(
+                                                        self.ast_arena.alloc_expr_or_stmt(
+                                                            IntegerExpr::new(
+                                                                1,
+                                                                parser_handle.get_ast_node_id()
+                                                            )
+                                                        )
+                                                    )
+                                                )
+                                            )
+                                        ),
+                                        parser_handle.get_ast_node_id()
+                                    )
+                                )
+                            )
+                        )
+                    ),
+                    parser_handle.get_ast_node_id(),
+                    Span::dummy()
+                )
+            )
+        );
+
+        let minus_one_stmt = Stmt::ExprStmt(
+            Expr::ExprWithoutBlock(
+                ExprWithoutBlock::ValueExpr(
+                    ValueExpr::BinaryExpr(
+                        self.ast_arena.alloc_expr_or_stmt(
+                            BinaryExpr::new(
+                                expr,
+                                BinaryOp::ArithmeticOp(ArithmeticOp::Sub),
+                                Expr::ExprWithoutBlock(
+                                    ExprWithoutBlock::ValueExpr(
+                                        ValueExpr::ConstExpr(
+                                            ConstExpr::IntegerExpr(
+                                                self.ast_arena.alloc_expr_or_stmt(
+                                                    IntegerExpr::new(
+                                                        1,
+                                                        parser_handle.get_ast_node_id()
+                                                    )
+                                                )
+                                            )
+                                        )
+                                    )
+                                ),
+                                parser_handle.get_ast_node_id()
+                            )
+                        )
+                    )
+                )
+            )
+        );
+
+        let stmts = vec![assign_stmt, minus_one_stmt];
+
+        let block_expr = self.ast_arena.alloc_expr_or_stmt(
+            BlockExpr::new(self.ast_arena.alloc_vec(stmts), parser_handle.get_ast_node_id())
+        );
+
+        let expr = Expr::ExprWithBlock(ExprWithBlock::BlockExpr(block_expr));
 
         self.exprs.push(expr);
     }

@@ -256,7 +256,7 @@ impl<'a> Parser<'a> {
     }
 
     pub(crate) fn expression_statement(&mut self) -> Stmt<'a> {
-        let mut expr_builder = ExprBuilder::new(self.ast_arena);
+        let mut expr_builder = ExprBuilder::new(self.ast_arena, None);
         self.expression(&mut expr_builder);
         let stmt = expr_builder.take_stmt().expect("TODO: Error handling");
         stmt
@@ -352,7 +352,7 @@ impl<'a> Parser<'a> {
     pub(crate) fn mut_stmt(&mut self) -> Stmt<'a> {
         let mut_span = self.prev.get_span();
         self.advance();
-        let mut expr_builder = ExprBuilder::new(self.ast_arena);
+        let mut expr_builder = ExprBuilder::new(self.ast_arena, None);
         self.parse_precedence(expr_builder.get_base_prec(), &mut expr_builder);
         let stmt = expr_builder.take_stmt().expect("TODO: Error handling");
         Self::test_and_set_mutable(&stmt, mut_span).expect("Misuse of mut");
@@ -392,7 +392,7 @@ impl<'a> Parser<'a> {
     /// Parse rule method: `block`
     pub(crate) fn block_expr(&mut self, expr_builder: &mut ExprBuilder<'a>) {
         let block_expr = self.parse_block();
-        self.consume(TokenKind::End, "Expected `end`");
+        self.consume(TokenKind::RightCurly, "Expected `}` after block");
         expr_builder.emit_block_expr(block_expr);
     }
 
@@ -578,10 +578,34 @@ impl<'a> Parser<'a> {
         expr_builder.emit_binary_expr(binary_op, self)
     }
 
+    pub(crate) fn post_inc(&mut self, expr_builder: &mut ExprBuilder<'a>) {
+        self.advance();
+        expr_builder.emit_post_inc_expr(self)
+    }
+
+    pub(crate) fn post_dec(&mut self, expr_builder: &mut ExprBuilder<'a>) {
+        todo!()
+        // self.advance();
+        // expr_builder.emit_post_dec_expr(self)
+    }
+
+    pub(crate) fn pre_inc(&mut self, expr_builder: &mut ExprBuilder<'a>) {
+        todo!()
+        // self.advance();
+        // expr_builder.emit_pre_inc_expr(self)
+    }
+
+    pub(crate) fn pre_dec(&mut self, expr_builder: &mut ExprBuilder<'a>) {
+        todo!()
+        // self.advance();
+        // expr_builder.emit_pre_dec_expr(self)
+    }
+
     /// Parse rule method: `loop_expr`
     pub(crate) fn loop_expr(&mut self, expr_builder: &mut ExprBuilder<'a>) {
+        self.consume(TokenKind::LeftCurly, "Expected `{` before loop");
         let block = self.parse_block();
-        self.consume(TokenKind::End, "Expected `end` after loop");
+        self.consume(TokenKind::RightCurly, "Expected `}` after loop");
 
         let loop_expr = self.ast_arena.alloc_expr_or_stmt(
             LoopExpr::new(block, self.get_ast_node_id())
@@ -597,31 +621,45 @@ impl<'a> Parser<'a> {
         expr_builder.emit_if_expr(if_expr);
     }
 
-    pub fn parse_expr_and_take(&mut self, prec: Precedence) -> Expr<'a> {
-        let mut expr_builder = ExprBuilder::new(self.ast_arena);
+    pub(crate) fn parse_expr_and_take_with_terminate_infix_token(
+        &mut self,
+        prec: Precedence,
+        terminate_infix_token: Option<TokenKind>
+    ) -> Expr<'a> {
+        let mut expr_builder = ExprBuilder::new(self.ast_arena, terminate_infix_token);
+        self.parse_precedence(prec, &mut expr_builder);
+        expr_builder.take_expr().expect("TODO:Error handling")
+    }
+
+    pub(crate) fn parse_expr_and_take(&mut self, prec: Precedence) -> Expr<'a> {
+        let mut expr_builder = ExprBuilder::new(self.ast_arena, None);
         self.parse_precedence(prec, &mut expr_builder);
         expr_builder.take_expr().expect("TODO:Error handling")
     }
 
     pub(crate) fn parse_if_expr(&mut self) -> &'a IfExpr<'a> {
-        let cond = self.parse_expr_and_take(Precedence::PrecAssign.get_next());
+        let cond = self.parse_expr_and_take_with_terminate_infix_token(
+            Precedence::PrecAssign.get_next(),
+            Some(TokenKind::LeftCurly)
+        );
 
-        self.consume(TokenKind::Then, "Expected 'then' after if-condition");
+        self.consume(TokenKind::LeftCurly, "Expected `{` after if condition");
 
         let true_block = self.parse_block();
 
+        self.consume(TokenKind::RightCurly, "Expected `}` after if block");
+
         self.advance_if(matches!(self.current.get_kind(), TokenKind::Else | TokenKind::Elif));
+
         let false_block = match self.prev.get_kind() {
             TokenKind::Else => {
+                self.consume(TokenKind::LeftCurly, "Expected `{` after else");
                 let block_expr = self.parse_block();
-                self.consume(TokenKind::End, "Expected `end` after if expression");
+                self.consume(TokenKind::RightCurly, "Expected `}` after else block");
                 Some(IfFalseBranchExpr::ElseExpr(block_expr))
             }
             TokenKind::Elif => Some(IfFalseBranchExpr::ElifExpr(self.parse_if_expr())),
-            _ => {
-                self.consume(TokenKind::End, "Expected `end` after if expression");
-                None
-            }
+            _ => None,
         };
 
         let if_expr = self.ast_arena.alloc_expr_or_stmt(
@@ -632,12 +670,13 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_block_as_stmts(&mut self) -> &'a [Stmt<'a>] {
-        let mut stmts = VecDeque::with_capacity(32);
-        while !self.current.get_kind().can_end_scope() && !self.is_eof() {
-            Self::push_stmt(&mut stmts, self.statement());
+        let mut stmts = Vec::with_capacity(32);
+        while !self.is_curr_kind(TokenKind::RightCurly) && !self.is_eof() {
+            stmts.push(self.statement());
+            // Self::push_stmt(&mut stmts, self.statement());
         }
 
-        self.ast_arena.alloc_vec(stmts.into())
+        self.ast_arena.alloc_vec(stmts)
     }
 
     fn parse_block(&mut self) -> &'a BlockExpr<'a> {
@@ -651,25 +690,26 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_global_scope(&mut self) -> GlobalScope<'a> {
-        let mut stmts = VecDeque::with_capacity(32);
+        let mut stmts = Vec::with_capacity(32);
 
         while !self.is_eof() {
-            Self::push_stmt(&mut stmts, self.statement());
+            stmts.push(self.statement());
+            // Self::push_stmt(&mut stmts, self.statement());
         }
 
-        let stmts = self.ast_arena.alloc_vec(stmts.into());
+        let stmts = self.ast_arena.alloc_vec(stmts);
 
         GlobalScope::new(stmts)
     }
 
-    fn push_stmt(vec_deque: &mut VecDeque<Stmt<'a>>, stmt: Stmt<'a>) {
-        match stmt {
-            Stmt::ItemStmt(ItemStmt::StructItem(_) | ItemStmt::TypedefItem(_)) => {
-                vec_deque.push_front(stmt);
-            }
-            stmt => vec_deque.push_back(stmt),
-        }
-    }
+    // fn push_stmt(vec_deque: &mut VecDeque<Stmt<'a>>, stmt: Stmt<'a>) {
+    //     match stmt {
+    //         Stmt::ItemStmt(ItemStmt::StructItem(_) | ItemStmt::TypedefItem(_)) => {
+    //             vec_deque.push_front(stmt);
+    //         }
+    //         stmt => vec_deque.push_back(stmt),
+    //     }
+    // }
 
     pub(crate) fn parse_precedence(
         &mut self,
@@ -681,18 +721,49 @@ impl<'a> Parser<'a> {
         let parse_rule = self.get_parse_rule_of_prev();
 
         if let Some(prefix_method) = parse_rule.prefix_method {
+            macro_rules! is_terminate_infix_token {
+                (current) => {
+                    match expr_builder.terminate_infix_token {
+                        Some(token_kind) => self.is_curr_kind(token_kind),
+                        None => false,
+                    }
+                };
+                (prev) => {
+                    match expr_builder.terminate_infix_token {
+                        Some(token_kind) => self.prev.get_kind() == token_kind,
+                        None => false,
+                    }
+                };
+            }
+
+            if is_terminate_infix_token!(prev) {
+                return;
+            }
+
             prefix_method(self, expr_builder);
 
-            while prec <= self.get_parse_rule_of_current().infix_prec {
-                // Now we don't want to parse another `:=` or `=` in expr without block
-                if self.current.get_kind().has_assign_prec() {
-                    prec = Precedence::PrecAssign.get_next();
+            loop {
+                while
+                    prec <= self.get_parse_rule_of_current().infix_prec &&
+                    !is_terminate_infix_token!(current)
+                {
+                    // If this is true we don't want to parse another `:=` or `=` in expr without block
+                    if self.current.get_kind().has_assign_prec() {
+                        prec = Precedence::PrecAssign.get_next();
+                    }
+
+                    self.advance();
+
+                    if let Some(infix_rule) = self.get_parse_rule_of_prev().infix_method {
+                        infix_rule(self, expr_builder);
+                    }
                 }
 
-                self.advance();
-
-                if let Some(infix_rule) = self.get_parse_rule_of_prev().infix_method {
-                    infix_rule(self, expr_builder);
+                if let Some(postfix_rule) = self.get_parse_rule_of_current().postfix_method {
+                    postfix_rule(self, expr_builder);
+                    continue;
+                } else {
+                    break;
                 }
             }
         } else {
@@ -701,7 +772,6 @@ impl<'a> Parser<'a> {
     }
 
     /* Helper methods */
-
     pub(crate) fn get_ast_node_id(&mut self) -> NodeId {
         let prev = self.next_ast_node_id;
         self.next_ast_node_id = NodeId(prev.0 + 1);
@@ -713,13 +783,11 @@ impl<'a> Parser<'a> {
         // Compute the number of digits using logarithms
         let num_digits = if int == 0 { 1 } else { (int.abs() as f64).log10().ceil() as u32 };
 
-        // Compute the divisor as 10^num_digits
-        let divisor = (10_i64).pow(num_digits);
+        // Compute the divisor
+        let divisor = (10.0_f64).powi(-(num_digits as i32));
 
-        // Perform the division
-        let result = (int as f64) / (divisor as f64);
-
-        result
+        // Compute the float
+        (int as f64) * divisor
     }
 
     pub(crate) fn get_lexeme_of_prev(&self) -> &str {
@@ -802,7 +870,7 @@ impl<'a> Parser<'a> {
     /*                   method     prec        method      prec                    method      prec    */
         LeftParen   = { (grouping   None),      (call       PrecCall        ),      (None       None) },
         RightParen  = { (None       None),      (None       None            ),      (None       None) },
-        LeftCurly   = { (None       None),      (struct_expr PrecPrimary            ),      (None       None) },
+        LeftCurly   = { (block_expr None),      (struct_expr PrecPrimary            ),      (None       None) },
         RightCurly  = { (None       None),      (None       None            ),      (None       None) },
         Eq          = { (None       None),      (eq         PrecEquality    ),      (None       None) },
         Ne          = { (None       None),      (ne         PrecEquality    ),      (None       None) },
@@ -818,8 +886,10 @@ impl<'a> Parser<'a> {
         Define      = { (None       None),      (define     PrecAssign      ),      (None       None) },
         Assign      = { (None       None),      (assign     PrecAssign      ),      (None       None) },
         Dot         = { (dot_float  None),      (field_expr PrecCall        ),      (None       None) },
-        Comma       = { (None       None),      (None       None            ),      (None       None)},
-        Bang        = { (None       None),      (None       None            ),      (None       None)   },
+        Comma       = { (None       None),      (None       None            ),      (None       None) },
+        Bang        = { (None       None),      (None       None            ),      (None       None) },
+        Increment   = { (pre_inc    None),      (None       None            ),      (post_inc   None) },
+        Decrement   = { (pre_dec    None),      (None       None            ),      (post_dec   None) },
         
             
         // Numbers
@@ -846,11 +916,8 @@ impl<'a> Parser<'a> {
         Break       = { (None       None),      (None       None            ),      (None       None) },
         Continue    = { (None       None),      (None       None            ),      (None       None) },
         Return      = { (None       None),      (None       None            ),      (None       None) },
-        Do          = { (block_expr None),      (None       None            ),      (None       None) },
-        Then        = { (None       None),      (None       None            ),      (None       None) },
         Else        = { (None       None),      (None       None            ),      (None       None) },
         Elif        = { (None       None),      (None       None            ),      (None       None) },
-        End         = { (None       None),      (None       None            ),      (None       None) },
         Eof         = { (None       None),      (None       None            ),      (None       None) }
         
         )

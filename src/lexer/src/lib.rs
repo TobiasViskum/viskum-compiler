@@ -25,12 +25,10 @@ impl<'a> Lexer<'a> {
     }
 
     pub fn scan_token(&mut self) -> Token {
-        let prev = self.current_char;
-
         let char = self.advance();
 
         match char {
-            '+' => self.make_token(TokenKind::Plus),
+            '+' => self.make_token_or_other_if(TokenKind::Plus, '+', TokenKind::Increment),
             '-' => self.make_token(TokenKind::Minus),
             '*' => self.make_token(TokenKind::Star),
             '/' => self.make_token(TokenKind::Slash),
@@ -112,8 +110,6 @@ impl<'a> Lexer<'a> {
             "mut" => TokenKind::Mut,
             "class" => TokenKind::Class,
             "struct" => TokenKind::Struct,
-            "end" => TokenKind::End,
-            "do" => TokenKind::Do,
             "loop" => TokenKind::Loop,
             "while" => TokenKind::While,
             "if" => TokenKind::If,
@@ -124,7 +120,6 @@ impl<'a> Lexer<'a> {
             "ret" => TokenKind::Return,
             "true" => TokenKind::True,
             "false" => TokenKind::False,
-            "then" => TokenKind::Then,
             "typedef" => TokenKind::Typedef,
             _ => TokenKind::Ident,
         }
@@ -237,11 +232,11 @@ mod test {
             TokenKind::Integer,
             TokenKind::Eq,
             TokenKind::Integer,
-            TokenKind::Do,
+            TokenKind::Ident,
             TokenKind::Integer,
             TokenKind::Plus,
             TokenKind::Integer,
-            TokenKind::End,
+            TokenKind::Ident,
         ];
 
         expect_tokens(input, &expected_tokens)
@@ -276,8 +271,8 @@ mod test {
             TokenKind::RightParen,
             TokenKind::Loop,
             TokenKind::Break,
-            TokenKind::End,
-            TokenKind::End,
+            TokenKind::Ident,
+            TokenKind::Ident,
         ];
 
         expect_tokens(input, &expected_tokens)

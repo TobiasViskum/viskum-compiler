@@ -16,6 +16,7 @@ use crate::{
     walk_call_expr,
     walk_field_expr,
     walk_loop_expr,
+    walk_stmts_none_items,
     walk_struct_expr,
     walk_tuple_expr,
     walk_tuple_field_expr,
@@ -401,14 +402,14 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
     }
 
     fn visit_stmts(&mut self, stmts: &'ast [Stmt<'ast>]) -> Self::Result {
-        let iter = stmts.iter().filter_map(|x| {
+        let item_iter = stmts.iter().filter_map(|x| {
             match x {
                 Stmt::ItemStmt(item_stmt) => Some(item_stmt),
                 _ => None,
             }
         });
 
-        for item_stmt in iter {
+        for item_stmt in item_iter.clone() {
             let (def_id, res_kind) = match item_stmt {
                 ItemStmt::FnItem(fn_item) => {
                     let def_id = self.ast_visit_emitter.make_def_id(
@@ -435,7 +436,11 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
             self.ast_visit_emitter.bind_def_id_to_lexical_binding(def_id, res_kind);
         }
 
-        walk_stmts(self, stmts)
+        for item_stmt in item_iter {
+            self.visit_item(*item_stmt);
+        }
+
+        walk_stmts_none_items(self, stmts)
     }
 
     fn visit_ident_expr(&mut self, ident_node: &'ast IdentNode) -> Self::Result {
@@ -543,6 +548,13 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
                     );
                 }
 
+                let name_binding = NameBinding::new(
+                    NameBindingKind::Fn(
+                        FnSig::new(TyCtx::intern_many_types(args_tys), TyCtx::intern_type(ret_ty))
+                    )
+                );
+                self.ast_visit_emitter.set_namebinding_to_def_id(def_id, name_binding);
+
                 // Type of the body (not equal to the return type)
                 // If the body_ty is the NEVER_TY then the functions ends with a return statement no matter the path (e.g. if expresions)
                 let body_ty = self.visit_stmts(fn_item.body);
@@ -554,16 +566,7 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
 
                 self.ast_visit_emitter.end_context();
                 self.fn_ret_ty = prev_ret_ty;
-
-                args_tys
             };
-
-            let name_binding = NameBinding::new(
-                NameBindingKind::Fn(
-                    FnSig::new(TyCtx::intern_many_types(args_tys), TyCtx::intern_type(ret_ty))
-                )
-            );
-            self.ast_visit_emitter.set_namebinding_to_def_id(def_id, name_binding);
 
             let symbol = Symbol::new(&self.src[fn_item.ident_node.span.get_byte_range()]);
             if symbol.get() == "main" && self.ast_visit_emitter.is_main_scope() {

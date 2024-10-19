@@ -25,143 +25,180 @@ define i32 @main() {
     %25 = alloca [4 x i8], align 4
     br label %26
 26:
+    %27 = call i32 (i32) @fib55(i32 noundef 45)
     store i32 0, ptr %3
     store i32 2, ptr %4
     store i32 2, ptr %5
-    %27 = load i32, ptr %4
-    %28 = load i32, ptr %3
-    %29 = add nsw i32 %27, %28
-    store i32 %29, ptr %2
-    br i1 1, label %30, label %31
-30:
-    store i32 1, ptr %19
-    br label %32
+    %28 = load i32, ptr %4
+    %29 = load i32, ptr %3
+    %30 = add nsw i32 %28, %29
+    store i32 %30, ptr %2
+    br i1 1, label %31, label %32
 31:
-    store i32 0, ptr %19
-    br label %32
+    store i32 1, ptr %19
+    br label %33
 32:
-    %33 = load i32, ptr %19
-    store i32 %33, ptr %6
+    store i32 0, ptr %19
+    br label %33
+33:
+    %34 = load i32, ptr %19
+    store i32 %34, ptr %6
     store i32 3, ptr %20
-    %34 = getelementptr inbounds i8, ptr %20, i64 4
-    store i32 4, ptr %34
-    %35 = load i32, ptr %6
-    %36 = call ptr () @returnFunction24()
-    %37 = call i32 (i32, i32) %36(i32 noundef 2, i32 noundef 3)
-    %38 = add nsw i32 %35, %37
-    %39 = add nsw i32 5, %38
-    %40 = getelementptr inbounds i8, ptr %20, i64 8
-    store i32 %39, ptr %40
+    %35 = getelementptr inbounds i8, ptr %20, i64 4
+    store i32 4, ptr %35
+    %36 = load i32, ptr %6
+    %37 = call ptr () @returnFunction43()
+    %38 = call i32 (i32, i32) %37(i32 noundef 2, i32 noundef 3)
+    %39 = add nsw i32 %36, %38
+    %40 = add nsw i32 5, %39
+    %41 = getelementptr inbounds i8, ptr %20, i64 8
+    store i32 %40, ptr %41
     store i32 9, ptr %21
-    %41 = getelementptr inbounds i8, ptr %21, i64 4
-    store i32 4, ptr %41
+    %42 = getelementptr inbounds i8, ptr %21, i64 4
+    store i32 4, ptr %42
     store i1 1, ptr %22
-    %42 = getelementptr inbounds i8, ptr %22, i64 1
-    store i1 0, ptr %42
-    %43 = getelementptr inbounds i8, ptr %22, i64 2
-    store i32 8, ptr %43
-    %44 = load [6 x i8], ptr %22
-    %45 = getelementptr inbounds i8, ptr %21, i64 8
-    store [6 x i8] %44, ptr %45
-    %46 = load [14 x i8], ptr %21
-    %47 = getelementptr inbounds i8, ptr %20, i64 12
-    store [14 x i8] %46, ptr %47
-    %48 = getelementptr inbounds i8, ptr %20, i64 26
-    store ptr @addNoReturn16, ptr %48
-    %49 = load [34 x i8], ptr %20
-    store [34 x i8] %49, ptr %7
-    %50 = getelementptr inbounds i8, ptr %7, i64 12
-    %51 = getelementptr inbounds i8, ptr %50, i64 8
-    %52 = getelementptr inbounds i8, ptr %51, i64 1
-    %53 = load i1, ptr %52
-    store i1 %53, ptr %8
+    %43 = getelementptr inbounds i8, ptr %22, i64 1
+    store i1 0, ptr %43
+    %44 = getelementptr inbounds i8, ptr %22, i64 2
+    store i32 8, ptr %44
+    %45 = load [6 x i8], ptr %22
+    %46 = getelementptr inbounds i8, ptr %21, i64 8
+    store [6 x i8] %45, ptr %46
+    %47 = load [14 x i8], ptr %21
+    %48 = getelementptr inbounds i8, ptr %20, i64 12
+    store [14 x i8] %47, ptr %48
+    %49 = getelementptr inbounds i8, ptr %20, i64 26
+    store ptr @add26, ptr %49
+    %50 = load [34 x i8], ptr %20
+    store [34 x i8] %50, ptr %7
+    %51 = getelementptr inbounds i8, ptr %7, i64 12
+    %52 = getelementptr inbounds i8, ptr %51, i64 8
+    %53 = getelementptr inbounds i8, ptr %52, i64 1
+    %54 = load i1, ptr %53
+    store i1 %54, ptr %8
     store i32 7, ptr %23
-    %54 = getelementptr inbounds i8, ptr %23, i64 4
-    store i32 8, ptr %54
-    %55 = load [8 x i8], ptr %23
-    store [8 x i8] %55, ptr %9
-    %56 = add nsw i32 2, 3
-    %57 = mul nsw i32 %56, 9
-    %58 = getelementptr inbounds i8, ptr %9, i64 4
-    %59 = load i32, ptr %58
-    %60 = add nsw i32 %57, %59
-    %61 = getelementptr inbounds i8, ptr %7, i64 12
-    %62 = getelementptr inbounds i8, ptr %61, i64 8
-    %63 = getelementptr inbounds i8, ptr %62, i64 2
-    %64 = load i32, ptr %63
-    %65 = add nsw i32 %60, %64
-    %66 = getelementptr inbounds i8, ptr %7, i64 26
-    %67 = load ptr, ptr %66
-    %68 = call i32 (i32, i32) %67(i32 noundef 2, i32 noundef 3)
-    %69 = add nsw i32 %65, %68
-    store i32 %69, ptr %10
-    %70 = load i32, ptr %10
-    %71 = add nsw i32 1, %70
-    %72 = sub nsw i32 6, %71
-    store i32 %72, ptr %11
-    %73 = load i1, ptr %8
-    br i1 %73, label %74, label %75
-74:
-    store i32 2, ptr %13
-    store i32 2, ptr %24
-    br label %78
-75:
-    %76 = load i32, ptr %10
-    %77 = icmp eq i32 %76, 9
+    %55 = getelementptr inbounds i8, ptr %23, i64 4
+    store i32 8, ptr %55
+    %56 = load [8 x i8], ptr %23
+    store [8 x i8] %56, ptr %9
+    %57 = add nsw i32 2, 3
+    %58 = mul nsw i32 %57, 9
+    %59 = getelementptr inbounds i8, ptr %9, i64 4
+    %60 = load i32, ptr %59
+    %61 = add nsw i32 %58, %60
+    %62 = getelementptr inbounds i8, ptr %7, i64 12
+    %63 = getelementptr inbounds i8, ptr %62, i64 8
+    %64 = getelementptr inbounds i8, ptr %63, i64 2
+    %65 = load i32, ptr %64
+    %66 = add nsw i32 %61, %65
+    %67 = getelementptr inbounds i8, ptr %7, i64 26
+    %68 = load ptr, ptr %67
+    %69 = call i32 (i32, i32) %68(i32 noundef 2, i32 noundef 3)
+    %70 = add nsw i32 %66, %69
+    %71 = load [34 x i8], ptr %7
+    %72 = call i32 ([34 x i8]) @sum9([34 x i8] noundef %71)
+    %73 = add nsw i32 %70, %72
+    store i32 %73, ptr %10
+    %74 = load i32, ptr %10
+    %75 = add nsw i32 1, %74
+    %76 = sub nsw i32 6, %75
+    store i32 %76, ptr %11
+    call void () @iReturnVoid24()
+    %77 = load i1, ptr %8
     br i1 %77, label %78, label %79
 78:
+    store i32 2, ptr %13
+    store i32 2, ptr %24
+    br label %82
+79:
+    %80 = load i32, ptr %10
+    %81 = icmp eq i32 %80, 9
+    br i1 %81, label %82, label %83
+82:
     store i32 3, ptr %14
     store i32 99, ptr %24
-    br label %80
-79:
+    br label %84
+83:
     store i32 4, ptr %15
     store i32 7, ptr %24
-    br label %80
-80:
-    %81 = load i32, ptr %24
-    store i32 %81, ptr %12
-    %82 = load i32, ptr %10
-    %83 = load i32, ptr %11
-    %84 = add nsw i32 %82, %83
-    %85 = load i32, ptr %12
-    %86 = add nsw i32 %84, %85
-    store i32 %86, ptr %16
+    br label %84
+84:
+    %85 = load i32, ptr %24
+    store i32 %85, ptr %12
+    %86 = load i32, ptr %10
+    %87 = load i32, ptr %11
+    %88 = add nsw i32 %86, %87
+    %89 = load i32, ptr %12
+    %90 = add nsw i32 %88, %89
+    store i32 %90, ptr %16
     store i32 2, ptr %16
-    %87 = icmp eq i1 1, 1
-    br i1 %87, label %88, label %89
-88:
+    %91 = icmp eq i1 1, 1
+    br i1 %91, label %92, label %93
+92:
     store i32 1, ptr %25
-    br label %91
-89:
-    %90 = load i32, ptr %16
-    store i32 %90, ptr %25
-    br label %91
-91:
-    %92 = load i32, ptr %25
-    store i32 %92, ptr %17
-    %93 = load i32, ptr %16
-    %94 = add nsw i32 928, %93
-    store i32 %94, ptr %16
+    br label %95
+93:
+    %94 = load i32, ptr %16
+    store i32 %94, ptr %25
+    br label %95
+95:
+    %96 = load i32, ptr %25
+    store i32 %96, ptr %17
+    %97 = load i32, ptr %16
+    %98 = add nsw i32 928, %97
+    store i32 %98, ptr %16
     store i32 0, ptr %18
-    %95 = load i32, ptr %18
-    %96 = icmp eq i32 %95, 10
-    br i1 %96, label %97, label %100
-97:
-    %98 = load i32, ptr %18
-    %99 = add nsw i32 %98, 1
-    store i32 %99, ptr %18
-    br label %100
-100:
+    %99 = load i32, ptr %18
+    %100 = icmp eq i32 %99, 10
+    br i1 %100, label %101, label %104
+101:
+    %102 = load i32, ptr %18
+    %103 = add nsw i32 %102, 1
+    store i32 %103, ptr %18
+    br label %104
+104:
+    br label %105
+105:
+    %106 = load i32, ptr %18
+    %107 = add nsw i32 %106, 1
+    store i32 %107, ptr %18
+    %108 = load i32, ptr %18
+    %109 = sub nsw i32 %108, 1
+    %110 = icmp eq i32 %109, 100
+    br i1 %110, label %111, label %113
+111:
+    br label %114
+112:
+    br label %113
+113:
+    br label %105
+114:
     ret i32 0
 }
 
-define void @iReturnVoid9() {
+define i32 @sum9([34 x i8] noundef %1) {
+    %3 = alloca [34 x i8], align 1
+    br label %4
+4:
+    store [34 x i8] %1, ptr %3
+    %5 = load i32, ptr %3
+    %6 = getelementptr inbounds i8, ptr %3, i64 4
+    %7 = load i32, ptr %6
+    %8 = add nsw i32 %5, %7
+    %9 = getelementptr inbounds i8, ptr %3, i64 8
+    %10 = load i32, ptr %9
+    %11 = add nsw i32 %8, %10
+    ret i32 %11
+    unreachable
+}
+
+define void @iReturnVoid24() {
     br label %2
 2:
     ret void
 }
 
-define i32 @addNoReturn16(i32 noundef %1, i32 noundef %2) {
+define i32 @doAddition29(i32 noundef %1, i32 noundef %2) {
     %4 = alloca [4 x i8], align 4
     %5 = alloca [4 x i8], align 4
     br label %6
@@ -175,10 +212,63 @@ define i32 @addNoReturn16(i32 noundef %1, i32 noundef %2) {
     unreachable
 }
 
-define ptr @returnFunction24() {
+define i32 @add26(i32 noundef %1, i32 noundef %2) {
+    %4 = alloca [4 x i8], align 4
+    %5 = alloca [4 x i8], align 4
+    br label %6
+6:
+    store i32 %1, ptr %4
+    store i32 %2, ptr %5
+    %7 = load i32, ptr %4
+    %8 = load i32, ptr %5
+    %9 = call i32 (i32, i32) @doAddition29(i32 noundef %7, i32 noundef %8)
+    ret i32 %9
+    unreachable
+}
+
+define i32 @addTwo44(i32 noundef %1, i32 noundef %2) {
+    %4 = alloca [4 x i8], align 4
+    %5 = alloca [4 x i8], align 4
+    br label %6
+6:
+    store i32 %1, ptr %4
+    store i32 %2, ptr %5
+    %7 = load i32, ptr %4
+    %8 = load i32, ptr %5
+    %9 = add nsw i32 %7, %8
+    ret i32 %9
+    unreachable
+}
+
+define ptr @returnFunction43() {
     br label %2
 2:
-    ret ptr @addNoReturn16
+    ret ptr @addTwo44
+    unreachable
+}
+
+define i32 @fib55(i32 noundef %1) {
+    %3 = alloca [4 x i8], align 4
+    br label %4
+4:
+    store i32 %1, ptr %3
+    %5 = load i32, ptr %3
+    %6 = icmp sle i32 %5, 1
+    br i1 %6, label %7, label %11
+7:
+    %8 = load i32, ptr %3
+    %9 = add nsw i32 %8, 0
+    ret i32 %9
+    br label %11
+11:
+    %12 = load i32, ptr %3
+    %13 = sub nsw i32 %12, 2
+    %14 = call i32 (i32) @fib55(i32 noundef %13)
+    %15 = load i32, ptr %3
+    %16 = sub nsw i32 %15, 1
+    %17 = call i32 (i32) @fib55(i32 noundef %16)
+    %18 = add nsw i32 %14, %17
+    ret i32 %18
     unreachable
 }
 

@@ -1,6 +1,6 @@
 use std::cell::RefCell;
 
-use ast::AstArena;
+use ast::{ AstArena, AstPrettifier };
 use bumpalo::Bump;
 use codegen::CodeGen;
 use icfg::Icfg;

@@ -1,4 +1,4 @@
-use std::fmt::Display;
+use std::{ fmt::Display, ops::Add };
 
 use enum_iterator::Sequence;
 use span::Span;
@@ -73,6 +73,10 @@ pub enum TokenKind {
     Comma,
     /// `!`
     Bang,
+    /// `++`
+    Increment,
+    /// `--`
+    Decrement,
 
     /* Literals */
     /// Integer e.g. `69`
@@ -108,12 +112,6 @@ pub enum TokenKind {
     Break,
     /// Keyword `continue`
     Continue,
-    /// Keyword `then`
-    Then,
-    /// Keyword `do`
-    Do,
-    /// Keyword `end`
-    End,
     /// Keyword `else`
     Else,
     /// Keyword `elif`
@@ -135,7 +133,7 @@ impl TokenKind {
     }
 
     pub fn can_end_scope(&self) -> bool {
-        matches!(self, Self::RightCurly | Self::End | Self::Else | Self::Elif)
+        matches!(self, Self::RightCurly)
     }
 }
 

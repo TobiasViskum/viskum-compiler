@@ -692,7 +692,7 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
         Self::default_result()
     }
 
-    fn visit_fn_item(&mut self, _: &'ast FnItem<'ast>) -> Self::Result {
+    fn visit_fn_item(&mut self, fn_item: &'ast FnItem<'ast>) -> Self::Result {
         VisitResult::Const(Const::Void)
     }
 
@@ -729,27 +729,6 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
 
         let visit_result = self.visit_expr(call_expr.callee);
 
-        // if
-        //     let VisitResult::PlaceKind(PlaceKind::GlobalMemId(global_mem_id), callee_ty) =
-        //         visit_result
-        // {
-        //     let fn_args_ty = get_fn_args_ty_from_callee_ty(callee_ty);
-
-        //     let temp_id = self.get_temp_id();
-        //     let call_node = Node::new(
-        //         NodeKind::CallNode(
-        //             CallNode::new(
-        //                 temp_id,
-        //                 PlaceKind::GlobalMemId(global_mem_id),
-        //                 arg_operands,
-        //                 fn_args_ty,
-        //                 ret_ty
-        //             )
-        //         )
-        //     );
-        //     self.push_node(call_node);
-        //     VisitResult::PlaceKind(PlaceKind::TempId(temp_id), ret_ty)
-        // } else {
         let (callee_operand, callee_ty) = self.get_operand_from_visit_result(visit_result);
         let fn_args_ty = get_fn_args_ty_from_callee_ty(callee_ty);
 
@@ -904,6 +883,7 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
         let ty = self.icfg_builder.get_ty_from_node_id(get_node_id_from_expr(def_stmt.value_expr));
 
         if ty.is_void() {
+            self.visit_expr(def_stmt.value_expr);
             return Self::default_result();
         }
 

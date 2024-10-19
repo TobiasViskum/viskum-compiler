@@ -127,8 +127,15 @@ impl<'a> CfgVisitor for CodeGenUnitHelper<'a> {
     }
 
     fn visit_call_node(&mut self, call_node: &CallNode, cfg: &Cfg) -> Self::Result {
+        if call_node.ret_ty.is_void() {
+            return;
+        }
         let next_ssa_id = self.get_next_ssa_id();
         self.place_to_ssa_id.insert(PlaceKind::TempId(call_node.result_place), next_ssa_id);
+    }
+
+    fn visit_return_node(&mut self, return_node: &ReturnNode, cfg: &Cfg) -> Self::Result {
+        self.next_ssa_id += 1;
     }
 }
 
@@ -456,16 +463,16 @@ impl<'a> CfgVisitor for CodeGenUnit<'a> {
     }
 
     fn visit_call_node(&mut self, call_node: &CallNode, cfg: &Cfg) -> Self::Result {
-        let ssa_id = self.get_ssa_id_from_place(&PlaceKind::TempId(call_node.result_place));
         let callee = self.get_llvm_operand(&call_node.callee);
 
-        write!(
-            self.buffer,
-            "{}{} = call {} ",
-            " ".repeat(INDENTATION),
-            ssa_id,
-            self.get_llvm_ty(call_node.ret_ty)
-        )?;
+        write!(self.buffer, "{}", " ".repeat(INDENTATION))?;
+
+        if !call_node.ret_ty.is_void() {
+            let ssa_id = self.get_ssa_id_from_place(&PlaceKind::TempId(call_node.result_place));
+            write!(self.buffer, "{} = ", ssa_id)?;
+        }
+
+        write!(self.buffer, "call {} ", self.get_llvm_ty(call_node.ret_ty))?;
 
         write!(self.buffer, "(")?;
         for (i, arg_ty) in call_node.args_ty.iter().enumerate() {
@@ -514,6 +521,7 @@ impl<'icfg> CodeGen<'icfg> {
         let mut file = File::create(&file_name_with_extension).expect("Error creating file");
         file.write_all(buffer.as_bytes()).expect("Error writing to file");
         Command::new("clang")
+            .arg("-O0")
             .arg(&file_name_with_extension)
             .arg("-o")
             .arg(&file_name)
