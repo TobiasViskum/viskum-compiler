@@ -1,8 +1,7 @@
-use std::marker::PhantomData;
+use std::cell::RefCell;
 
 use ast::{
     Ast,
-    AstPrettifier,
     AstQueryEntry,
     AstState,
     AstState0,
@@ -12,17 +11,16 @@ use ast::{
     AstTypeChecked,
     AstVisitEmitter,
     FnItem,
-    IdentNode,
-    StructItem,
 };
 use bumpalo::Bump;
 use error::{ Error, ErrorKind, Severity };
-use fxhash::FxHashMap;
+use fxhash::{ FxBuildHasher, FxHashMap };
 use ir::{
     ContextId,
     DefId,
     DefIdToNameBinding,
-    DefKind,
+    GlobalMem,
+    GlobalMemId,
     LexicalBinding,
     LexicalContext,
     NameBinding,
@@ -49,6 +47,9 @@ pub struct Resolver<'ctx, 'ast> {
 
     def_id_to_name_binding: FxHashMap<DefId, NameBinding<'ctx>>,
     node_id_to_ty: FxHashMap<NodeId, Ty>,
+
+    def_id_to_global_mem_id: FxHashMap<DefId, GlobalMemId>,
+    global_mems: &'ctx RefCell<Vec<GlobalMem>>,
 
     found_main_fn: Option<&'ast FnItem<'ast>>,
     pending_functions: Vec<&'ast FnItem<'ast>>,
@@ -81,6 +82,7 @@ impl<'ctx, 'ast> Resolver<'ctx, 'ast> where 'ctx: 'ast {
                 node_id_to_def_id: self.node_id_to_def_id,
                 node_id_to_ty: self.node_id_to_ty,
                 def_id_to_name_binding: self.def_id_to_name_binding,
+                def_id_to_global_mem_id: self.def_id_to_global_mem_id,
             },
         )
     }
@@ -89,7 +91,8 @@ impl<'ctx, 'ast> Resolver<'ctx, 'ast> where 'ctx: 'ast {
     pub fn from_ast(
         src: &'ast str,
         ast: Ast<'ast, AstState0>,
-        arena: &'ctx Bump
+        arena: &'ctx Bump,
+        global_mems: &'ctx RefCell<Vec<GlobalMem>>
     ) -> (Self, Ast<'ast, AstState1>) {
         /// Sets up query system
         fn build_ast_query_system<'ctx, 'ast>(
@@ -108,11 +111,22 @@ impl<'ctx, 'ast> Resolver<'ctx, 'ast> where 'ctx: 'ast {
         let mut lexical_context_stack = Vec::with_capacity(16);
         lexical_context_stack.push(LexicalContext::new(ContextId(0), ScopeId(0)));
 
+        macro_rules! hashmap_with_capacity {
+            ($capacity:expr) => {
+                FxHashMap::with_capacity_and_hasher(
+                    $capacity,
+                    FxBuildHasher::default()
+                )
+            };
+        }
+
         let mut resolver = Self {
+            global_mems,
+            def_id_to_global_mem_id: Default::default(),
             def_id_to_name_binding: Default::default(),
-            node_id_to_def_id: Default::default(),
             lexical_binding_to_def_id: Default::default(),
-            node_id_to_ty: Default::default(),
+            node_id_to_def_id: hashmap_with_capacity!(ast.expected_node_count()),
+            node_id_to_ty: hashmap_with_capacity!(ast.expected_node_count()),
             arena,
             lexical_context_stack,
             next_scope_id: ScopeId(1),
@@ -130,25 +144,26 @@ impl<'ctx, 'ast> Resolver<'ctx, 'ast> where 'ctx: 'ast {
 
     /// Performs name resolution
     pub fn resolve_ast(&mut self, ast: Ast<'ast, AstState1>) -> Ast<'ast, AstState2> {
-        fn remove_temp_storage<'ctx, 'ast>(resolver: &mut Resolver<'ctx, 'ast>) {
-            // resolver.symbol_and_scope_to_def_id = Default::default();
-            // resolver.lexical_context_stack = vec![];
-            // resolver.next_scope_id = ScopeId(0);
-            // resolver.next_context_id = ContextId(0);
-        }
         return ast.next_state();
 
-        let ast_visitor = ast.get_visitor(self.src, self);
+        // fn remove_temp_storage<'ctx, 'ast>(resolver: &mut Resolver<'ctx, 'ast>) {
+        //     // resolver.symbol_and_scope_to_def_id = Default::default();
+        //     // resolver.lexical_context_stack = vec![];
+        //     // resolver.next_scope_id = ScopeId(0);
+        //     // resolver.next_context_id = ContextId(0);
+        // }
 
-        let resolved_ast = ast_visitor.visit();
+        // let ast_visitor = ast.get_visitor(self.src, self);
 
-        if self.has_errors() {
-            self.exit_if_has(Severity::Fatal);
-        }
+        // let resolved_ast = ast_visitor.visit();
 
-        remove_temp_storage(self);
+        // if self.has_errors() {
+        //     self.exit_if_has(Severity::Fatal);
+        // }
 
-        resolved_ast
+        // remove_temp_storage(self);
+
+        // resolved_ast
     }
 
     /// Performs type checking
@@ -162,8 +177,6 @@ impl<'ctx, 'ast> Resolver<'ctx, 'ast> where 'ctx: 'ast {
         }
 
         self.assert_type_to_all_nodes(&type_checked_ast);
-
-        // AstPrettifier::new(&type_checked_ast, self.src, Some(&self.node_id_to_ty)).print_ast();
 
         type_checked_ast
     }
@@ -228,6 +241,13 @@ impl<'ctx, 'ast> Resolver<'ctx, 'ast> where 'ctx: 'ast {
 
 impl<'ctx, 'ast, T> AstVisitEmitter<'ctx, 'ast, T> for Resolver<'ctx, 'ast> where T: AstState {
     /* Methods used during all passes */
+    fn set_def_id_to_global_mem(&mut self, def_id: DefId) {
+        let ty = <Resolver<'_, '_> as AstVisitEmitter<'_, '_, T>>::get_ty_from_def_id(self, def_id);
+        let global_mem_id = GlobalMemId(self.global_mems.borrow().len() as u32);
+        let global_mem = GlobalMem::new(global_mem_id, def_id, Span::dummy(), ty);
+        self.global_mems.borrow_mut().push(global_mem);
+        self.def_id_to_global_mem_id.insert(def_id, global_mem_id);
+    }
     fn report_error(&mut self, error: Error) {
         self.errors.push(error);
     }
@@ -302,7 +322,7 @@ impl<'ctx, 'ast, T> AstVisitEmitter<'ctx, 'ast, T> for Resolver<'ctx, 'ast> wher
                 }
             ));
 
-        if let Some(prev) = prev {
+        if let Some(_prev) = prev {
             panic!("Already exists");
         }
 
@@ -344,11 +364,15 @@ impl<'ctx, 'ast, T> AstVisitEmitter<'ctx, 'ast, T> for Resolver<'ctx, 'ast> wher
                 }
             }
             ResKind::Fn => {
-                todo!();
+                for lexical_context in self.lexical_context_stack.iter().rev() {
+                    let lexical_binding = LexicalBinding::new(*lexical_context, symbol, res_kind);
+                    if let Some(def_id) = self.lexical_binding_to_def_id.get(&lexical_binding) {
+                        return Some(*def_id);
+                    }
+                }
             }
         }
 
-        self.errors.push(Error::new(ErrorKind::UndefinedLookup(symbol, res_kind), span));
         None
     }
 

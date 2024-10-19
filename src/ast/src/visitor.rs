@@ -12,6 +12,7 @@ use crate::{
     BlockExpr,
     BoolExpr,
     BreakExpr,
+    CallExpr,
     ConstExpr,
     ContinueExpr,
     DefineStmt,
@@ -155,6 +156,10 @@ pub trait Visitor<'ast>: Sized {
 
     fn visit_struct_expr(&mut self, struct_expr: &'ast StructExpr<'ast>) -> Self::Result {
         walk_struct_expr(self, struct_expr)
+    }
+
+    fn visit_call_expr(&mut self, call_expr: &'ast CallExpr<'ast>) -> Self::Result {
+        walk_call_expr(self, call_expr)
     }
 
     fn visit_block_expr(&mut self, expr: &'ast BlockExpr<'ast>) -> Self::Result {
@@ -312,6 +317,7 @@ pub fn walk_value_expr<'a, V>(visitor: &mut V, value_expr: ValueExpr<'a>) -> V::
         ValueExpr::GroupExpr(group_expr) => visitor.visit_group_expr(group_expr),
         ValueExpr::ConstExpr(const_expr) => visitor.visit_const_expr(const_expr),
         ValueExpr::StructExpr(struct_expr) => visitor.visit_struct_expr(struct_expr),
+        ValueExpr::CallExpr(call_expr) => visitor.visit_call_expr(call_expr),
     }
 }
 
@@ -323,6 +329,18 @@ pub fn walk_struct_expr<'a, V>(visitor: &mut V, struct_expr: &'a StructExpr<'a>)
     struct_expr.field_initializations.iter().for_each(|field| {
         visitor.visit_ident_expr(field.ident);
         visitor.visit_expr(field.value);
+    });
+
+    V::default_result()
+}
+
+pub fn walk_call_expr<'a, V>(visitor: &mut V, call_expr: &'a CallExpr<'a>) -> V::Result
+    where V: Visitor<'a>
+{
+    visitor.visit_expr(call_expr.callee);
+
+    call_expr.args.iter().for_each(|arg| {
+        visitor.visit_expr(*arg);
     });
 
     V::default_result()

@@ -6,13 +6,30 @@ Useful links:
 
 */
 
-use std::fmt::Display;
+use std::{ cell::RefCell, fmt::Display, rc::Rc };
 
 use data_structures::Either;
 use derive_new::new;
 use op::{ ArithmeticOp, BinaryOp };
 use span::Span;
-use ir::{ CfgFnKind, Mutability, Symbol, Ty, BOOL_TY, INT_TY, VOID_TY };
+use ir::{
+    CfgFnKind,
+    DefId,
+    GlobalMem,
+    GlobalMemId,
+    LocalMem,
+    LocalMemId,
+    Mutability,
+    ResultMem,
+    ResultMemId,
+    Symbol,
+    TempId,
+    Ty,
+    TyCtx,
+    BOOL_TY,
+    INT_TY,
+    VOID_TY,
+};
 mod icfg_prettifier;
 mod cfg_visitor;
 
@@ -24,38 +41,42 @@ enum Liveness {
     Dead,
 }
 
-pub struct Icfg {
-    pub cfgs: Vec<Cfg>,
+pub struct Icfg<'a> {
+    pub cfgs: Vec<Cfg<'a>>,
+    pub global_mems: &'a RefCell<Vec<GlobalMem>>,
 }
-impl Icfg {
-    pub fn new(cfgs: Vec<Cfg>) -> Self {
-        Self { cfgs }
+impl<'a> Icfg<'a> {
+    pub fn new(cfgs: Vec<Cfg<'a>>, global_mems: &'a RefCell<Vec<GlobalMem>>) -> Self {
+        Self { cfgs, global_mems }
     }
 }
 
 /// One Cfg is constructed for each function
-pub struct Cfg {
-    /// All variables used in the function
+pub struct Cfg<'a> {
+    /// All variables used or referenced in the function
+    pub global_mems: &'a RefCell<Vec<GlobalMem>>,
     pub args: Vec<(TempId, Ty)>,
     pub local_mems: Vec<LocalMem>,
     pub result_mems: Vec<ResultMem>,
-    pub basic_blocks: Vec<BasicBlock>,
+    pub basic_blocks: Vec<BasicBlock<'a>>,
     /// Based on if the function is called or not
     liveness: Liveness,
     pub cfg_fn_kind: CfgFnKind,
     pub ret_ty: Ty,
 }
 
-impl Cfg {
+impl<'a> Cfg<'a> {
     pub fn new(
+        global_mems: &'a RefCell<Vec<GlobalMem>>,
         args: Vec<(TempId, Ty)>,
         local_mems: Vec<LocalMem>,
         result_mems: Vec<ResultMem>,
-        basic_blocks: Vec<BasicBlock>,
+        basic_blocks: Vec<BasicBlock<'a>>,
         cfg_fn_kind: CfgFnKind,
         ret_ty: Ty
     ) -> Self {
         Self {
+            global_mems,
             args,
             local_mems,
             result_mems,
@@ -64,6 +85,13 @@ impl Cfg {
             ret_ty,
             liveness: Liveness::Dead,
         }
+    }
+
+    pub fn get_global_mem(&self, global_mem_id: GlobalMemId) -> GlobalMem {
+        *self.global_mems
+            .borrow()
+            .get(global_mem_id.0 as usize)
+            .expect("Expected GlobalMem")
     }
 
     pub fn get_local_mem(&self, local_mem_id: LocalMemId) -> &LocalMem {
@@ -75,89 +103,13 @@ impl Cfg {
     }
 }
 
-/// Implement `requires_drop` for when heap objects is implemented
-#[derive(Debug, Clone, Copy, new)]
-pub struct LocalMem {
-    pub local_mem_id: LocalMemId,
-    pub symbol: Symbol,
-    pub span: Span,
-    pub ty: Ty,
-    pub mutability: Mutability,
-    pub is_arg: bool,
-}
-
-impl Display for LocalMem {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}{}", self.symbol.get(), get_subscript(self.local_mem_id.0))
-    }
-}
-
-#[derive(Debug, Clone, Copy, new)]
-pub struct ResultMem {
-    pub result_mem_id: ResultMemId,
-    pub ty: Ty,
-}
-
-impl Display for ResultMem {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.result_mem_id)
-    }
-}
-fn get_subscript(mem: u32) -> String {
-    let mut subscript = String::new();
-    for char in mem.to_string().chars() {
-        subscript += match char {
-            '0' => "₀",
-            '1' => "₁",
-            '2' => "₂",
-            '3' => "₃",
-            '4' => "₄",
-            '5' => "₅",
-            '6' => "₆",
-            '7' => "₇",
-            '8' => "₈",
-            '9' => "₉",
-            _ => unreachable!(),
-        };
-    }
-
-    subscript
-}
-
-#[derive(Hash, Eq, PartialEq, Debug, Clone, Copy)]
-pub struct LocalMemId(pub u32);
-
-impl Display for LocalMemId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-#[derive(Hash, Eq, PartialEq, Debug, Clone, Copy)]
-pub struct ResultMemId(pub u32);
-
-impl Display for ResultMemId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "r{}", self.0)
-    }
-}
-
-#[derive(Hash, Eq, PartialEq, Debug, Clone, Copy)]
-pub struct TempId(pub u32);
-
-impl Display for TempId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "_{}", self.0)
-    }
-}
-
 #[derive(Debug)]
-pub struct BasicBlock {
+pub struct BasicBlock<'a> {
     pub basic_block_id: BasicBlockId,
-    pub nodes: Vec<Node>,
+    pub nodes: Vec<Node<'a>>,
 }
 
-impl BasicBlock {
+impl<'a> BasicBlock<'a> {
     pub fn new(basic_block_id: BasicBlockId) -> Self {
         Self {
             basic_block_id,
@@ -165,7 +117,7 @@ impl BasicBlock {
         }
     }
 
-    pub fn push_node(&mut self, node: Node) {
+    pub fn push_node(&mut self, node: Node<'a>) {
         self.nodes.push(node);
     }
 }
@@ -183,12 +135,12 @@ pub enum AccessKind {
 }
 
 #[derive(Debug, new, Clone, Copy)]
-pub struct Node {
-    pub kind: NodeKind,
+pub struct Node<'a> {
+    pub kind: NodeKind<'a>,
 }
 
 #[derive(Debug, Clone, Copy)]
-pub enum NodeKind {
+pub enum NodeKind<'a> {
     BranchNode(BranchNode),
     BranchCondNode(BranchCondNode),
     BinaryNode(BinaryNode),
@@ -196,6 +148,8 @@ pub enum NodeKind {
     LoadNode(LoadNode),
     IndexNode(IndexNode),
     ByteAccessNode(ByteAccessNode),
+    ReturnNode(ReturnNode),
+    CallNode(CallNode<'a>),
 }
 
 /// A hint to the optimizer whether or not the store is used for initializing a complicated data structure
@@ -236,6 +190,31 @@ pub struct ByteAccessNode {
     pub result_place: PlaceKind,
     pub access_place: PlaceKind,
     pub byte_offset: usize,
+}
+
+/// Used to return a value from a function
+///
+/// LLVM instruction:
+///
+/// `ret {ret_ty} {ret_val}`
+#[derive(Debug, new, Clone, Copy)]
+pub struct ReturnNode {
+    pub ret_val: Operand,
+    pub ret_ty: Ty,
+}
+
+/// Used to call a function
+///
+/// LLVM instruction:
+///
+/// `%{result_place} = call {ret_ty} {fn_name}({args})`
+#[derive(Debug, new, Clone, Copy)]
+pub struct CallNode<'a> {
+    pub result_place: TempId,
+    pub callee: Operand,
+    pub args: &'a [Operand],
+    pub args_ty: &'a [Ty],
+    pub ret_ty: Ty,
 }
 
 /// Not implemented yet
@@ -354,6 +333,7 @@ impl Default for Operand {
 /// TempId: Memory location usable only once and occurs as a result of many instructions (e.g. `tempId = 2 + 8` or `tempId = load a`)
 #[derive(Hash, Eq, PartialEq, Debug, Clone, Copy)]
 pub enum PlaceKind {
+    // GlobalMemId(GlobalMemId),
     LocalMemId(LocalMemId),
     ResultMemId(ResultMemId),
     TempId(TempId),
@@ -362,6 +342,7 @@ pub enum PlaceKind {
 impl PlaceKind {
     pub fn get_id(&self) -> usize {
         let id = match self {
+            // Self::GlobalMemId(global_mem_id) => global_mem_id.0,
             Self::LocalMemId(local_mem_id) => local_mem_id.0,
             Self::ResultMemId(result_mem_id) => result_mem_id.0,
             Self::TempId(temp_id) => temp_id.0,
@@ -375,6 +356,7 @@ impl PlaceKind {
 pub enum Const {
     Int(i64),
     Bool(bool),
+    FnPtr(DefId),
     Void,
 }
 
@@ -384,6 +366,7 @@ impl Const {
             Self::Void => VOID_TY,
             Self::Int(_) => INT_TY,
             Self::Bool(_) => BOOL_TY,
+            Self::FnPtr(def_id) => Ty::FnDef(*def_id),
         }
     }
 }
@@ -394,6 +377,7 @@ impl Display for Const {
             Self::Bool(bool) => write!(f, "{}", bool),
             Self::Int(int) => write!(f, "{}", int),
             Self::Void => write!(f, "()"),
+            Self::FnPtr(def_id) => write!(f, "{}", def_id),
         }
     }
 }

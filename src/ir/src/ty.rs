@@ -16,6 +16,8 @@ use crate::{
 pub const VOID_TY: Ty = Ty::PrimTy(PrimTy::Void);
 pub const INT_TY: Ty = Ty::PrimTy(PrimTy::Int);
 pub const BOOL_TY: Ty = Ty::PrimTy(PrimTy::Bool);
+pub const NEVER_TY: Ty = Ty::Never;
+pub const UNKOWN_TY: Ty = Ty::Unkown;
 
 /// For now, this is just used as a way to intern types
 pub struct TyCtx;
@@ -64,6 +66,8 @@ pub enum Ty {
     Ptr(&'static Ty),
     /// Compiler types e.g. `Int, Uint, Float, String, etc.`
     PrimTy(PrimTy),
+    /// All code after this point is unreachable
+    Never,
     /// If the resulting type of an operation is unkown (error)
     Unkown,
 }
@@ -82,6 +86,10 @@ impl Ty {
 
     pub fn is_void(&self) -> bool {
         self.auto_deref() == VOID_TY
+    }
+
+    pub fn is_never(&self) -> bool {
+        self.auto_deref() == NEVER_TY
     }
 
     pub fn is_ptr(&self) -> bool {
@@ -116,6 +124,13 @@ impl Ty {
                         }
                     }
                     _ => panic!("Invalid ADT"),
+                }
+            }
+            Self::FnDef(def_id) => {
+                let name_binding = def_id_to_name_binding.get(&def_id).unwrap();
+                match name_binding.kind {
+                    NameBindingKind::Fn(fn_sig) => Ty::FnSig(fn_sig),
+                    _ => panic!("Expected fn"),
                 }
             }
             _ => self.auto_deref(),
@@ -256,7 +271,7 @@ impl GetTyAttr for Ty {
             }
             Self::Ptr(_) => TyAttr::new(8, 8),
             Self::PrimTy(prim_ty) => prim_ty.get_ty_attr(resolved_information),
-            Self::Unkown => panic!("Unkown has no size and alignment"),
+            t @ (Self::Unkown | Self::Never) => panic!("{} has no size and alignment", t),
         }
     }
 }
@@ -268,6 +283,7 @@ impl Display for Ty {
             Self::FnSig(_) => write!(f, "FnSig"),
             Self::Ptr(inner) => write!(f, "*{}", inner),
             Self::Unkown => write!(f, "{{unkown}}"),
+            Self::Never => write!(f, "!"),
             Self::PrimTy(prim_ty) => prim_ty.fmt(f),
             Self::Adt(def_id) => {
                 write!(f, "{} {{", def_id.symbol.get())?;

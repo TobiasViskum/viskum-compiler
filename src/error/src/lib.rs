@@ -42,6 +42,9 @@ pub enum ErrorKind {
     UndefinedLookup(Symbol, ResKind),
     MismatchedFieldTypes(Symbol, Symbol, Ty, Ty),
     MissingStructField(Symbol),
+    MismatchedReturnTypes(Ty, Ty),
+    ReturnOutsideFn,
+    MissingReturn,
     UndefinedStructField(Symbol, Symbol),
     ExpectedBoolExpr(Ty),
     AssignmentToImmutable(Symbol),
@@ -63,6 +66,9 @@ impl ErrorKind {
             Self::InvalidPattern => Severity::Fatal,
             Self::BinaryExprTypeError(_, _, _) => Severity::Fatal,
             Self::TupleAccessOutOfBounds(_, _) => Severity::Fatal,
+            Self::MismatchedReturnTypes(_, _) => Severity::NoImpact,
+            Self::ReturnOutsideFn => Severity::NoImpact,
+            Self::MissingReturn => Severity::NoImpact,
             Self::MismatchedFieldTypes(_, _, _, _) => Severity::NoImpact,
             Self::MissingStructField(_) => Severity::NoImpact,
             Self::UndefinedStructField(_, _) => Severity::NoImpact,
@@ -83,6 +89,18 @@ impl ErrorKind {
                     Ty::Tuple(tuple_ty),
                     tuple_ty.len()
                 )
+            }
+            Self::MissingReturn => { write!(buffer, "Missing return statement") }
+            Self::MismatchedReturnTypes(expected_ty, found_ty) => {
+                write!(
+                    buffer,
+                    "Expected return type `{}` but found type `{}`",
+                    expected_ty,
+                    found_ty
+                )
+            }
+            Self::ReturnOutsideFn => {
+                write!(buffer, "Keyword `return` cannot be used outside of functions")
             }
             Self::InvalidTuple(found_ty) => {
                 write!(buffer, "Expected tuple but found type `{}`", found_ty)

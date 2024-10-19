@@ -154,6 +154,7 @@ name = "icfg_builder"
 version = "0.1.0"
 dependencies = [
  "ast",
+ "bumpalo",
  "data_structures",
  "fxhash",
  "icfg",
@@ -179,8 +180,10 @@ version = "0.1.0"
 dependencies = [
  "bumpalo",
  "data_structures",
+ "derive-new",
  "fxhash",
  "op",
+ "span",
 ]
 
 [[package]]

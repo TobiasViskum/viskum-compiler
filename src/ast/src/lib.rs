@@ -90,6 +90,10 @@ impl<'ast, T> Ast<'ast, T> where T: AstState {
             _state: PhantomData,
         }
     }
+
+    pub fn expected_node_count(&self) -> usize {
+        self.query_system.expected_nodes_count
+    }
 }
 
 impl<'ast> Ast<'ast, AstState0> {
@@ -149,6 +153,7 @@ pub struct GlobalScope<'ast> {
 pub enum Typing<'ast> {
     Ident(Span),
     Tuple(&'ast [Typing<'ast>]),
+    Fn(&'ast [Typing<'ast>], Option<&'ast Typing<'ast>>),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -336,6 +341,14 @@ pub enum ValueExpr<'ast> {
     TupleExpr(&'ast TupleExpr<'ast>),
     StructExpr(&'ast StructExpr<'ast>),
     ConstExpr(ConstExpr<'ast>),
+    CallExpr(&'ast CallExpr<'ast>),
+}
+
+#[derive(Debug, new)]
+pub struct CallExpr<'ast> {
+    pub callee: Expr<'ast>,
+    pub args: &'ast [Expr<'ast>],
+    pub ast_node_id: NodeId,
 }
 
 #[derive(Debug, new)]
@@ -417,6 +430,7 @@ pub fn get_node_id_from_value_expr(value_expr: ValueExpr) -> NodeId {
         ValueExpr::GroupExpr(group_expr) => group_expr.ast_node_id,
         ValueExpr::TupleExpr(tuple_expr) => tuple_expr.ast_node_id,
         ValueExpr::StructExpr(struct_expr) => struct_expr.ast_node_id,
+        ValueExpr::CallExpr(call_expr) => call_expr.ast_node_id,
         ValueExpr::ConstExpr(const_expr) => {
             match const_expr {
                 ConstExpr::BoolExpr(bool_expr) => bool_expr.ast_node_id,

@@ -7,9 +7,9 @@ use crate::{
     BlockExpr,
     BoolExpr,
     BreakExpr,
+    CallExpr,
     ContinueExpr,
     DefineStmt,
-    Expr,
     FieldExpr,
     FnItem,
     GroupExpr,
@@ -17,8 +17,6 @@ use crate::{
     IfExpr,
     IntegerExpr,
     LoopExpr,
-    Pat,
-    PlaceExpr,
     ReturnExpr,
     StructExpr,
     StructItem,
@@ -33,7 +31,7 @@ use crate::{
 #[derive(Debug)]
 pub struct AstQuerySystem<'ast> {
     ast_node_id_to_ast_node: FxHashMap<NodeId, AstQueryEntry<'ast>>,
-    expected_nodes_count: usize,
+    pub expected_nodes_count: usize,
 }
 
 impl<'ast> AstQuerySystem<'ast> {
@@ -83,6 +81,7 @@ pub enum AstQueryEntry<'ast> {
     DefineStmt(&'ast DefineStmt<'ast>),
     AssignStmt(&'ast AssignStmt<'ast>),
     GroupExpr(&'ast GroupExpr<'ast>),
+    CallExpr(&'ast CallExpr<'ast>),
     IntegerExpr(&'ast IntegerExpr),
     BoolExpr(&'ast BoolExpr),
     IdentNode(&'ast IdentNode),

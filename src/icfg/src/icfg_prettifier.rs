@@ -6,7 +6,7 @@ use std::fmt::{ Display, Write };
 const INDENTATION: usize = 4;
 
 pub struct IcfgPrettifier<'b> {
-    icfg: &'b Icfg,
+    icfg: &'b Icfg<'b>,
     buffer: String,
 }
 
@@ -28,6 +28,9 @@ impl<'b> IcfgPrettifier<'b> {
         let mut temp_buffer = String::with_capacity(8);
         (|| -> Result<(), std::fmt::Error> {
             match place {
+                // PlaceKind::GlobalMemId(global_mem_id) => {
+                //     write!(temp_buffer, "{}", cfg.get_global_mem(*global_mem_id))
+                // }
                 PlaceKind::LocalMemId(local_mem_id) => {
                     write!(temp_buffer, "{}", cfg.get_local_mem(*local_mem_id))
                 }

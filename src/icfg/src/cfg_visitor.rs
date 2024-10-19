@@ -6,6 +6,7 @@ use crate::{
     BranchCondNode,
     BranchNode,
     ByteAccessNode,
+    CallNode,
     Cfg,
     IndexNode,
     LoadNode,
@@ -13,6 +14,7 @@ use crate::{
     Node,
     NodeKind,
     ResultMem,
+    ReturnNode,
     StoreNode,
     TempId,
 };
@@ -105,6 +107,16 @@ pub trait CfgVisitor: Sized {
     ) -> Self::Result {
         Self::default_result()
     }
+
+    #[allow(unused_variables)]
+    fn visit_return_node(&mut self, return_node: &ReturnNode, cfg: &Cfg) -> Self::Result {
+        Self::default_result()
+    }
+
+    #[allow(unused_variables)]
+    fn visit_call_node(&mut self, call_node: &CallNode, cfg: &Cfg) -> Self::Result {
+        Self::default_result()
+    }
 }
 
 pub fn walk_cfg<'ctx, V>(visitor: &mut V, cfg: &Cfg) -> V::Result where V: CfgVisitor {
@@ -168,5 +180,7 @@ pub fn walk_node<'ctx, V>(visitor: &mut V, node: &Node, cfg: &Cfg) -> V::Result 
         NodeKind::IndexNode(index_node) => visitor.visit_index_node(index_node, cfg),
         NodeKind::ByteAccessNode(byte_access_node) =>
             visitor.visit_byte_access_node(byte_access_node, cfg),
+        NodeKind::ReturnNode(return_node) => visitor.visit_return_node(return_node, cfg),
+        NodeKind::CallNode(call_node) => visitor.visit_call_node(call_node, cfg),
     }
 }

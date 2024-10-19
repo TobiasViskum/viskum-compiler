@@ -1,6 +1,8 @@
 use std::fmt::Display;
 
+use derive_new::new;
 use fxhash::FxHashMap;
+use span::Span;
 
 use crate::{ Symbol, Ty };
 
@@ -60,6 +62,12 @@ pub struct DefId {
     pub node_id: NodeId,
 }
 
+impl Display for DefId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "@{}{}", self.symbol.get(), self.node_id.0)
+    }
+}
+
 impl DefId {
     pub fn new(symbol: Symbol, node_id: NodeId) -> Self {
         Self { symbol, node_id }
@@ -104,12 +112,12 @@ pub enum Adt<'res> {
 
 #[derive(Debug, Hash, Eq, PartialEq, Clone, Copy)]
 pub struct FnSig {
-    pub args: &'static [(DefId, Ty)],
+    pub args: &'static [Ty],
     pub ret_ty: &'static Ty,
 }
 
 impl FnSig {
-    pub fn new(args: &'static [(DefId, Ty)], ret_ty: &'static Ty) -> Self {
+    pub fn new(args: &'static [Ty], ret_ty: &'static Ty) -> Self {
         Self { args, ret_ty }
     }
 }
@@ -139,6 +147,7 @@ pub struct ResolvedInformation<'res> {
     pub node_id_to_ty: NodeIdToTy,
     pub node_id_to_def_id: NodeIdToDefId,
     pub def_id_to_name_binding: DefIdToNameBinding<'res>,
+    pub def_id_to_global_mem_id: FxHashMap<DefId, GlobalMemId>,
 }
 
 impl<'res> ResolvedInformation<'res> {
@@ -153,10 +162,114 @@ impl<'res> ResolvedInformation<'res> {
     pub fn get_name_binding_from_def_id(&self, def_id: &DefId) -> NameBinding<'res> {
         *self.def_id_to_name_binding.get(def_id).expect("Expected name to be binded to def id")
     }
+
+    pub fn get_global_mem_id_from_def_id(&self, def_id: &DefId) -> GlobalMemId {
+        *self.def_id_to_global_mem_id
+            .get(def_id)
+            .expect("Expected global mem to be binded to def id")
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum CfgFnKind {
     Main,
     Fn(DefId),
+}
+
+#[derive(Hash, Eq, PartialEq, Debug, Clone, Copy)]
+pub struct GlobalMemId(pub u32);
+
+impl Display for GlobalMemId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "@{}", self.0)
+    }
+}
+
+#[derive(Hash, Eq, PartialEq, Debug, Clone, Copy)]
+pub struct LocalMemId(pub u32);
+
+impl Display for LocalMemId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+#[derive(Hash, Eq, PartialEq, Debug, Clone, Copy)]
+pub struct ResultMemId(pub u32);
+
+impl Display for ResultMemId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "r{}", self.0)
+    }
+}
+
+#[derive(Hash, Eq, PartialEq, Debug, Clone, Copy)]
+pub struct TempId(pub u32);
+
+impl Display for TempId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "_{}", self.0)
+    }
+}
+
+#[derive(Debug, Clone, Copy, new)]
+pub struct GlobalMem {
+    pub global_mem_id: GlobalMemId,
+    pub def_id: DefId,
+    pub span: Span,
+    pub ty: Ty,
+}
+
+impl Display for GlobalMem {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "@{}", self.def_id.symbol.get())
+    }
+}
+
+/// Implement `requires_drop` for when heap objects is implemented
+#[derive(Debug, Clone, Copy, new)]
+pub struct LocalMem {
+    pub local_mem_id: LocalMemId,
+    pub symbol: Symbol,
+    pub span: Span,
+    pub ty: Ty,
+    pub mutability: Mutability,
+}
+
+impl Display for LocalMem {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}{}", self.symbol.get(), get_subscript(self.local_mem_id.0))
+    }
+}
+
+#[derive(Debug, Clone, Copy, new)]
+pub struct ResultMem {
+    pub result_mem_id: ResultMemId,
+    pub ty: Ty,
+}
+
+impl Display for ResultMem {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.result_mem_id)
+    }
+}
+fn get_subscript(mem: u32) -> String {
+    let mut subscript = String::new();
+    for char in mem.to_string().chars() {
+        subscript += match char {
+            '0' => "₀",
+            '1' => "₁",
+            '2' => "₂",
+            '3' => "₃",
+            '4' => "₄",
+            '5' => "₅",
+            '6' => "₆",
+            '7' => "₇",
+            '8' => "₈",
+            '9' => "₉",
+            _ => unreachable!(),
+        };
+    }
+
+    subscript
 }

@@ -4,6 +4,7 @@ use ast::{
     BinaryExpr,
     BlockExpr,
     BoolExpr,
+    CallExpr,
     ConstExpr,
     DefineStmt,
     Expr,
@@ -157,6 +158,21 @@ impl<'ast> ExprBuilder<'ast> {
         self.final_stmt = Some(Stmt::AssignStmt(assign_stmt));
     }
 
+    pub fn emit_call_expr(&mut self, parser_handle: &mut impl ParserHandle, args: Vec<Expr<'ast>>) {
+        let callee = self.exprs.pop().expect("TODO: Error handling");
+        let args = self.ast_arena.alloc_vec(args);
+
+        let call_expr = self.ast_arena.alloc_expr_or_stmt(
+            CallExpr::new(callee, args, parser_handle.get_ast_node_id())
+        );
+
+        let expr = Expr::ExprWithoutBlock(
+            ExprWithoutBlock::ValueExpr(ValueExpr::CallExpr(call_expr))
+        );
+
+        self.exprs.push(expr);
+    }
+
     pub fn emit_loop_expr(&mut self, loop_expr: &'ast LoopExpr<'ast>) {
         let expr = Expr::ExprWithBlock(ExprWithBlock::LoopExpr(loop_expr));
         self.exprs.push(expr);
@@ -276,6 +292,7 @@ impl<'ast> ExprBuilder<'ast> {
                     ExprWithoutBlock::ValueExpr(expr) => {
                         match expr {
                             ValueExpr::BinaryExpr(_) => None,
+                            ValueExpr::CallExpr(_) => None,
                             ValueExpr::ConstExpr(_) => None,
                             ValueExpr::GroupExpr(_) => None,
                             ValueExpr::StructExpr(_) => None,
@@ -302,6 +319,7 @@ impl<'ast> ExprBuilder<'ast> {
                             ValueExpr::BinaryExpr(_) => None,
                             ValueExpr::ConstExpr(_) => None,
                             ValueExpr::GroupExpr(_) => None,
+                            ValueExpr::CallExpr(_) => None,
                             ValueExpr::StructExpr(_) => None,
                             ValueExpr::TupleExpr(tuple_expr) =>
                                 todo!("As place expr: {:#?}", tuple_expr),

@@ -7,16 +7,29 @@ use icfg::{
     walk_local_mems,
     walk_result_mems,
     BasicBlockId,
+    CallNode,
     Cfg,
     CfgVisitor,
     Const,
     Icfg,
     Operand,
     PlaceKind,
+    ReturnNode,
 };
 use op::{ ArithmeticOp, BinaryOp, ComparisonOp };
-use ir::{ CfgFnKind, GetTyAttr, PrimTy, ResolvedInformation, Ty };
-use std::{ fmt::Write, fs::File, process::Command };
+use ir::{
+    CfgFnKind,
+    DefId,
+    GetTyAttr,
+    LocalMem,
+    PrimTy,
+    ResolvedInformation,
+    ResultMem,
+    TempId,
+    Ty,
+    VOID_TY,
+};
+use std::{ fmt::{ Display, Write }, fs::File, process::Command };
 
 const INDENTATION: usize = 4;
 
@@ -24,7 +37,7 @@ const INDENTATION: usize = 4;
 
 /// Used to allocate places (e.g. results of operations, variables, etc.) before the actual code gen
 pub(crate) struct CodeGenUnitHelper<'a> {
-    cfg: &'a Cfg,
+    cfg: &'a Cfg<'a>,
     resolved_information: &'a ResolvedInformation<'a>,
     next_ssa_id: usize,
     place_to_ssa_id: FxHashMap<PlaceKind, usize>,
@@ -74,17 +87,17 @@ impl<'a> CfgVisitor for CodeGenUnitHelper<'a> {
         walk_basic_block(self, basic_block, cfg)
     }
 
-    fn visit_arg(&mut self, arg: &(icfg::TempId, Ty)) -> Self::Result {
+    fn visit_arg(&mut self, arg: &(TempId, Ty)) -> Self::Result {
         let next_ssa_id = self.get_next_ssa_id();
         self.place_to_ssa_id.insert(PlaceKind::TempId(arg.0), next_ssa_id);
     }
 
-    fn visit_local_mem(&mut self, local_mem: &icfg::LocalMem) -> Self::Result {
+    fn visit_local_mem(&mut self, local_mem: &LocalMem) -> Self::Result {
         let next_ssa_id = self.get_next_ssa_id();
         self.place_to_ssa_id.insert(PlaceKind::LocalMemId(local_mem.local_mem_id), next_ssa_id);
     }
 
-    fn visit_result_mem(&mut self, result_mem: &icfg::ResultMem) -> Self::Result {
+    fn visit_result_mem(&mut self, result_mem: &ResultMem) -> Self::Result {
         let next_ssa_id = self.get_next_ssa_id();
         self.place_to_ssa_id.insert(PlaceKind::ResultMemId(result_mem.result_mem_id), next_ssa_id);
     }
@@ -112,10 +125,29 @@ impl<'a> CfgVisitor for CodeGenUnitHelper<'a> {
         let next_ssa_id = self.get_next_ssa_id();
         self.place_to_ssa_id.insert(byte_access_node.result_place, next_ssa_id);
     }
+
+    fn visit_call_node(&mut self, call_node: &CallNode, cfg: &Cfg) -> Self::Result {
+        let next_ssa_id = self.get_next_ssa_id();
+        self.place_to_ssa_id.insert(PlaceKind::TempId(call_node.result_place), next_ssa_id);
+    }
+}
+
+pub enum LLVMSSA {
+    SSAId(usize),
+    Global(DefId),
+}
+
+impl Display for LLVMSSA {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LLVMSSA::SSAId(ssa_id) => write!(f, "%{}", ssa_id),
+            LLVMSSA::Global(def_id) => write!(f, "{}", def_id),
+        }
+    }
 }
 
 pub(crate) struct CodeGenUnit<'a> {
-    cfg: &'a Cfg,
+    cfg: &'a Cfg<'a>,
     resolved_information: &'a ResolvedInformation<'a>,
     buffer: String,
     place_to_ssa_id: FxHashMap<PlaceKind, usize>,
@@ -143,8 +175,15 @@ impl<'a> CodeGenUnit<'a> {
         writeln!(buffer, "{}", self.buffer).expect(err_msg)
     }
 
-    pub(crate) fn get_ssa_id_from_place(&self, place: &PlaceKind) -> usize {
-        *self.place_to_ssa_id.get(place).expect("Expected place")
+    pub(crate) fn get_ssa_id_from_place(&self, place: &PlaceKind) -> LLVMSSA {
+        match place {
+            // PlaceKind::GlobalMemId(global_mem_id) => {
+            //     let borrow = self.cfg.global_mems.borrow();
+            //     let global_mem = borrow.get(global_mem_id.0 as usize).expect("Expected global mem");
+            //     LLVMSSA::Global(global_mem.def_id)
+            // }
+            _ => LLVMSSA::SSAId(*self.place_to_ssa_id.get(place).expect("Expected place")),
+        }
     }
 
     pub(crate) fn get_bb_id(&self, bb_id: &BasicBlockId) -> usize {
@@ -169,22 +208,22 @@ impl<'a> CodeGenUnit<'a> {
                 let ty_attr = ty.get_ty_attr(self.resolved_information);
                 format!("[{} x i8]", ty_attr.size_bytes)
             }
-            Ty::FnSig(_) => { todo!("Yay I got this far") }
-            Ty::FnDef(_) => {
-                todo!("Yay I got this far (pretty much the same functionality as above, I think)")
-            }
+            Ty::FnSig(_) => "ptr".to_string(),
+            Ty::FnDef(_) => "ptr".to_string(),
 
-            Ty::Unkown => panic!("Unkown type (should not be this far in compilation)"),
+            t @ (Ty::Unkown | Ty::Never) =>
+                panic!("{} type (should not be this far in compilation)", t),
         }
     }
 
     pub(crate) fn get_llvm_operand(&self, operand: &Operand) -> String {
         let string = match &operand {
             Operand::TempId(place) => {
-                format!("%{}", self.get_ssa_id_from_place(&PlaceKind::TempId(*place)))
+                format!("{}", self.get_ssa_id_from_place(&PlaceKind::TempId(*place)))
             }
             Operand::Const(const_val) => {
                 match const_val {
+                    Const::FnPtr(def_id) => format!("{}", def_id),
                     Const::Bool(bool) =>
                         (
                             match bool {
@@ -212,18 +251,12 @@ impl<'a> CfgVisitor for CodeGenUnit<'a> {
         match cfg.cfg_fn_kind {
             CfgFnKind::Main => writeln!(self.buffer, "define i32 @main() {{")?,
             CfgFnKind::Fn(def_id) => {
-                write!(
-                    self.buffer,
-                    "define {} @{}{}(",
-                    self.get_llvm_ty(cfg.ret_ty),
-                    def_id.symbol.get(),
-                    def_id.node_id.0
-                )?;
+                write!(self.buffer, "define {} {}(", self.get_llvm_ty(cfg.ret_ty), def_id)?;
 
                 for (i, (temp_id, arg_ty)) in cfg.args.iter().enumerate() {
                     write!(
                         self.buffer,
-                        "{} noundef %{}",
+                        "{} noundef {}",
                         self.get_llvm_ty(*arg_ty),
                         self.get_ssa_id_from_place(&PlaceKind::TempId(*temp_id))
                     )?;
@@ -249,18 +282,20 @@ impl<'a> CfgVisitor for CodeGenUnit<'a> {
             writeln!(self.buffer, "{}ret i32 0", " ".repeat(INDENTATION))?;
         } else if cfg.ret_ty.is_void() {
             writeln!(self.buffer, "{}ret void", " ".repeat(INDENTATION))?;
+        } else {
+            writeln!(self.buffer, "{}unreachable", " ".repeat(INDENTATION))?;
         }
         writeln!(self.buffer, "}}")
     }
 
-    fn visit_local_mem(&mut self, local_mem: &icfg::LocalMem) -> Self::Result {
+    fn visit_local_mem(&mut self, local_mem: &LocalMem) -> Self::Result {
         let ssa_id = self.get_ssa_id_from_place(&PlaceKind::LocalMemId(local_mem.local_mem_id));
 
         let ty_attr = local_mem.ty.get_ty_attr(self.resolved_information);
 
         writeln!(
             self.buffer,
-            "{}%{} = alloca [{} x i8], align {}",
+            "{}{} = alloca [{} x i8], align {}",
             " ".repeat(INDENTATION),
             ssa_id,
             ty_attr.size_bytes,
@@ -268,14 +303,14 @@ impl<'a> CfgVisitor for CodeGenUnit<'a> {
         )
     }
 
-    fn visit_result_mem(&mut self, result_mem: &icfg::ResultMem) -> Self::Result {
+    fn visit_result_mem(&mut self, result_mem: &ResultMem) -> Self::Result {
         let ssa_id = self.get_ssa_id_from_place(&PlaceKind::ResultMemId(result_mem.result_mem_id));
 
         let ty_attr = result_mem.ty.get_ty_attr(self.resolved_information);
 
         writeln!(
             self.buffer,
-            "{}%{} = alloca [{} x i8], align {}",
+            "{}{} = alloca [{} x i8], align {}",
             " ".repeat(INDENTATION),
             ssa_id,
             ty_attr.size_bytes,
@@ -300,7 +335,7 @@ impl<'a> CfgVisitor for CodeGenUnit<'a> {
 
         writeln!(
             self.buffer,
-            "{}store {} {}, ptr %{}",
+            "{}store {} {}, ptr {}",
             " ".repeat(INDENTATION),
             self.get_llvm_ty(store_node.op_ty),
             val,
@@ -314,7 +349,7 @@ impl<'a> CfgVisitor for CodeGenUnit<'a> {
 
         writeln!(
             self.buffer,
-            "{}%{} = getelementptr inbounds {}, ptr %{}, i64 0, i64 {}",
+            "{}{} = getelementptr inbounds {}, ptr {}, i64 0, i64 {}",
             " ".repeat(INDENTATION),
             temp_id,
             self.get_llvm_ty(index_node.place_ty),
@@ -333,7 +368,7 @@ impl<'a> CfgVisitor for CodeGenUnit<'a> {
 
         writeln!(
             self.buffer,
-            "{}%{} = getelementptr inbounds i8, ptr %{}, i64 {}",
+            "{}{} = getelementptr inbounds i8, ptr {}, i64 {}",
             " ".repeat(INDENTATION),
             temp_id,
             array_id,
@@ -365,7 +400,7 @@ impl<'a> CfgVisitor for CodeGenUnit<'a> {
         let var_place = self.get_ssa_id_from_place(&load_node.load_place);
         writeln!(
             self.buffer,
-            "{}%{} = load {}, ptr %{}",
+            "{}{} = load {}, ptr {}",
             " ".repeat(INDENTATION),
             ssa_id,
             self.get_llvm_ty(load_node.load_ty),
@@ -394,7 +429,7 @@ impl<'a> CfgVisitor for CodeGenUnit<'a> {
 
         writeln!(
             self.buffer,
-            "{}%{} = {} {} {}, {}",
+            "{}{} = {} {} {}, {}",
             " ".repeat(INDENTATION),
             ssa_id,
             op_kw,
@@ -403,10 +438,61 @@ impl<'a> CfgVisitor for CodeGenUnit<'a> {
             rhs_op
         )
     }
+
+    fn visit_return_node(&mut self, return_node: &ReturnNode, cfg: &Cfg) -> Self::Result {
+        match return_node.ret_ty {
+            VOID_TY => writeln!(self.buffer, "{}ret void", " ".repeat(INDENTATION)),
+            ty => {
+                let return_operand = self.get_llvm_operand(&return_node.ret_val);
+                writeln!(
+                    self.buffer,
+                    "{}ret {} {}",
+                    " ".repeat(INDENTATION),
+                    self.get_llvm_ty(ty),
+                    return_operand
+                )
+            }
+        }
+    }
+
+    fn visit_call_node(&mut self, call_node: &CallNode, cfg: &Cfg) -> Self::Result {
+        let ssa_id = self.get_ssa_id_from_place(&PlaceKind::TempId(call_node.result_place));
+        let callee = self.get_llvm_operand(&call_node.callee);
+
+        write!(
+            self.buffer,
+            "{}{} = call {} ",
+            " ".repeat(INDENTATION),
+            ssa_id,
+            self.get_llvm_ty(call_node.ret_ty)
+        )?;
+
+        write!(self.buffer, "(")?;
+        for (i, arg_ty) in call_node.args_ty.iter().enumerate() {
+            write!(self.buffer, "{}", self.get_llvm_ty(*arg_ty))?;
+            if i != call_node.args_ty.len() - 1 {
+                write!(self.buffer, ", ")?;
+            }
+        }
+        write!(self.buffer, ")")?;
+
+        write!(self.buffer, " {}(", callee)?;
+
+        for (i, arg) in call_node.args.iter().enumerate() {
+            let ty = call_node.args_ty[i];
+            let arg_str = self.get_llvm_operand(arg);
+            write!(self.buffer, "{} noundef {}", self.get_llvm_ty(ty), arg_str)?;
+            if i != call_node.args.len() - 1 {
+                write!(self.buffer, ", ")?;
+            }
+        }
+
+        writeln!(self.buffer, ")")
+    }
 }
 
 pub struct CodeGen<'icfg> {
-    icfg: &'icfg Icfg,
+    icfg: &'icfg Icfg<'icfg>,
 }
 
 impl<'icfg> CodeGen<'icfg> {

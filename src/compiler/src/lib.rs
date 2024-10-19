@@ -1,9 +1,11 @@
-use ast::{ AstArena, AstPrettifier };
+use std::cell::RefCell;
+
+use ast::AstArena;
 use bumpalo::Bump;
 use codegen::CodeGen;
-use icfg::{ Icfg, IcfgPrettifier };
+use icfg::Icfg;
 use icfg_builder::IcfgBuilder;
-use ir::ResolvedInformation;
+use ir::{ GlobalMem, ResolvedInformation };
 use parser::Parser;
 use resolver::Resolver;
 
@@ -18,7 +20,8 @@ impl Compiler {
         let now = std::time::Instant::now();
 
         let arena = Bump::new();
-        let (icfg, resolved_information) = self.build_to_icfg(&arena);
+        let global_mems = RefCell::new(Vec::new());
+        let (icfg, resolved_information) = self.build_to_icfg(&arena, &global_mems);
 
         // IcfgPrettifier::new(&icfg).print_icfg();
 
@@ -29,7 +32,11 @@ impl Compiler {
         println!("LLVM compilation took: {:?}", now.elapsed());
     }
 
-    fn build_to_icfg<'a>(&self, arena: &'a Bump) -> (Icfg, ResolvedInformation<'a>) {
+    fn build_to_icfg<'a>(
+        &self,
+        arena: &'a Bump,
+        global_mems: &'a RefCell<Vec<GlobalMem>>
+    ) -> (Icfg<'a>, ResolvedInformation<'a>) {
         let file_content = Self::get_file_content();
         let ast_arena = AstArena::new();
 
@@ -39,8 +46,11 @@ impl Compiler {
             let (mut resolver, ast) = Resolver::from_ast(
                 &file_content,
                 parser.parse_into_ast(),
-                &arena
+                &arena,
+                global_mems
             );
+
+            // AstPrettifier::new(&ast, &file_content, None).print_ast();
 
             let resolved_ast = resolver.resolve_ast(ast);
             let type_checked_ast = resolver.type_check_ast(resolved_ast);
@@ -54,7 +64,7 @@ impl Compiler {
         //     Some(&resolved_information.node_id_to_ty)
         // ).print_ast();
 
-        let icfg_builder = IcfgBuilder::new(ast, &resolved.1, &file_content);
+        let icfg_builder = IcfgBuilder::new(ast, &resolved.1, global_mems, &file_content, arena);
         let icfg = icfg_builder.build(resolved.0);
         (icfg, resolved.1)
     }

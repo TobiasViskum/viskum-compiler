@@ -1,5 +1,5 @@
 use fxhash::FxHashMap;
-use ir::{ NodeId, Ty };
+use ir::{ NodeId, Symbol, Ty };
 
 use crate::{
     ast_state::AstState,
@@ -9,6 +9,7 @@ use crate::{
     IdentNode,
     IfFalseBranchExpr,
     Stmt,
+    Typing,
 };
 use std::fmt::Write;
 
@@ -54,11 +55,179 @@ impl<'ast, T> AstPrettifier<'ast, T> where T: AstState {
     }
 }
 
+fn write_typing<'ast>(buffer: &mut String, src: &str, typing: &Typing<'ast>) {
+    match typing {
+        Typing::Ident(span) =>
+            write!(buffer, "{}", Symbol::new(&src[span.get_byte_range()]).get()).expect(
+                "Unexpected write error"
+            ),
+        Typing::Tuple(typings) => {
+            write!(buffer, "(").expect("Unexpected write error");
+            for (i, typing) in typings.iter().enumerate() {
+                write_typing(buffer, src, typing);
+                if i < typings.len() - 1 {
+                    write!(buffer, ", ").expect("Unexpected write error");
+                }
+            }
+            write!(buffer, ")").expect("Unexpected write error");
+        }
+        Typing::Fn(args_typing, ret_typing) => {
+            write!(buffer, "fn(").expect("Unexpected write error");
+
+            for (i, typing) in args_typing.iter().enumerate() {
+                write_typing(buffer, src, typing);
+                if i < args_typing.len() - 1 {
+                    write!(buffer, ", ").expect("Unexpected write error");
+                }
+            }
+
+            write!(buffer, ")").expect("Unexpected write error");
+
+            if let Some(ret_typing) = ret_typing {
+                write!(buffer, " ").expect("Unexpected write error");
+                write_typing(buffer, src, ret_typing);
+            }
+        }
+    }
+}
+
 impl<'ast, T> Visitor<'ast> for AstPrettifier<'ast, T> where T: AstState {
     type Result = Result<(), std::fmt::Error>;
 
     fn default_result() -> Self::Result {
         Ok(())
+    }
+
+    fn visit_struct_expr(&mut self, struct_expr: &'ast crate::StructExpr<'ast>) -> Self::Result {
+        write!(
+            self.buffer,
+            "{} {{ ",
+            Symbol::new(&self.src[struct_expr.ident_node.span.get_byte_range()]).get()
+        )?;
+
+        for (i, field) in struct_expr.field_initializations.iter().enumerate() {
+            write!(
+                self.buffer,
+                "{}: ",
+                Symbol::new(&self.src[field.ident.span.get_byte_range()]).get()
+            )?;
+            self.visit_expr(field.value)?;
+
+            if i < struct_expr.field_initializations.len() - 1 {
+                write!(self.buffer, ", ")?;
+            }
+        }
+
+        write!(self.buffer, " }}")?;
+
+        Self::default_result()
+    }
+
+    fn visit_tuple_expr(&mut self, tuple_expr: &'ast crate::TupleExpr<'ast>) -> Self::Result {
+        write!(self.buffer, "(")?;
+
+        for (i, expr) in tuple_expr.fields.iter().enumerate() {
+            self.visit_expr(*expr)?;
+
+            if i < tuple_expr.fields.len() - 1 {
+                write!(self.buffer, ", ")?;
+            }
+        }
+
+        write!(self.buffer, ")")?;
+
+        Self::default_result()
+    }
+
+    fn visit_typedef_item(&mut self, typedef_item: &'ast crate::TypedefItem<'ast>) -> Self::Result {
+        write!(
+            self.buffer,
+            "{}typedef {} ",
+            self.get_indentation(),
+            Symbol::new(&self.src[typedef_item.ident_node.span.get_byte_range()]).get()
+        )?;
+
+        write_typing(&mut self.buffer, self.src, &typedef_item.type_expr);
+
+        write!(self.buffer, "\n")?;
+
+        Self::default_result()
+    }
+
+    fn visit_struct_item(&mut self, struct_item: &'ast crate::StructItem<'ast>) -> Self::Result {
+        write!(
+            self.buffer,
+            "{}struct {} {{\n",
+            self.get_indentation(),
+            Symbol::new(&self.src[struct_item.ident_node.span.get_byte_range()]).get()
+        )?;
+
+        self.increment_scope_depth();
+
+        for field in struct_item.field_declarations.iter() {
+            write!(self.buffer, "{}", self.get_indentation())?;
+
+            write!(
+                self.buffer,
+                "{} ",
+                Symbol::new(&self.src[field.ident.span.get_byte_range()]).get()
+            )?;
+
+            write_typing(&mut self.buffer, self.src, &field.type_expr);
+
+            write!(self.buffer, ",\n")?;
+        }
+
+        self.decrement_scope_depth();
+
+        write!(self.buffer, "{}}}\n", self.get_indentation())?;
+
+        Self::default_result()
+    }
+
+    fn visit_fn_item(&mut self, fn_item: &'ast crate::FnItem<'ast>) -> Self::Result {
+        write!(
+            self.buffer,
+            "{}fn {}(",
+            self.get_indentation(),
+            Symbol::new(&self.src[fn_item.ident_node.span.get_byte_range()]).get()
+        )?;
+
+        for (i, arg) in fn_item.args.iter().enumerate() {
+            write!(
+                self.buffer,
+                "{} ",
+                Symbol::new(&self.src[arg.ident.span.get_byte_range()]).get()
+            )?;
+
+            write_typing(&mut self.buffer, self.src, &arg.type_expr);
+
+            if i < fn_item.args.len() - 1 {
+                write!(self.buffer, ", ")?;
+            }
+        }
+
+        write!(self.buffer, ") {{\n")?;
+
+        self.increment_scope_depth();
+        self.visit_stmts(fn_item.body)?;
+        self.decrement_scope_depth();
+
+        write!(self.buffer, "{}}}\n", self.get_indentation())?;
+
+        Self::default_result()
+    }
+
+    fn visit_return_expr(&mut self, return_expr: &'ast crate::ReturnExpr) -> Self::Result {
+        write!(self.buffer, "ret")?;
+        if let Some(expr) = return_expr.value {
+            write!(self.buffer, " ")?;
+            self.visit_expr(expr)?;
+        }
+
+        write!(self.buffer, "\n")?;
+
+        Self::default_result()
     }
 
     fn visit_def_stmt(&mut self, def_stmt: &'ast crate::DefineStmt<'ast>) -> Self::Result {
@@ -90,6 +259,21 @@ impl<'ast, T> Visitor<'ast> for AstPrettifier<'ast, T> where T: AstState {
             }
             _ => walk_stmt(self, stmt),
         }
+    }
+
+    fn visit_tuple_field_expr(
+        &mut self,
+        tuple_field_expr: &'ast crate::TupleFieldExpr<'ast>
+    ) -> Self::Result {
+        self.visit_expr(tuple_field_expr.lhs)?;
+        write!(self.buffer, ".")?;
+        self.visit_interger_expr(tuple_field_expr.rhs)
+    }
+
+    fn visit_field_expr(&mut self, field_expr: &'ast crate::FieldExpr<'ast>) -> Self::Result {
+        self.visit_expr(field_expr.lhs)?;
+        write!(self.buffer, ".")?;
+        self.visit_ident_expr(field_expr.rhs)
     }
 
     fn visit_group_expr(&mut self, group_expr: &'ast crate::GroupExpr<'ast>) -> Self::Result {

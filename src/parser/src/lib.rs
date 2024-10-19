@@ -207,6 +207,23 @@ impl<'a> Parser<'a> {
     }
 
     pub(crate) fn parse_typing(&mut self) -> Option<Typing<'a>> {
+        fn parse_many_typings<'a>(
+            parser: &mut Parser<'a>,
+            mut tuple_typing: Vec<Typing<'a>>
+        ) -> &'a [Typing<'a>] {
+            while !parser.is_eof() && !parser.is_curr_kind(TokenKind::RightParen) {
+                let typing = parser.parse_typing().expect("Expected typing");
+                tuple_typing.push(typing);
+                if parser.is_curr_kind(TokenKind::Comma) {
+                    parser.advance();
+                    continue;
+                }
+                break;
+            }
+            parser.consume(TokenKind::RightParen, "Expected `)` after tuple typing");
+            parser.ast_arena.alloc_vec(tuple_typing)
+        }
+
         if self.is_curr_kind(TokenKind::Ident) {
             let ident = self.consume_ident_span("Expected ident");
             Some(Typing::Ident(ident))
@@ -221,21 +238,18 @@ impl<'a> Parser<'a> {
                 }
                 TokenKind::Comma => {
                     self.advance();
-                    let mut tuple_typing = vec![typing];
-                    while !self.is_eof() && !self.is_curr_kind(TokenKind::RightParen) {
-                        let typing = self.parse_typing().expect("Expected typing");
-                        tuple_typing.push(typing);
-                        if self.is_curr_kind(TokenKind::Comma) {
-                            self.advance();
-                            continue;
-                        }
-                        break;
-                    }
-                    self.consume(TokenKind::RightParen, "Expected `)` after tuple typing");
-                    Some(Typing::Tuple(self.ast_arena.alloc_vec(tuple_typing)))
+                    let tuple_typing = parse_many_typings(self, vec![typing]);
+                    Some(Typing::Tuple(tuple_typing))
                 }
                 t => panic!("Unexpected token in typing: {}", t),
             }
+        } else if self.is_curr_kind(TokenKind::Fn) {
+            self.advance();
+            self.consume(TokenKind::LeftParen, "Expected `(` before function args");
+            let args_typing = parse_many_typings(self, vec![]);
+            let ret_typing = self.parse_typing().map(|x| self.ast_arena.alloc_expr_or_stmt(x));
+
+            Some(Typing::Fn(args_typing, ret_typing))
         } else {
             None
         }
@@ -294,11 +308,7 @@ impl<'a> Parser<'a> {
 
         self.consume(TokenKind::RightParen, "Expected ')' after function args");
 
-        let return_ty = if self.is_curr_kind(TokenKind::Ident) {
-            self.parse_typing()
-        } else {
-            None
-        };
+        let return_ty = self.parse_typing();
 
         self.consume(TokenKind::LeftCurly, "Expected `{` before function body");
 
@@ -403,6 +413,26 @@ impl<'a> Parser<'a> {
         }
 
         expr_builder.emit_grouping_or_tuple_expr(self, exprs)
+    }
+
+    /// Parse rule method: `call`
+    pub(crate) fn call(&mut self, expr_builder: &mut ExprBuilder<'a>) {
+        let mut args = Vec::with_capacity(8);
+        while !self.is_eof() && !self.is_curr_kind(TokenKind::RightParen) {
+            let arg = self.parse_expr_and_take(Precedence::PrecAssign.get_next());
+            args.push(arg);
+
+            if self.is_curr_kind(TokenKind::Comma) {
+                self.advance();
+                continue;
+            }
+
+            break;
+        }
+
+        self.consume(TokenKind::RightParen, "Expected ')' after function call");
+
+        expr_builder.emit_call_expr(self, args);
     }
 
     /// Parse rule method: `ident`
@@ -770,7 +800,7 @@ impl<'a> Parser<'a> {
 
     /*  TOKENKIND        PREFIX                 INFIX                               POSTFIX             */
     /*                   method     prec        method      prec                    method      prec    */
-        LeftParen   = { (grouping   None),      (None       None            ),      (None       None) },
+        LeftParen   = { (grouping   None),      (call       PrecCall        ),      (None       None) },
         RightParen  = { (None       None),      (None       None            ),      (None       None) },
         LeftCurly   = { (None       None),      (struct_expr PrecPrimary            ),      (None       None) },
         RightCurly  = { (None       None),      (None       None            ),      (None       None) },

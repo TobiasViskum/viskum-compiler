@@ -15,3 +15,4 @@ data_structures = { path = "../data_structures" }
 
 # Extern crates
 fxhash = "0.2.1"
+bumpalo = "3.16.0"

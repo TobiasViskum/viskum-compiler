@@ -5,10 +5,19 @@ struct Point {
     y Int,
     z Int,
     data Data,
+    addFn fn(Int, Int) Int,
 }
 
-fn addNoReturn(x Int, y Int) {
-    x + y
+fn iReturnVoid() Void { }
+
+a := 2 + 1
+
+fn addNoReturn(x Int, y Int) Int {
+    ret x + y
+}
+
+fn returnFunction() fn(Int, Int) Int {
+    ret addNoReturn
 }
 
 fn main() {
@@ -21,13 +30,14 @@ fn main() {
 
     abc := if true then 1 else 0 end
 
-    point := Point { z: 5, y: 4, x: 3, data: (9, 4, (true, false, 8)) }
+
+    point := Point { z: 5 + (abc + returnFunction()(2, 3)), y: 4, x: 3, data: (9, 4, (true, false, 8)), addFn: addNoReturn }
 
     boolean := point.data.2.1
 
     tuple := (7, 8)
 
-    a := (2 + 3) * 9 + tuple.1 + point.data.2.2
+    a := (2 + 3) * 9 + tuple.1 + point.data.2.2 + point.addFn(2, 3)
     b := 6 - (1 + a)
 
     k := if boolean then
