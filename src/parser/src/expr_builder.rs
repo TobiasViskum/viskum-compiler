@@ -15,6 +15,7 @@ use ast::{
     GroupExpr,
     IdentNode,
     IfExpr,
+    IfExprKind,
     IntegerExpr,
     LoopExpr,
     Pat,
@@ -65,13 +66,13 @@ impl<'ast> ExprBuilder<'ast> {
         self.exprs.pop()
     }
 
-    pub fn emit_define_stmt(&mut self, parser_handle: &mut impl ParserHandle) {
+    pub fn emit_define_stmt(&mut self, parser_handle: &mut impl ParserHandle<'ast>) {
         let value_expr = self.exprs.pop().expect("TODO: Error handling");
         let pattern_expr = {
             let setter_expr = self.exprs.pop().expect("TODO: Error handling");
-            self.try_as_pattern_expr(setter_expr).expect(
-                "TODO: Error handling (invalid pattern expr)"
-            )
+            parser_handle
+                .try_as_pat(setter_expr)
+                .expect("TODO: Error handling (invalid pattern expr)")
         };
 
         let define_stmt = self.ast_arena.alloc_expr_or_stmt(
@@ -84,7 +85,7 @@ impl<'ast> ExprBuilder<'ast> {
     pub fn emit_field_expr(
         &mut self,
         ident_node: IdentNode,
-        parser_handle: &mut impl ParserHandle
+        parser_handle: &mut impl ParserHandle<'ast>
     ) {
         let field_expr = {
             let lhs = self.exprs.pop().expect("TODO: Error handling");
@@ -105,7 +106,7 @@ impl<'ast> ExprBuilder<'ast> {
     pub fn emit_tuple_field_expr(
         &mut self,
         integer_expr: IntegerExpr,
-        parser_handle: &mut impl ParserHandle
+        parser_handle: &mut impl ParserHandle<'ast>
     ) {
         let tuple_field_expr = {
             let lhs = self.exprs.pop().expect("TODO: Error handling");
@@ -126,13 +127,13 @@ impl<'ast> ExprBuilder<'ast> {
     pub fn emit_struct_expr(
         &mut self,
         initialization_fields: Vec<&'ast FieldInitialization<'ast>>,
-        parser_handle: &mut impl ParserHandle
+        parser_handle: &mut impl ParserHandle<'ast>
     ) {
         let ident_node = {
             let ident_expr = self.exprs.pop().expect("TODO: Error handlings");
-            self.try_as_ident(ident_expr).expect(
-                "TODO: Error handling (expected ident in struct expr)"
-            )
+            parser_handle
+                .try_as_ident(ident_expr)
+                .expect("TODO: Error handling (expected ident in struct expr)")
         };
 
         let struct_expr = {
@@ -150,10 +151,10 @@ impl<'ast> ExprBuilder<'ast> {
         );
     }
 
-    pub fn emit_assign_stmt(&mut self, parser_handle: &mut impl ParserHandle) {
+    pub fn emit_assign_stmt(&mut self, parser_handle: &mut impl ParserHandle<'ast>) {
         let value_expr = self.exprs.pop().expect("TODO: Error handling");
         let setter_expr = self.exprs.pop().expect("TODO: Error handling");
-        let place_expr = self
+        let place_expr = parser_handle
             .try_as_place_expr(setter_expr)
             .expect("TODO: Error handling (invalid pattern expr)");
 
@@ -164,7 +165,11 @@ impl<'ast> ExprBuilder<'ast> {
         self.final_stmt = Some(Stmt::AssignStmt(assign_stmt));
     }
 
-    pub fn emit_call_expr(&mut self, parser_handle: &mut impl ParserHandle, args: Vec<Expr<'ast>>) {
+    pub fn emit_call_expr(
+        &mut self,
+        parser_handle: &mut impl ParserHandle<'ast>,
+        args: Vec<Expr<'ast>>
+    ) {
         let callee = self.exprs.pop().expect("TODO: Error handling");
         let args = self.ast_arena.alloc_vec(args);
 
@@ -184,8 +189,14 @@ impl<'ast> ExprBuilder<'ast> {
         self.exprs.push(expr);
     }
 
-    pub fn emit_if_expr(&mut self, if_expr: &'ast IfExpr<'ast>) {
-        let expr = Expr::ExprWithBlock(ExprWithBlock::IfExpr(if_expr));
+    pub fn emit_if_expr(&mut self, if_expr: IfExprKind<'ast>) {
+        let expr = match if_expr {
+            IfExprKind::IfExpr(if_expr) => Expr::ExprWithBlock(ExprWithBlock::IfExpr(if_expr)),
+            IfExprKind::IfDefExpr(if_let_expr) => {
+                Expr::ExprWithBlock(ExprWithBlock::IfDefExpr(if_let_expr))
+            }
+        };
+
         self.exprs.push(expr);
     }
 
@@ -196,7 +207,7 @@ impl<'ast> ExprBuilder<'ast> {
 
     pub fn emit_grouping_or_tuple_expr(
         &mut self,
-        parser_handle: &mut impl ParserHandle,
+        parser_handle: &mut impl ParserHandle<'ast>,
         exprs: Vec<Expr<'ast>>
     ) {
         assert_eq!(true, exprs.len() > 0, "Expected at least one expr in group (got 0)");
@@ -252,7 +263,7 @@ impl<'ast> ExprBuilder<'ast> {
         self.exprs.push(expr);
     }
 
-    pub fn emit_binary_expr(&mut self, op: BinaryOp, parser_handle: &mut impl ParserHandle) {
+    pub fn emit_binary_expr(&mut self, op: BinaryOp, parser_handle: &mut impl ParserHandle<'ast>) {
         let rhs = self.exprs.pop().expect("TODO: Error handling");
         let lhs = self.exprs.pop().expect("TODO: Error handling");
 
@@ -267,13 +278,13 @@ impl<'ast> ExprBuilder<'ast> {
         self.exprs.push(expr);
     }
 
-    pub fn emit_post_inc_expr(&mut self, parser_handle: &mut impl ParserHandle) {
+    pub fn emit_post_inc_expr(&mut self, parser_handle: &mut impl ParserHandle<'ast>) {
         let expr = self.exprs.pop().expect("TODO: Error handling");
 
         let assign_stmt = Stmt::AssignStmt(
             self.ast_arena.alloc_expr_or_stmt(
                 AssignStmt::new(
-                    self.try_as_place_expr(expr).expect("TODO: Error handling"),
+                    parser_handle.try_as_place_expr(expr).expect("TODO: Error handling"),
                     Expr::ExprWithoutBlock(
                         ExprWithoutBlock::ValueExpr(
                             ValueExpr::BinaryExpr(
@@ -354,87 +365,5 @@ impl<'ast> ExprBuilder<'ast> {
 
     pub fn set_base_prec(&mut self, prec: Precedence) {
         self.base_precedence = prec;
-    }
-
-    fn try_as_pattern_expr(&mut self, expr: Expr<'ast>) -> Option<Pat<'ast>> {
-        match expr {
-            Expr::ExprWithBlock(_) => None,
-            Expr::ExprWithoutBlock(expr) => {
-                match expr {
-                    ExprWithoutBlock::PlaceExpr(expr) => {
-                        match expr {
-                            PlaceExpr::TupleFieldExpr(_) => None,
-                            PlaceExpr::FieldExpr(_) => None,
-                            PlaceExpr::IdentExpr(ident_expr) =>
-                                Some(
-                                    Pat::IdentPat(
-                                        self.ast_arena.alloc_expr_or_stmt(ident_expr.get_copy())
-                                    )
-                                ),
-                        }
-                    }
-                    ExprWithoutBlock::BreakExpr(_) => None,
-                    ExprWithoutBlock::ContinueExpr(_) => None,
-                    ExprWithoutBlock::ReturnExpr(_) => None,
-                    ExprWithoutBlock::ValueExpr(expr) => {
-                        match expr {
-                            ValueExpr::BinaryExpr(_) => None,
-                            ValueExpr::CallExpr(_) => None,
-                            ValueExpr::ConstExpr(_) => None,
-                            ValueExpr::GroupExpr(_) => None,
-                            ValueExpr::StructExpr(_) => None,
-                            ValueExpr::TupleExpr(tuple_expr) =>
-                                todo!("As pattern: {:#?}", tuple_expr),
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    fn try_as_place_expr(&mut self, expr: Expr<'ast>) -> Option<PlaceExpr<'ast>> {
-        match expr {
-            Expr::ExprWithBlock(_) => None,
-            Expr::ExprWithoutBlock(expr) => {
-                match expr {
-                    ExprWithoutBlock::PlaceExpr(expr) => { Some(expr) }
-                    ExprWithoutBlock::BreakExpr(_) => None,
-                    ExprWithoutBlock::ReturnExpr(_) => None,
-                    ExprWithoutBlock::ContinueExpr(_) => None,
-                    ExprWithoutBlock::ValueExpr(expr) => {
-                        match expr {
-                            ValueExpr::BinaryExpr(_) => None,
-                            ValueExpr::ConstExpr(_) => None,
-                            ValueExpr::GroupExpr(_) => None,
-                            ValueExpr::CallExpr(_) => None,
-                            ValueExpr::StructExpr(_) => None,
-                            ValueExpr::TupleExpr(tuple_expr) =>
-                                todo!("As place expr: {:#?}", tuple_expr),
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    fn try_as_ident(&mut self, expr: Expr<'ast>) -> Option<&'ast IdentNode> {
-        match expr {
-            Expr::ExprWithBlock(_) => None,
-            Expr::ExprWithoutBlock(expr) => {
-                match expr {
-                    ExprWithoutBlock::BreakExpr(_) => None,
-                    ExprWithoutBlock::ReturnExpr(_) => None,
-                    ExprWithoutBlock::ContinueExpr(_) => None,
-                    ExprWithoutBlock::ValueExpr(_) => None,
-                    ExprWithoutBlock::PlaceExpr(expr) => {
-                        match expr {
-                            PlaceExpr::IdentExpr(expr) => Some(expr),
-                            PlaceExpr::TupleFieldExpr(_) => None,
-                            PlaceExpr::FieldExpr(_) => None,
-                        }
-                    }
-                }
-            }
-        }
     }
 }

@@ -37,6 +37,7 @@ impl TyCtx {
     }
 }
 
+#[derive(Debug)]
 pub struct TyAttr {
     pub size_bytes: usize,
     pub alignment_bytes: usize,
@@ -52,6 +53,11 @@ pub trait GetTyAttr {
     fn get_ty_attr(&self, resolved_information: &ResolvedInformation) -> TyAttr;
 }
 
+enum Delimiter {
+    Parentheses,
+    CurlyBrackets,
+}
+
 #[derive(Debug, Hash, Eq, PartialEq, Clone, Copy)]
 pub enum Ty {
     /// `(T, K, ...)`
@@ -60,6 +66,10 @@ pub enum Ty {
     FnSig(FnSig),
     /// Reference to a function definition
     FnDef(DefId),
+    // Constructor for a struct or enum
+    // E.g. Option.Some(...) or Point { ... }
+    // `Option` and `Point` are the constructor types
+    AtdConstructer(DefId),
     /// Reference to an algebraic data type definition
     Adt(DefId),
     /// Used internally by the compiler `*Ty`
@@ -68,6 +78,8 @@ pub enum Ty {
     PrimTy(PrimTy),
     /// All code after this point is unreachable
     Never,
+    /// Zero sized type
+    ZeroSized,
     /// If the resulting type of an operation is unkown (error)
     Unkown,
 }
@@ -110,6 +122,7 @@ impl Ty {
                 match name_binding.kind {
                     NameBindingKind::Adt(adt) => {
                         match adt {
+                            Adt::EnumVariant(_, _, ty) => todo!("EnumVariant"),
                             Adt::Struct(fields) => {
                                 let mut expanded_fields = Vec::with_capacity(fields.len());
                                 for (_, ty) in fields.iter() {
@@ -121,6 +134,7 @@ impl Ty {
                                 Ty::Tuple(TyCtx::intern_many_types(expanded_fields))
                             }
                             Adt::Typedef(ty) => ty.get_expanded_ty(def_id_to_name_binding),
+                            Adt::Enum(variants) => { todo!("Enum variants") }
                         }
                     }
                     _ => panic!("Invalid ADT"),
@@ -176,6 +190,23 @@ impl Ty {
         }
     }
 
+    pub fn try_deref_as_adt<'a>(
+        &self,
+        def_id_to_name_binding: &DefIdToNameBinding<'a>
+    ) -> Option<(DefId, Adt<'a>)> {
+        let ty = self.auto_deref();
+        match ty {
+            Ty::Adt(def_id) => {
+                let name_binding = def_id_to_name_binding.get(&def_id).unwrap();
+                match name_binding.kind {
+                    NameBindingKind::Adt(adt) => Some((def_id, adt)),
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
+
     pub fn try_deref_as_struct<'a>(
         &self,
         def_id_to_name_binding: &DefIdToNameBinding<'a>
@@ -216,6 +247,8 @@ impl Ty {
 impl GetTyAttr for Ty {
     fn get_ty_attr(&self, resolved_information: &ResolvedInformation) -> TyAttr {
         match self {
+            Self::AtdConstructer(_) => todo!("Constructer function"),
+            Self::ZeroSized => TyAttr::new(0, 0),
             Self::FnDef(_) => TyAttr::new(8, 8),
             Self::FnSig(_) => TyAttr::new(8, 8),
             Self::Tuple(tuple) => {
@@ -242,6 +275,46 @@ impl GetTyAttr for Ty {
                 let ty_attr = match name_binding.kind {
                     NameBindingKind::Adt(adt) => {
                         match adt {
+                            Adt::EnumVariant(parent_def_id, _, tys) => {
+                                // This is the base size based on only the data inside the enum variant
+                                let mut total_size = 0;
+                                let mut alignment = None;
+
+                                for ty in tys.iter() {
+                                    let ty_attr = ty.get_ty_attr(resolved_information);
+                                    total_size += ty_attr.size_bytes;
+                                    if let Some(alignment) = &mut alignment {
+                                        if ty_attr.alignment_bytes < *alignment {
+                                            *alignment = ty_attr.alignment_bytes;
+                                        }
+                                    } else {
+                                        alignment = Some(ty_attr.alignment_bytes);
+                                    }
+                                }
+
+                                TyAttr::new(total_size, alignment.unwrap_or(0))
+                            }
+                            Adt::Enum(variants) => {
+                                let mut largest_variant_size = 0;
+
+                                for def_id in variants {
+                                    let variant_ty_attr = Ty::Adt(*def_id).get_ty_attr(
+                                        resolved_information
+                                    );
+
+                                    if variant_ty_attr.size_bytes > largest_variant_size {
+                                        largest_variant_size = variant_ty_attr.size_bytes;
+                                    }
+                                }
+
+                                // The size of the enum is the size of the largest variant + 8 bytes for the discriminant
+                                //
+                                // In the future we want to fit the size of the discriminant to the nearst byte
+                                // whilst still having enough space in the discriminant to fit all the variants
+                                let total_size = largest_variant_size + 8;
+
+                                TyAttr::new(total_size, 4)
+                            }
                             Adt::Typedef(ty) => ty.get_ty_attr(resolved_information),
                             Adt::Struct(fields) => {
                                 let mut total_size = 0;
@@ -279,6 +352,8 @@ impl GetTyAttr for Ty {
 impl Display for Ty {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::AtdConstructer(def_id) => write!(f, "{}", def_id.symbol.get()),
+            Self::ZeroSized => write!(f, "ZeroSized"),
             Self::FnDef(def_id) => write!(f, "FnDef({})", def_id.symbol.get()),
             Self::FnSig(_) => write!(f, "FnSig"),
             Self::Ptr(inner) => write!(f, "*{}", inner),
@@ -318,6 +393,7 @@ impl Display for Ty {
 #[derive(Debug, Hash, Eq, PartialEq, Clone, Copy)]
 pub enum PrimTy {
     Int,
+    Int64,
     Bool,
     Void,
 }
@@ -326,6 +402,7 @@ impl GetTyAttr for PrimTy {
     fn get_ty_attr(&self, _: &ResolvedInformation) -> TyAttr {
         match self {
             Self::Int => TyAttr::new(4, 4),
+            Self::Int64 => TyAttr::new(8, 8),
             Self::Bool => TyAttr::new(1, 1),
             Self::Void => TyAttr::new(0, 0),
         }
@@ -336,6 +413,7 @@ impl Display for PrimTy {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Int => write!(f, "Int"),
+            Self::Int64 => write!(f, "Int64"),
             Self::Bool => write!(f, "Bool"),
             Self::Void => write!(f, "Void"),
         }

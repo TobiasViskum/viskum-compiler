@@ -110,6 +110,7 @@ impl<'a> Lexer<'a> {
             "mut" => TokenKind::Mut,
             "class" => TokenKind::Class,
             "struct" => TokenKind::Struct,
+            "enum" => TokenKind::Enum,
             "loop" => TokenKind::Loop,
             "while" => TokenKind::While,
             "if" => TokenKind::If,

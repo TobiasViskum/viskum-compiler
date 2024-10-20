@@ -173,7 +173,7 @@ impl<'ctx, 'ast> Resolver<'ctx, 'ast> where 'ctx: 'ast {
         let type_checked_ast = ast_visitor.visit();
 
         if self.has_errors() {
-            self.exit_if_has(Severity::Fatal);
+            self.exit_if_has(Severity::NoImpact);
         }
 
         self.assert_type_to_all_nodes(&type_checked_ast);
@@ -355,15 +355,7 @@ impl<'ctx, 'ast, T> AstVisitEmitter<'ctx, 'ast, T> for Resolver<'ctx, 'ast> wher
                     }
                 }
             }
-            ResKind::Adt => {
-                for lexical_context in self.lexical_context_stack.iter().rev() {
-                    let lexical_binding = LexicalBinding::new(*lexical_context, symbol, res_kind);
-                    if let Some(def_id) = self.lexical_binding_to_def_id.get(&lexical_binding) {
-                        return Some(*def_id);
-                    }
-                }
-            }
-            ResKind::Fn => {
+            ResKind::Adt | ResKind::Fn => {
                 for lexical_context in self.lexical_context_stack.iter().rev() {
                     let lexical_binding = LexicalBinding::new(*lexical_context, symbol, res_kind);
                     if let Some(def_id) = self.lexical_binding_to_def_id.get(&lexical_binding) {

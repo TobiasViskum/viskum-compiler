@@ -169,6 +169,7 @@ pub enum ItemStmt<'ast> {
     FnItem(&'ast FnItem<'ast>),
     StructItem(&'ast StructItem<'ast>),
     TypedefItem(&'ast TypedefItem<'ast>),
+    EnumItem(&'ast EnumItem<'ast>),
 }
 
 #[derive(Debug, new)]
@@ -192,6 +193,18 @@ pub struct StructItem<'ast> {
     pub ident_node: &'ast IdentNode,
     pub field_declarations: &'ast [&'ast Field<'ast>],
     pub ast_node_id: NodeId,
+}
+
+#[derive(Debug, new)]
+pub struct EnumItem<'ast> {
+    pub ident_node: &'ast IdentNode,
+    pub variants: &'ast [EnumVariant<'ast>],
+    pub ast_node_id: NodeId,
+}
+#[derive(Debug, new)]
+pub struct EnumVariant<'ast> {
+    pub ident_node: &'ast IdentNode,
+    pub enum_data: Option<&'ast [Typing<'ast>]>,
 }
 
 #[derive(Debug, new)]
@@ -232,7 +245,30 @@ pub struct AssignStmt<'ast> {
 
 #[derive(Debug, Clone, Copy)]
 pub enum Pat<'ast> {
+    /// E.g. x in `x := 5`
     IdentPat(&'ast IdentNode),
+    // E.g.  in `Option.Some(x) := val`
+    TuplePat(&'ast TuplePat<'ast>),
+}
+
+#[derive(Debug, new)]
+pub struct TuplePat<'ast> {
+    pub path: Path<'ast>,
+    pub fields: &'ast [Pat<'ast>],
+    pub ast_node_id: NodeId,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum Path<'ast> {
+    PathSegment(&'ast IdentNode),
+    PathField(&'ast PathField<'ast>),
+}
+
+#[derive(Debug, Clone, Copy, new)]
+pub struct PathField<'ast> {
+    pub lhs: Path<'ast>,
+    pub rhs: &'ast IdentNode,
+    pub ast_node_id: NodeId,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -245,7 +281,18 @@ pub enum Expr<'ast> {
 pub enum ExprWithBlock<'ast> {
     BlockExpr(&'ast BlockExpr<'ast>),
     IfExpr(&'ast IfExpr<'ast>),
+    IfDefExpr(&'ast IfDefExpr<'ast>),
     LoopExpr(&'ast LoopExpr<'ast>),
+}
+
+#[derive(Debug, new)]
+pub struct IfDefExpr<'ast> {
+    pub pat: Pat<'ast>,
+    pub rhs: Expr<'ast>,
+    pub true_block: &'ast BlockExpr<'ast>,
+    pub false_block: Option<IfFalseBranchExpr<'ast>>,
+    pub ast_node_id: NodeId,
+    pub span: Span,
 }
 
 #[derive(Debug, new)]
@@ -270,9 +317,15 @@ pub struct IfExpr<'ast> {
 }
 
 #[derive(Debug, Clone, Copy)]
+pub enum IfExprKind<'ast> {
+    IfExpr(&'ast IfExpr<'ast>),
+    IfDefExpr(&'ast IfDefExpr<'ast>),
+}
+
+#[derive(Debug, Clone, Copy)]
 pub enum IfFalseBranchExpr<'ast> {
     ElseExpr(&'ast BlockExpr<'ast>),
-    ElifExpr(&'ast IfExpr<'ast>),
+    IfExprKind(IfExprKind<'ast>),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -401,6 +454,7 @@ pub fn get_node_id_from_expr(expr: Expr) -> NodeId {
             match expr_with_block {
                 ExprWithBlock::BlockExpr(block_expr) => block_expr.ast_node_id,
                 ExprWithBlock::IfExpr(if_expr) => if_expr.ast_node_id,
+                ExprWithBlock::IfDefExpr(if_def_expr) => if_def_expr.ast_node_id,
                 ExprWithBlock::LoopExpr(loop_expr) => loop_expr.ast_node_id,
             }
         }
@@ -443,5 +497,6 @@ pub fn get_node_id_from_value_expr(value_expr: ValueExpr) -> NodeId {
 pub fn get_node_id_from_pattern(pat: Pat) -> NodeId {
     match pat {
         Pat::IdentPat(ident_pat) => ident_pat.ast_node_id,
+        Pat::TuplePat(tuple_pat) => tuple_pat.ast_node_id,
     }
 }

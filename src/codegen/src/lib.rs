@@ -49,7 +49,7 @@ impl<'a> CodeGenUnitHelper<'a> {
         Self {
             cfg,
             resolved_information,
-            next_ssa_id: 1,
+            next_ssa_id: 0,
             place_to_ssa_id: Default::default(),
             basic_block_id_to_ssa_id: Default::default(),
         }
@@ -75,7 +75,9 @@ impl<'a> CfgVisitor for CodeGenUnitHelper<'a> {
 
     fn visit_cfg(&mut self, cfg: &Cfg) -> Self::Result {
         walk_args(self, cfg);
+
         self.next_ssa_id += 1;
+
         walk_local_mems(self, cfg);
         walk_result_mems(self, cfg);
         walk_basic_blocks(self, cfg)
@@ -201,8 +203,9 @@ impl<'a> CodeGenUnit<'a> {
         match &ty {
             Ty::PrimTy(prim_ty) => {
                 match prim_ty {
-                    PrimTy::Bool => "i1".to_string(),
+                    PrimTy::Bool => "i8".to_string(),
                     PrimTy::Int => "i32".to_string(),
+                    PrimTy::Int64 => "i64".to_string(),
                     PrimTy::Void => "void".to_string(),
                 }
             }
@@ -217,8 +220,9 @@ impl<'a> CodeGenUnit<'a> {
             }
             Ty::FnSig(_) => "ptr".to_string(),
             Ty::FnDef(_) => "ptr".to_string(),
+            Ty::AtdConstructer(_) => todo!(),
 
-            t @ (Ty::Unkown | Ty::Never) =>
+            t @ (Ty::Unkown | Ty::Never | Ty::ZeroSized) =>
                 panic!("{} type (should not be this far in compilation)", t),
         }
     }
@@ -521,7 +525,7 @@ impl<'icfg> CodeGen<'icfg> {
         let mut file = File::create(&file_name_with_extension).expect("Error creating file");
         file.write_all(buffer.as_bytes()).expect("Error writing to file");
         Command::new("clang")
-            .arg("-O0")
+            .arg("-O4")
             .arg(&file_name_with_extension)
             .arg("-o")
             .arg(&file_name)

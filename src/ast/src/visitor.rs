@@ -16,6 +16,7 @@ use crate::{
     ConstExpr,
     ContinueExpr,
     DefineStmt,
+    EnumItem,
     Expr,
     ExprWithBlock,
     ExprWithoutBlock,
@@ -23,12 +24,16 @@ use crate::{
     FnItem,
     GroupExpr,
     IdentNode,
+    IfDefExpr,
     IfExpr,
+    IfExprKind,
     IfFalseBranchExpr,
     IntegerExpr,
     ItemStmt,
     LoopExpr,
     Pat,
+    Path,
+    PathField,
     PlaceExpr,
     ReturnExpr,
     Stmt,
@@ -36,6 +41,7 @@ use crate::{
     StructItem,
     TupleExpr,
     TupleFieldExpr,
+    TuplePat,
     TypedefItem,
     ValueExpr,
 };
@@ -55,6 +61,7 @@ pub trait Visitor<'ast>: Sized {
     fn visit_ident_pat(&mut self, ident_node: &'ast IdentNode) -> Self::Result {
         Self::default_result()
     }
+
     #[allow(unused_variables)]
     fn visit_interger_expr(&mut self, interger_expr: &'ast IntegerExpr) -> Self::Result {
         Self::default_result()
@@ -73,17 +80,34 @@ pub trait Visitor<'ast>: Sized {
         Self::default_result()
     }
 
-    fn visit_return_expr(&mut self, return_expr: &'ast ReturnExpr) -> Self::Result {
-        walk_return_expr(self, return_expr)
+    #[allow(unused_variables)]
+    fn visit_path_segment(&mut self, path_segment: &'ast IdentNode) -> Self::Result {
+        Self::default_result()
     }
 
     /* Traversel of enums (not nodes) */
+    fn visit_path_field(&mut self, path_field: &'ast PathField<'ast>) -> Self::Result {
+        walk_path_field(self, path_field)
+    }
+
+    fn visit_tuple_pat(&mut self, tuple_pat: &'ast TuplePat<'ast>) -> Self::Result {
+        walk_tuple_pat(self, tuple_pat)
+    }
+
+    fn visit_path(&mut self, path: Path<'ast>) -> Self::Result {
+        walk_path(self, path)
+    }
+
     fn visit_const_expr(&mut self, const_expr: ConstExpr<'ast>) -> Self::Result {
         walk_const_expr(self, const_expr)
     }
 
     fn visit_pat(&mut self, pat: Pat<'ast>) -> Self::Result {
         walk_pat(self, pat)
+    }
+
+    fn visit_return_expr(&mut self, return_expr: &'ast ReturnExpr) -> Self::Result {
+        walk_return_expr(self, return_expr)
     }
 
     fn visit_expr(&mut self, expr: Expr<'ast>) -> Self::Result {
@@ -119,10 +143,15 @@ pub trait Visitor<'ast>: Sized {
             ItemStmt::FnItem(fn_item) => self.visit_fn_item(fn_item),
             ItemStmt::StructItem(struct_item) => self.visit_struct_item(struct_item),
             ItemStmt::TypedefItem(typedef_item) => self.visit_typedef_item(typedef_item),
+            ItemStmt::EnumItem(enum_item) => self.visit_enum_item(enum_item),
         }
     }
 
     fn visit_typedef_item(&mut self, typedef_item: &'ast TypedefItem<'ast>) -> Self::Result {
+        Self::default_result()
+    }
+
+    fn visit_enum_item(&mut self, enum_item: &'ast EnumItem<'ast>) -> Self::Result {
         Self::default_result()
     }
 
@@ -178,6 +207,10 @@ pub trait Visitor<'ast>: Sized {
         walk_if_expr(self, expr)
     }
 
+    fn visit_if_def_expr(&mut self, if_def_expr: &'ast IfDefExpr<'ast>) -> Self::Result {
+        walk_if_def_expr(self, if_def_expr)
+    }
+
     fn visit_tuple_expr(&mut self, tuple_expr: &'ast TupleExpr<'ast>) -> Self::Result {
         walk_tuple_expr(self, tuple_expr)
     }
@@ -231,6 +264,7 @@ pub fn walk_expr_with_block<'a, V>(visitor: &mut V, expr_with_block: ExprWithBlo
     match expr_with_block {
         ExprWithBlock::BlockExpr(expr) => visitor.visit_block_expr(expr),
         ExprWithBlock::IfExpr(expr) => visitor.visit_if_expr(expr),
+        ExprWithBlock::IfDefExpr(expr) => visitor.visit_if_def_expr(expr),
         ExprWithBlock::LoopExpr(loop_expr) => visitor.visit_loop_expr(loop_expr),
     }
 }
@@ -268,10 +302,25 @@ pub fn walk_return_expr<'a, V>(visitor: &mut V, return_expr: &'a ReturnExpr<'a>)
     return_expr.value.map(|expr| visitor.visit_expr(expr)).unwrap_or(V::default_result())
 }
 
+pub fn walk_if_def_expr<'a, V>(visitor: &mut V, if_def_expr: &'a IfDefExpr<'a>) -> V::Result
+    where V: Visitor<'a>
+{
+    visitor.visit_pat(if_def_expr.pat);
+    visitor.visit_expr(if_def_expr.rhs);
+
+    if let Some(if_false_branch_expr) = &if_def_expr.false_block {
+        visitor.visit_block_expr(if_def_expr.true_block);
+        visitor.visit_if_false_branch_expr(*if_false_branch_expr)
+    } else {
+        visitor.visit_block_expr(if_def_expr.true_block)
+    }
+}
+
 pub fn walk_if_expr<'a, V>(visitor: &mut V, if_expr: &'a IfExpr<'a>) -> V::Result
     where V: Visitor<'a>
 {
     visitor.visit_expr(if_expr.condition);
+
     if let Some(if_false_branch_expr) = &if_expr.false_block {
         visitor.visit_block_expr(if_expr.true_block);
         visitor.visit_if_false_branch_expr(*if_false_branch_expr)
@@ -376,7 +425,12 @@ pub fn walk_if_false_branch_expr<'a, V>(
     where V: Visitor<'a>
 {
     match if_false_branch_expr {
-        IfFalseBranchExpr::ElifExpr(expr) => visitor.visit_if_expr(expr),
+        IfFalseBranchExpr::IfExprKind(if_expr_kind) => {
+            match if_expr_kind {
+                IfExprKind::IfExpr(if_expr) => visitor.visit_if_expr(if_expr),
+                IfExprKind::IfDefExpr(if_def_expr) => visitor.visit_if_def_expr(if_def_expr),
+            }
+        }
         IfFalseBranchExpr::ElseExpr(block_expr) => visitor.visit_block_expr(block_expr),
     }
 }
@@ -430,5 +484,32 @@ pub fn walk_const_expr<'a, V>(visitor: &mut V, const_expr: ConstExpr<'a>) -> V::
 pub fn walk_pat<'a, V>(visitor: &mut V, pat: Pat<'a>) -> V::Result where V: Visitor<'a> {
     match &pat {
         Pat::IdentPat(pat) => visitor.visit_ident_pat(pat),
+        Pat::TuplePat(tuple_pat) => visitor.visit_tuple_pat(tuple_pat),
     }
+}
+
+pub fn walk_tuple_pat<'a, V>(visitor: &mut V, tuple_pat: &'a TuplePat<'a>) -> V::Result
+    where V: Visitor<'a>
+{
+    visitor.visit_path(tuple_pat.path);
+
+    tuple_pat.fields.iter().for_each(|pat| {
+        visitor.visit_pat(*pat);
+    });
+
+    V::default_result()
+}
+
+pub fn walk_path<'a, V>(visitor: &mut V, path: Path<'a>) -> V::Result where V: Visitor<'a> {
+    match path {
+        Path::PathField(path_field) => visitor.visit_path_field(path_field),
+        Path::PathSegment(path_segment) => visitor.visit_path_segment(path_segment),
+    }
+}
+
+pub fn walk_path_field<'a, V>(visitor: &mut V, path_field: &'a PathField<'a>) -> V::Result
+    where V: Visitor<'a>
+{
+    visitor.visit_path(path_field.lhs);
+    visitor.visit_path_segment(path_field.rhs)
 }

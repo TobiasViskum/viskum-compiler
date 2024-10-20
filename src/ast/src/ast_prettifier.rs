@@ -7,6 +7,7 @@ use crate::{
     visitor::{ walk_stmt, Visitor },
     Ast,
     IdentNode,
+    IfExprKind,
     IfFalseBranchExpr,
     Stmt,
     Typing,
@@ -61,6 +62,19 @@ fn write_typing<'ast>(buffer: &mut String, src: &str, typing: &Typing<'ast>) {
             write!(buffer, "{}", Symbol::new(&src[span.get_byte_range()]).get()).expect(
                 "Unexpected write error"
             ),
+        // Typing::NamedTuple(typings) => {
+        //     write!(buffer, "(").expect("Unexpected write error");
+        //     for (i, (span, typing)) in typings.iter().enumerate() {
+        //         write!(buffer, "{} ", Symbol::new(&src[span.get_byte_range()]).get()).expect(
+        //             "Unexpected write error"
+        //         );
+        //         write_typing(buffer, src, typing);
+        //         if i < typings.len() - 1 {
+        //             write!(buffer, ", ").expect("Unexpected write error");
+        //         }
+        //     }
+        //     write!(buffer, ")").expect("Unexpected write error");
+        // }
         Typing::Tuple(typings) => {
             write!(buffer, "(").expect("Unexpected write error");
             for (i, typing) in typings.iter().enumerate() {
@@ -335,16 +349,24 @@ impl<'ast, T> Visitor<'ast> for AstPrettifier<'ast, T> where T: AstState {
         match &if_expr.false_block {
             Some(expr) => {
                 match expr {
-                    IfFalseBranchExpr::ElifExpr(elif_expr) => {
-                        write!(self.buffer, "\n{}el", self.get_indentation())?;
-                        self.visit_if_expr(elif_expr)?;
-                    }
                     IfFalseBranchExpr::ElseExpr(expr) => {
                         write!(self.buffer, "\n{}else\n", self.get_indentation())?;
                         self.increment_scope_depth();
                         self.visit_stmts(expr.stmts)?;
                         self.decrement_scope_depth();
                         write!(self.buffer, "\n{}end", self.get_indentation())?;
+                    }
+                    IfFalseBranchExpr::IfExprKind(if_expr_kind) => {
+                        match if_expr_kind {
+                            IfExprKind::IfDefExpr(if_def_expr) => {
+                                write!(self.buffer, "\n{}el", self.get_indentation())?;
+                                self.visit_if_def_expr(if_def_expr)?;
+                            }
+                            IfExprKind::IfExpr(if_expr) => {
+                                write!(self.buffer, "\n{}el", self.get_indentation())?;
+                                self.visit_if_expr(if_expr)?;
+                            }
+                        }
                     }
                 }
             }

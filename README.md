@@ -51,3 +51,43 @@ x << 1
 point := Point(x: 2, y: 3)
 
 point := Point { x: 2, y: 3 }
+
+
+## Example of Low level control
+
+
+struct.C Vec {
+    len Int,
+    cap Int,
+    items [*]Int,
+
+    fn new() Self {
+        Self { len: 0, cap: 0, items: null }
+    }
+
+    fn push(*mut self, item Int) {
+        if self.len == self.cap {
+            if self.cap == 0 { 
+                self.cap = 2
+                items := match malloc(self.cap * Int.SIZE) {
+                    Option.Some(items) -> items,
+                    Option.None -> exit(1)
+                }
+                self.items = items
+            } else { 
+                self.cap *= 2
+                newItems := match realloc(self.cap * Int.SIZE) {
+                    Option.Some(newItems) -> newItems,
+                    Option.None -> exit(1)
+                }
+                self.items = newItems
+            }
+        }
+
+        self.items[len++] = item   
+    }
+
+    fn pop(*mut self) Option<Int> {
+        self.items[--self.len]
+    }
+}

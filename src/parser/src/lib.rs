@@ -9,6 +9,8 @@ use ast::{
     BoolExpr,
     BreakExpr,
     ContinueExpr,
+    EnumItem,
+    EnumVariant,
     Expr,
     ExprWithoutBlock,
     Field,
@@ -16,16 +18,24 @@ use ast::{
     FnItem,
     GlobalScope,
     IdentNode,
+    IfDefExpr,
     IfExpr,
+    IfExprKind,
     IfFalseBranchExpr,
     IntegerExpr,
     ItemStmt,
     LoopExpr,
+    Pat,
+    Path,
+    PathField,
+    PlaceExpr,
     ReturnExpr,
     Stmt,
     StructItem,
+    TuplePat,
     TypedefItem,
     Typing,
+    ValueExpr,
 };
 use error::Error;
 use expr_builder::ExprBuilder;
@@ -71,19 +81,196 @@ impl ParseRule {
     }
 }
 
-pub(crate) trait ParserHandle {
+pub(crate) trait ParserHandle<'ast> {
     fn get_ast_node_id(&mut self) -> NodeId;
 
     fn forget_node(&mut self, node_id: NodeId);
+
+    fn try_as_pat(&mut self, expr: Expr<'ast>) -> Option<Pat<'ast>>;
+
+    fn try_as_place_expr(&mut self, expr: Expr<'ast>) -> Option<PlaceExpr<'ast>>;
+
+    fn try_as_ident(&mut self, expr: Expr<'ast>) -> Option<&'ast IdentNode>;
+
+    fn try_as_path(&mut self, expr: Expr<'ast>) -> Option<Path<'ast>>;
 }
 
-impl<'a> ParserHandle for Parser<'a> {
+impl<'a> ParserHandle<'a> for Parser<'a> {
     fn forget_node(&mut self, node_id: NodeId) {
         self.forgotten_nodes += 1;
     }
 
     fn get_ast_node_id(&mut self) -> NodeId {
         Parser::get_ast_node_id(self)
+    }
+
+    fn try_as_path(&mut self, expr: Expr<'a>) -> Option<Path<'a>> {
+        match expr {
+            Expr::ExprWithBlock(_) => None,
+            Expr::ExprWithoutBlock(expr) => {
+                match expr {
+                    ExprWithoutBlock::PlaceExpr(place_expr) => {
+                        match place_expr {
+                            PlaceExpr::IdentExpr(ident_expr) => {
+                                Some(Path::PathSegment(ident_expr))
+                            }
+                            PlaceExpr::TupleFieldExpr(_) => None,
+                            PlaceExpr::FieldExpr(field_expr) => {
+                                let lhs = self.try_as_path(field_expr.lhs);
+
+                                match lhs {
+                                    Some(lhs) => {
+                                        Some(
+                                            Path::PathField(
+                                                self.ast_arena.alloc_expr_or_stmt(
+                                                    PathField::new(
+                                                        lhs,
+                                                        field_expr.rhs,
+                                                        field_expr.ast_node_id
+                                                    )
+                                                )
+                                            )
+                                        )
+                                    }
+                                    None => None,
+                                }
+                            }
+                        }
+                    }
+                    ExprWithoutBlock::BreakExpr(_) => None,
+                    ExprWithoutBlock::ContinueExpr(_) => None,
+                    ExprWithoutBlock::ReturnExpr(_) => None,
+                    ExprWithoutBlock::ValueExpr(value_expr) => {
+                        match value_expr {
+                            ValueExpr::BinaryExpr(_) => None,
+                            ValueExpr::CallExpr(_) => None,
+                            ValueExpr::ConstExpr(_) => None,
+                            ValueExpr::GroupExpr(_) => None,
+                            ValueExpr::StructExpr(_) => None,
+                            ValueExpr::TupleExpr(_) => None,
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn try_as_pat(&mut self, expr: Expr<'a>) -> Option<Pat<'a>> {
+        match expr {
+            Expr::ExprWithBlock(_) => None,
+            Expr::ExprWithoutBlock(expr) => {
+                match expr {
+                    ExprWithoutBlock::PlaceExpr(expr) => {
+                        match expr {
+                            PlaceExpr::TupleFieldExpr(_) => None,
+                            PlaceExpr::FieldExpr(_) => None,
+                            PlaceExpr::IdentExpr(ident_expr) =>
+                                Some(
+                                    Pat::IdentPat(
+                                        self.ast_arena.alloc_expr_or_stmt(ident_expr.get_copy())
+                                    )
+                                ),
+                        }
+                    }
+                    ExprWithoutBlock::BreakExpr(_) => None,
+                    ExprWithoutBlock::ContinueExpr(_) => None,
+                    ExprWithoutBlock::ReturnExpr(_) => None,
+                    ExprWithoutBlock::ValueExpr(expr) => {
+                        match expr {
+                            ValueExpr::BinaryExpr(_) => None,
+                            ValueExpr::CallExpr(call_expr) => {
+                                let path = match self.try_as_path(call_expr.callee) {
+                                    Some(path) => path,
+                                    None => {
+                                        return None;
+                                    }
+                                };
+
+                                let mut has_args_failed = false;
+
+                                let pat_args = call_expr.args
+                                    .iter()
+                                    .filter_map(|arg| {
+                                        let pat = self.try_as_pat(*arg);
+                                        if pat.is_none() {
+                                            has_args_failed = true;
+                                        }
+                                        pat
+                                    })
+                                    .collect::<Vec<_>>();
+
+                                if has_args_failed {
+                                    return None;
+                                }
+
+                                let final_pat = Pat::TuplePat(
+                                    self.ast_arena.alloc_expr_or_stmt(
+                                        TuplePat::new(
+                                            path,
+                                            self.ast_arena.alloc_vec(pat_args),
+                                            call_expr.ast_node_id
+                                        )
+                                    )
+                                );
+
+                                Some(final_pat)
+                            }
+                            ValueExpr::ConstExpr(_) => None,
+                            ValueExpr::GroupExpr(_) => None,
+                            ValueExpr::StructExpr(_) => None,
+                            ValueExpr::TupleExpr(tuple_expr) =>
+                                todo!("As pattern: {:#?}", tuple_expr),
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn try_as_place_expr(&mut self, expr: Expr<'a>) -> Option<PlaceExpr<'a>> {
+        match expr {
+            Expr::ExprWithBlock(_) => None,
+            Expr::ExprWithoutBlock(expr) => {
+                match expr {
+                    ExprWithoutBlock::PlaceExpr(expr) => { Some(expr) }
+                    ExprWithoutBlock::BreakExpr(_) => None,
+                    ExprWithoutBlock::ReturnExpr(_) => None,
+                    ExprWithoutBlock::ContinueExpr(_) => None,
+                    ExprWithoutBlock::ValueExpr(expr) => {
+                        match expr {
+                            ValueExpr::BinaryExpr(_) => None,
+                            ValueExpr::ConstExpr(_) => None,
+                            ValueExpr::GroupExpr(_) => None,
+                            ValueExpr::CallExpr(_) => None,
+                            ValueExpr::StructExpr(_) => None,
+                            ValueExpr::TupleExpr(tuple_expr) =>
+                                todo!("As place expr: {:#?}", tuple_expr),
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn try_as_ident(&mut self, expr: Expr<'a>) -> Option<&'a IdentNode> {
+        match expr {
+            Expr::ExprWithBlock(_) => None,
+            Expr::ExprWithoutBlock(expr) => {
+                match expr {
+                    ExprWithoutBlock::BreakExpr(_) => None,
+                    ExprWithoutBlock::ReturnExpr(_) => None,
+                    ExprWithoutBlock::ContinueExpr(_) => None,
+                    ExprWithoutBlock::ValueExpr(_) => None,
+                    ExprWithoutBlock::PlaceExpr(expr) => {
+                        match expr {
+                            PlaceExpr::IdentExpr(expr) => Some(expr),
+                            PlaceExpr::TupleFieldExpr(_) => None,
+                            PlaceExpr::FieldExpr(_) => None,
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -138,6 +325,7 @@ impl<'a> Parser<'a> {
             TokenKind::Def => self.function_statement(),
             TokenKind::Typedef => self.typedef_statement(),
             TokenKind::Struct => self.struct_item(),
+            TokenKind::Enum => self.enum_item(),
             TokenKind::Mut => self.mut_stmt(),
             TokenKind::Break => self.break_expr(),
             TokenKind::Continue => self.continue_expr(),
@@ -163,6 +351,68 @@ impl<'a> Parser<'a> {
         );
 
         Stmt::ItemStmt(typedef_stmt)
+    }
+
+    pub(crate) fn enum_item(&mut self) -> Stmt<'a> {
+        self.advance();
+        let ident_node = self.consume_ident("Expected ident after `enum`");
+        let mut variants = Vec::with_capacity(8);
+
+        self.consume(TokenKind::LeftCurly, "Expected `{` before enum variants");
+
+        while !self.is_eof() && !self.is_curr_kind(TokenKind::RightCurly) {
+            let variant_name = self.ast_arena.alloc_expr_or_stmt(
+                self.consume_ident("Expected ident in enum variant")
+            );
+
+            match self.current.get_kind() {
+                TokenKind::Comma => {
+                    self.advance();
+                    variants.push(EnumVariant::new(variant_name, None));
+                    continue;
+                }
+                TokenKind::RightCurly => {
+                    variants.push(EnumVariant::new(variant_name, None));
+                    break;
+                }
+                TokenKind::LeftParen => {
+                    self.advance();
+                    let mut tys = Vec::with_capacity(8);
+                    loop {
+                        let ty = self.parse_typing().expect("Expected type in enum variant");
+                        tys.push(ty);
+
+                        if self.is_curr_kind(TokenKind::Comma) {
+                            self.advance();
+                            continue;
+                        }
+
+                        break;
+                    }
+                    variants.push(
+                        EnumVariant::new(variant_name, Some(self.ast_arena.alloc_vec(tys)))
+                    );
+
+                    self.consume(TokenKind::RightParen, "Expected `)` after enum variant");
+
+                    if self.is_curr_kind(TokenKind::Comma) {
+                        self.advance();
+                    }
+                    continue;
+                }
+                _ => panic!("Unexpected token in enum variant"),
+            }
+        }
+
+        self.consume(TokenKind::RightCurly, "Expected `}` after enum variants");
+
+        let enum_item = EnumItem::new(
+            self.ast_arena.alloc_expr_or_stmt(ident_node),
+            self.ast_arena.alloc_vec(variants),
+            self.get_ast_node_id()
+        );
+
+        Stmt::ItemStmt(ItemStmt::EnumItem(self.ast_arena.alloc_expr_or_stmt(enum_item)))
     }
 
     pub(crate) fn struct_item(&mut self) -> Stmt<'a> {
@@ -637,11 +887,27 @@ impl<'a> Parser<'a> {
         expr_builder.take_expr().expect("TODO:Error handling")
     }
 
-    pub(crate) fn parse_if_expr(&mut self) -> &'a IfExpr<'a> {
+    pub(crate) fn parse_if_expr(&mut self) -> IfExprKind<'a> {
         let cond = self.parse_expr_and_take_with_terminate_infix_token(
             Precedence::PrecAssign.get_next(),
             Some(TokenKind::LeftCurly)
         );
+
+        let if_def_expr_data = if self.is_curr_kind(TokenKind::Define) {
+            // We have an IfDefExpr
+            let pat = self.try_as_pat(cond).expect("Expected pattern");
+
+            self.advance();
+
+            let rhs = self.parse_expr_and_take_with_terminate_infix_token(
+                Precedence::PrecAssign.get_next(),
+                Some(TokenKind::LeftCurly)
+            );
+
+            Some((pat, rhs))
+        } else {
+            None
+        };
 
         self.consume(TokenKind::LeftCurly, "Expected `{` after if condition");
 
@@ -658,15 +924,39 @@ impl<'a> Parser<'a> {
                 self.consume(TokenKind::RightCurly, "Expected `}` after else block");
                 Some(IfFalseBranchExpr::ElseExpr(block_expr))
             }
-            TokenKind::Elif => Some(IfFalseBranchExpr::ElifExpr(self.parse_if_expr())),
+            TokenKind::Elif => Some(IfFalseBranchExpr::IfExprKind(self.parse_if_expr())),
             _ => None,
         };
 
-        let if_expr = self.ast_arena.alloc_expr_or_stmt(
-            IfExpr::new(cond, true_block, false_block, self.get_ast_node_id(), Span::dummy())
-        );
+        match if_def_expr_data {
+            Some((pat, rhs)) => {
+                let if_def_expr = self.ast_arena.alloc_expr_or_stmt(
+                    IfDefExpr::new(
+                        pat,
+                        rhs,
+                        true_block,
+                        false_block,
+                        self.get_ast_node_id(),
+                        Span::dummy()
+                    )
+                );
 
-        if_expr
+                return IfExprKind::IfDefExpr(if_def_expr);
+            }
+            None => {
+                let if_expr = self.ast_arena.alloc_expr_or_stmt(
+                    IfExpr::new(
+                        cond,
+                        true_block,
+                        false_block,
+                        self.get_ast_node_id(),
+                        Span::dummy()
+                    )
+                );
+
+                return IfExprKind::IfExpr(if_expr);
+            }
+        }
     }
 
     fn parse_block_as_stmts(&mut self) -> &'a [Stmt<'a>] {
@@ -910,6 +1200,7 @@ impl<'a> Parser<'a> {
         Mut         = { (None       None),      (None       None            ),      (None       None) },
         Class       = { (None       None),      (None       None            ),      (None       None) },
         Struct      = { (None       None),      (None       None            ),      (None       None) },
+        Enum        = { (None       None),      (None       None            ),      (None       None) },
         While       = { (None       None),      (None       None            ),      (None       None) },
         If          = { (if_expr    None),      (None       None            ),      (None       None) },
         Loop        = { (loop_expr  None),      (None       None            ),      (None       None) },

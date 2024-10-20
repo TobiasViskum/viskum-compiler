@@ -9,6 +9,7 @@ use ast::{
     FnItem,
     IdentNode,
     IfExpr,
+    IfExprKind,
     IfFalseBranchExpr,
     LoopExpr,
     Pat,
@@ -41,6 +42,7 @@ use icfg::{
 };
 
 use ir::{
+    Adt,
     CfgFnKind,
     DefId,
     GetTyAttr,
@@ -494,7 +496,15 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
                 cfg_builder.icfg_builder.get_ty_from_node_id(if_expr.ast_node_id)
             );
 
-            if let Some(IfFalseBranchExpr::ElifExpr(elif_expr)) = if_expr.false_block {
+            if
+                let Some(IfFalseBranchExpr::IfExprKind(IfExprKind::IfDefExpr(if_def_expr))) =
+                    if_expr.false_block
+            {
+                cfg_builder.node_id_to_result_mem_id.insert(if_def_expr.ast_node_id, result_mem_id);
+            } else if
+                let Some(IfFalseBranchExpr::IfExprKind(IfExprKind::IfExpr(elif_expr))) =
+                    if_expr.false_block
+            {
                 cfg_builder.node_id_to_result_mem_id.insert(elif_expr.ast_node_id, result_mem_id);
             }
 
@@ -546,22 +556,34 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
             );
 
             match false_branch {
-                IfFalseBranchExpr::ElifExpr(elif_expr) => {
-                    self.visit_if_expr(elif_expr);
-                    // let cond_ty = self.icfg_builder.get_ty_from_node_id(
-                    //     get_node_id_from_expr(elif_expr.condition)
-                    // );
-                    self.push_node_to(
-                        bb_id_before_if_expr,
-                        Node::new(
-                            NodeKind::BranchCondNode(
-                                BranchCondNode::new(cond_operand, first_true_bb_id, false_bb_id)
-                            )
-                        )
-                    );
-                    self.push_node_to(last_true_bb_id, branch_out_node);
-                    self.push_node_to(false_bb_id, branch_out_node);
+                IfFalseBranchExpr::IfExprKind(if_expr_kind) => {
+                    match if_expr_kind {
+                        IfExprKind::IfDefExpr(if_def_expr) => {
+                            todo!("IfDefExpr");
+                        }
+                        IfExprKind::IfExpr(elif_expr) => {
+                            self.visit_if_expr(elif_expr);
+                            // let cond_ty = self.icfg_builder.get_ty_from_node_id(
+                            //     get_node_id_from_expr(elif_expr.condition)
+                            // );
+                            self.push_node_to(
+                                bb_id_before_if_expr,
+                                Node::new(
+                                    NodeKind::BranchCondNode(
+                                        BranchCondNode::new(
+                                            cond_operand,
+                                            first_true_bb_id,
+                                            false_bb_id
+                                        )
+                                    )
+                                )
+                            );
+                            self.push_node_to(last_true_bb_id, branch_out_node);
+                            self.push_node_to(false_bb_id, branch_out_node);
+                        }
+                    }
                 }
+
                 IfFalseBranchExpr::ElseExpr(else_expr) => {
                     let false_visit_result = self.visit_block_expr(else_expr);
                     let (false_operand, false_ty) =
@@ -697,6 +719,82 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
     }
 
     fn visit_call_expr(&mut self, call_expr: &'ast CallExpr<'ast>) -> Self::Result {
+        let ty = self.icfg_builder.get_ty_from_node_id(call_expr.ast_node_id);
+
+        if let Ty::Adt(enum_variant_def_id) = ty {
+            let name_binding = self.icfg_builder.resolved_information.get_name_binding_from_def_id(
+                &enum_variant_def_id
+            );
+            let (enum_ty, enum_variant_id) = match name_binding.kind {
+                NameBindingKind::Adt(Adt::EnumVariant(enum_def_id, enum_variant_id, _)) => {
+                    (Ty::Adt(enum_def_id), enum_variant_id)
+                }
+                _ => panic!("Expected fn"),
+            };
+
+            let result_mem_id = self.new_result_mem(enum_ty);
+
+            // First store the enum variant id (the discriminant)
+            self.push_node(
+                Node::new(
+                    NodeKind::StoreNode(
+                        StoreNode::new(
+                            PlaceKind::ResultMemId(result_mem_id),
+                            Ty::PrimTy(ir::PrimTy::Int64),
+                            Operand::Const(Const::Int(enum_variant_id.0 as i64)),
+                            StoreKind::Init
+                        )
+                    )
+                )
+            );
+
+            // Now we store the data
+            let arg_operands = call_expr.args
+                .iter()
+                .map(|arg| {
+                    let visit_result = self.visit_expr(*arg);
+                    self.get_operand_from_visit_result(visit_result)
+                })
+                .collect::<Vec<_>>();
+
+            let mut byte_offset = 8; // The discriminant is 8 bytes
+            for (operand, operand_ty) in arg_operands {
+                let temp_id = self.get_temp_id();
+                self.push_node(
+                    Node::new(
+                        NodeKind::ByteAccessNode(
+                            ByteAccessNode::new(
+                                PlaceKind::TempId(temp_id),
+                                PlaceKind::ResultMemId(result_mem_id),
+                                byte_offset
+                            )
+                        )
+                    )
+                );
+                self.push_node(
+                    Node::new(
+                        NodeKind::StoreNode(
+                            StoreNode::new(
+                                PlaceKind::TempId(temp_id),
+                                operand_ty,
+                                operand,
+                                StoreKind::Init
+                            )
+                        )
+                    )
+                );
+
+                byte_offset += operand_ty.get_ty_attr(
+                    &self.icfg_builder.resolved_information
+                ).size_bytes;
+            }
+
+            return VisitResult::PlaceKind(
+                PlaceKind::ResultMemId(result_mem_id),
+                enum_ty.to_ptr_ty()
+            );
+        }
+
         let get_fn_args_ty_from_callee_ty = |callee_ty: Ty| {
             match callee_ty {
                 Ty::FnDef(def_id) => {
@@ -740,7 +838,6 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
         );
         self.push_node(call_node);
         VisitResult::PlaceKind(PlaceKind::TempId(temp_id), ret_ty)
-        // }
     }
 
     /// Assumes read for now
@@ -882,6 +979,22 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
     fn visit_def_stmt(&mut self, def_stmt: &'ast ast::DefineStmt<'ast>) -> Self::Result {
         let ty = self.icfg_builder.get_ty_from_node_id(get_node_id_from_expr(def_stmt.value_expr));
 
+        // If ty is an enum variant, get the type of the whole enum
+        let ty = match ty {
+            Ty::Adt(enum_variant_def_id) => {
+                let name_binding =
+                    self.icfg_builder.resolved_information.get_name_binding_from_def_id(
+                        &enum_variant_def_id
+                    );
+                match name_binding.kind {
+                    NameBindingKind::Adt(Adt::EnumVariant(enum_def_id, _, _)) =>
+                        Ty::Adt(enum_def_id),
+                    _ => ty,
+                }
+            }
+            _ => ty,
+        };
+
         if ty.is_void() {
             self.visit_expr(def_stmt.value_expr);
             return Self::default_result();
@@ -902,6 +1015,7 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
                 self.set_def_id_to_local_mem_id(def_id, local_mem_id);
                 local_mem_id
             }
+            Pat::TuplePat(_) => unreachable!("Should have been caught by type checking"),
         };
 
         let value_visit_result = self.visit_expr(def_stmt.value_expr);

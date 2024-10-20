@@ -103,10 +103,15 @@ pub enum NameBindingKind<'res> {
     // Import
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct EmumVaraintId(pub u32);
+
 /// Algebraic data type (e.g. structs, enums etc.)
 #[derive(Debug, Clone, Copy)]
 pub enum Adt<'res> {
     Struct(&'res [(DefId, Ty)]),
+    Enum(&'res [DefId]),
+    EnumVariant(DefId, EmumVaraintId, &'res [Ty]),
     Typedef(Ty),
 }
 
@@ -124,12 +129,6 @@ impl FnSig {
 
 #[derive(Eq, Hash, PartialEq, Debug, Clone, Copy)]
 pub struct AdtId(pub DefId);
-
-#[derive(Debug, Clone, Copy)]
-pub enum DefKind<'res> {
-    Variable(Mutability),
-    Stuct(&'res [(DefId, Ty)]),
-}
 
 /// Only difference between this and `DefKind`, is that this has no data
 #[derive(Hash, Eq, PartialEq, Debug, Clone, Copy)]

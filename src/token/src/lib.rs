@@ -102,6 +102,8 @@ pub enum TokenKind {
     Class,
     /// Keyword `struct`
     Struct,
+    /// Keyword `enum`
+    Enum,
     /// Keyword `if`
     If,
     /// Keyword `while`

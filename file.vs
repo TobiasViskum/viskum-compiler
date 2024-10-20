@@ -35,7 +35,21 @@ fn fib(n Int) Int {
     ret fib(n - 2) + fib(n - 1)
 }
 
+
+enum Option {
+    Some(Int),
+    None
+}
+
+
 fn main() {
+
+    myEnum := Option.Some(2)
+
+    if Option.Some(value) := myEnum {
+        
+    }
+
     fib(45)
 
     a := {
@@ -46,7 +60,6 @@ fn main() {
     }
 
     abc := if true { 1 } else { 0 }
-
 
     point := Point { z: 5 + (abc + returnFunction()(2, 3)), y: 4, x: 3, data: (9, 4, (true, false, 8)), addFn: add }
 

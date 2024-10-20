@@ -24,8 +24,11 @@ pub(crate) fn with_global_session<T>(f: impl FnOnce(&GlobalSession) -> T) -> T {
 /// This is because this object is destroyed once the main thread ends
 #[derive(Default)]
 struct GlobalSession {
-    arena: Bump,
     interned_types: RefCell<FxIndexSet<&'static Ty>>,
+    /// We own them because we want to mutate them later
+    real_interned_types: RefCell<FxIndexSet<Ty>>,
+    /// For the string interner
+    arena: Bump,
     interned_strings: RefCell<FxIndexSet<&'static str>>,
 }
 
@@ -45,7 +48,7 @@ impl GlobalSession {
 
         // This is safe, because the arena lives as long as the program
         let interned_type = with_global_session(|session| unsafe {
-            &*(session.arena.alloc(ty) as *mut Ty)
+            &mut *(session.arena.alloc(ty) as *mut Ty)
         });
         self.interned_types.borrow_mut().insert(interned_type);
 
