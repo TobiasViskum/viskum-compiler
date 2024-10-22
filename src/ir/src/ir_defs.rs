@@ -110,6 +110,7 @@ pub struct EmumVaraintId(pub u32);
 #[derive(Debug, Clone, Copy)]
 pub enum Adt<'res> {
     Struct(&'res [(DefId, Ty)]),
+    // TupleStruct(&'res [Ty]),
     Enum(&'res [DefId]),
     EnumVariant(DefId, EmumVaraintId, &'res [Ty]),
     Typedef(Ty),

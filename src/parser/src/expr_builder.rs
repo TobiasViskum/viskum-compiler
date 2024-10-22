@@ -15,10 +15,8 @@ use ast::{
     GroupExpr,
     IdentNode,
     IfExpr,
-    IfExprKind,
     IntegerExpr,
     LoopExpr,
-    Pat,
     PlaceExpr,
     Stmt,
     StructExpr,
@@ -189,13 +187,8 @@ impl<'ast> ExprBuilder<'ast> {
         self.exprs.push(expr);
     }
 
-    pub fn emit_if_expr(&mut self, if_expr: IfExprKind<'ast>) {
-        let expr = match if_expr {
-            IfExprKind::IfExpr(if_expr) => Expr::ExprWithBlock(ExprWithBlock::IfExpr(if_expr)),
-            IfExprKind::IfDefExpr(if_let_expr) => {
-                Expr::ExprWithBlock(ExprWithBlock::IfDefExpr(if_let_expr))
-            }
-        };
+    pub fn emit_if_expr(&mut self, if_expr: &'ast IfExpr<'ast>) {
+        let expr = Expr::ExprWithBlock(ExprWithBlock::IfExpr(if_expr));
 
         self.exprs.push(expr);
     }

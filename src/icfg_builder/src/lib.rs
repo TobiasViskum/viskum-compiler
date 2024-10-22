@@ -2,19 +2,21 @@ use std::cell::RefCell;
 
 use ast::{
     get_node_id_from_expr,
+    get_node_id_from_pattern,
     Ast,
     AstTypeChecked,
     CallExpr,
+    CondKind,
     Expr,
     FnItem,
     IdentNode,
     IfExpr,
-    IfExprKind,
     IfFalseBranchExpr,
     LoopExpr,
     Pat,
     PlaceExpr,
     ReturnExpr,
+    Stmt,
     Visitor,
 };
 
@@ -53,6 +55,7 @@ use ir::{
     Mutability,
     NameBindingKind,
     NodeId,
+    PrimTy,
     ResolvedInformation,
     ResultMem,
     ResultMemId,
@@ -63,6 +66,7 @@ use ir::{
     NEVER_TY,
     VOID_TY,
 };
+use op::{ BinaryOp, ComparisonOp };
 use resolver::ResolvedFunctions;
 
 pub struct IcfgBuilder<'icfg, 'ast> {
@@ -409,6 +413,22 @@ impl Default for VisitResult {
     }
 }
 
+fn set_result_mem_id_to_if_expr_result<'icfg, 'ast, 'b>(
+    cfg_builder: &mut CfgBuilder<'icfg, 'ast, 'b>,
+    if_expr: &'ast IfExpr<'ast>
+) -> ResultMemId {
+    let result_mem_id = cfg_builder.set_result_mem_id_to_expr_result(
+        if_expr.ast_node_id,
+        cfg_builder.icfg_builder.get_ty_from_node_id(if_expr.ast_node_id)
+    );
+
+    if let Some(IfFalseBranchExpr::ElifExpr(if_expr)) = if_expr.false_block {
+        cfg_builder.node_id_to_result_mem_id.insert(if_expr.ast_node_id, result_mem_id);
+    }
+
+    result_mem_id
+}
+
 impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
     /// This is a kind of "lazy-load" result. For example when visiting a variable, it just returns the place it lives in.
     /// It doesn't add the load node before requesting so with the method `get_operand_from_visit_result`.
@@ -487,52 +507,166 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
     }
 
     fn visit_if_expr(&mut self, if_expr: &'ast IfExpr<'ast>) -> Self::Result {
-        fn set_result_mem_id_to_if_expr_result<'icfg, 'ast, 'b>(
-            cfg_builder: &mut CfgBuilder<'icfg, 'ast, 'b>,
-            if_expr: &'ast IfExpr<'ast>
-        ) -> ResultMemId {
-            let result_mem_id = cfg_builder.set_result_mem_id_to_expr_result(
-                if_expr.ast_node_id,
-                cfg_builder.icfg_builder.get_ty_from_node_id(if_expr.ast_node_id)
-            );
+        fn make_cond_and_locals_from_cond_pat<'icfg, 'ast, 'c>(
+            cfg_builder: &mut CfgBuilder<'icfg, 'ast, 'c>,
+            pat: Pat<'ast>,
+            expr_visit_result: VisitResult
+            // expr_operand: Operand,
+            // expr_ty: Ty
+        ) -> (Vec<(Operand, BasicBlockId)>, Vec<(ByteAccessNode, LoadNode, StoreNode)>) {
+            match pat {
+                Pat::IdentPat(_) => unreachable!(),
+                Pat::TupleStructPat(tuple_struct_pat) => {
+                    let (enum_variant_id, enum_data) = {
+                        let def_id = cfg_builder.icfg_builder.get_def_id_from_node_id(
+                            tuple_struct_pat.ast_node_id
+                        );
+                        let name_binding =
+                            cfg_builder.icfg_builder.resolved_information.get_name_binding_from_def_id(
+                                &def_id
+                            );
 
-            if
-                let Some(IfFalseBranchExpr::IfExprKind(IfExprKind::IfDefExpr(if_def_expr))) =
-                    if_expr.false_block
-            {
-                cfg_builder.node_id_to_result_mem_id.insert(if_def_expr.ast_node_id, result_mem_id);
-            } else if
-                let Some(IfFalseBranchExpr::IfExprKind(IfExprKind::IfExpr(elif_expr))) =
-                    if_expr.false_block
-            {
-                cfg_builder.node_id_to_result_mem_id.insert(elif_expr.ast_node_id, result_mem_id);
+                        match name_binding.kind {
+                            NameBindingKind::Adt(Adt::EnumVariant(_, enum_variant_id, enum_data)) =>
+                                (enum_variant_id, enum_data),
+                            _ => panic!("Expected enum variant"),
+                        }
+                    };
+
+                    let load_temp_id = cfg_builder.get_temp_id();
+                    let (access_place, access_ty) = match expr_visit_result {
+                        VisitResult::PlaceKind(place_kind, ty) => (place_kind, ty),
+                        _ => panic!("Expected TempId"),
+                    };
+
+                    cfg_builder.push_node(
+                        Node::new(
+                            NodeKind::LoadNode(
+                                LoadNode::new(load_temp_id, access_place, Ty::PrimTy(PrimTy::Int64))
+                            )
+                        )
+                    );
+
+                    let cmp_tmp_id = cfg_builder.get_temp_id();
+                    cfg_builder.push_node(
+                        Node::new(
+                            NodeKind::BinaryNode(
+                                BinaryNode::new(
+                                    cmp_tmp_id,
+                                    Ty::PrimTy(PrimTy::Int64),
+                                    BinaryOp::ComparisonOp(ComparisonOp::Eq),
+                                    Operand::TempId(load_temp_id),
+                                    Operand::Const(Const::Int(enum_variant_id.0 as i64))
+                                )
+                            )
+                        )
+                    );
+
+                    let current_bb_id = cfg_builder.get_curr_bb_id();
+
+                    if
+                        tuple_struct_pat.fields
+                            .iter()
+                            .find(|x| !matches!(x, Pat::IdentPat(_)))
+                            .is_some()
+                    {
+                        cfg_builder.new_basic_block();
+                    }
+
+                    let (mut false_bb_ids, mut store_nodes) = (
+                        vec![(Operand::TempId(cmp_tmp_id), current_bb_id)],
+                        vec![],
+                    );
+                    let mut byte_offset = 8;
+                    for (i, pat) in tuple_struct_pat.fields.iter().enumerate() {
+                        let ty = &enum_data[i];
+
+                        if let Pat::IdentPat(ident_pat) = pat {
+                            let local_mem_id = {
+                                let local_mem_id = LocalMemId(cfg_builder.local_mems.len() as u32);
+                                let local_mem = LocalMem::new(
+                                    local_mem_id,
+                                    Symbol::new(
+                                        &cfg_builder.icfg_builder.src
+                                            [ident_pat.span.get_byte_range()]
+                                    ),
+                                    ident_pat.span,
+                                    *ty,
+                                    Mutability::Immutable
+                                );
+                                cfg_builder.local_mems.push(local_mem);
+                                let def_id = cfg_builder.icfg_builder.get_def_id_from_node_id(
+                                    ident_pat.ast_node_id
+                                );
+                                cfg_builder.set_def_id_to_local_mem_id(def_id, local_mem_id);
+                                local_mem_id
+                            };
+
+                            let byte_access_temp_id = cfg_builder.get_temp_id();
+                            let byte_access_node = ByteAccessNode::new(
+                                PlaceKind::TempId(byte_access_temp_id),
+                                access_place,
+                                byte_offset
+                            );
+                            let load_temp_id = cfg_builder.get_temp_id();
+                            let load_node = LoadNode::new(
+                                load_temp_id,
+                                PlaceKind::TempId(byte_access_temp_id),
+                                *ty
+                            );
+                            let store_node = StoreNode::new(
+                                PlaceKind::LocalMemId(local_mem_id),
+                                *ty,
+                                Operand::TempId(load_temp_id),
+                                StoreKind::Init
+                            );
+
+                            store_nodes.push((byte_access_node, load_node, store_node));
+                        } else {
+                            let byte_access_temp_id = cfg_builder.get_temp_id();
+                            cfg_builder.push_node(
+                                Node::new(
+                                    NodeKind::ByteAccessNode(
+                                        ByteAccessNode::new(
+                                            PlaceKind::TempId(byte_access_temp_id),
+                                            access_place,
+                                            byte_offset
+                                        )
+                                    )
+                                )
+                            );
+
+                            let other_false_bb_ids = make_cond_and_locals_from_cond_pat(
+                                cfg_builder,
+                                *pat,
+                                VisitResult::PlaceKind(PlaceKind::TempId(byte_access_temp_id), *ty)
+                            );
+                            false_bb_ids.extend(other_false_bb_ids.0);
+                            store_nodes.extend(other_false_bb_ids.1);
+                        }
+
+                        byte_offset += ty.get_ty_attr(
+                            &cfg_builder.icfg_builder.resolved_information
+                        ).size_bytes;
+                    }
+
+                    (false_bb_ids, store_nodes)
+                }
             }
-
-            result_mem_id
         }
 
-        let if_expr_ty = self.icfg_builder.get_ty_from_node_id(if_expr.ast_node_id).to_ptr_ty();
-
-        let result_mem_id = if !if_expr_ty.is_void() && !if_expr_ty.is_never() {
-            Some(set_result_mem_id_to_if_expr_result(self, if_expr))
-        } else {
-            None
-        };
-
-        let bb_id_before_if_expr = BasicBlockId((self.basic_blocks.len() - 1) as u32);
-
-        let (cond_operand, _) = {
-            let cond_visit_result = self.visit_expr(if_expr.condition);
-            self.get_operand_from_visit_result(cond_visit_result)
-        };
-
-        let (first_true_bb_id, last_true_bb_id) = {
-            let true_bb_id = self.new_basic_block();
-            let true_visit_result = self.visit_block_expr(if_expr.true_block);
+        fn compile_true_block<'icfg, 'ast, 'c>(
+            cfg_builder: &mut CfgBuilder<'icfg, 'ast, 'c>,
+            true_block: &'ast [Stmt<'ast>],
+            result_mem_id: Option<ResultMemId>
+        ) -> (BasicBlockId, BasicBlockId) {
+            let first_true_bb_id = cfg_builder.new_basic_block();
+            let true_visit_result = cfg_builder.visit_stmts(true_block);
             if let Some(result_mem_id) = result_mem_id {
-                let (true_operand, true_ty) = self.get_operand_from_visit_result(true_visit_result);
+                let (true_operand, true_ty) =
+                    cfg_builder.get_operand_from_visit_result(true_visit_result);
 
-                self.push_node(
+                cfg_builder.push_node(
                     Node::new(
                         NodeKind::StoreNode(
                             StoreNode::new(
@@ -545,26 +679,179 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
                     )
                 );
             }
-            (true_bb_id, self.get_curr_bb_id())
+            (first_true_bb_id, cfg_builder.get_curr_bb_id())
+        }
+
+        let if_expr_ty = self.icfg_builder.get_ty_from_node_id(if_expr.ast_node_id).to_ptr_ty();
+
+        let result_mem_id = if !if_expr_ty.is_void() && !if_expr_ty.is_never() {
+            Some(set_result_mem_id_to_if_expr_result(self, if_expr))
+        } else {
+            None
         };
 
-        if let Some(false_branch) = &if_expr.false_block {
-            let false_bb_id = self.new_basic_block();
-            let bb_id_after_false_expr = BasicBlockId(false_bb_id.0 + 1);
-            let branch_out_node = Node::new(
-                NodeKind::BranchNode(BranchNode::new(bb_id_after_false_expr))
-            );
+        let bb_id_before_if_expr = BasicBlockId((self.basic_blocks.len() - 1) as u32);
 
-            match false_branch {
-                IfFalseBranchExpr::IfExprKind(if_expr_kind) => {
-                    match if_expr_kind {
-                        IfExprKind::IfDefExpr(if_def_expr) => {
-                            todo!("IfDefExpr");
+        match if_expr.cond_kind {
+            CondKind::CondPat(pat, rhs_expr) => {
+                // let (expr_operand, expr_ty) = {
+                //     let expr_visit_result = self.visit_expr(rhs_expr);
+                //     self.get_operand_from_visit_result(expr_visit_result)
+                // };
+                let expr_visit_result = self.visit_expr(rhs_expr);
+                let (bb_ids, store_nodes) = make_cond_and_locals_from_cond_pat(
+                    self,
+                    pat,
+                    expr_visit_result
+                    // expr_operand,
+                    // expr_ty
+                );
+
+                let (first_true_bb_id, last_true_bb_id) = {
+                    let first_true_bb_id = self.new_basic_block();
+                    for nodes in store_nodes {
+                        self.push_node(Node::new(NodeKind::ByteAccessNode(nodes.0)));
+                        self.push_node(Node::new(NodeKind::LoadNode(nodes.1)));
+                        self.push_node(Node::new(NodeKind::StoreNode(nodes.2)));
+                    }
+
+                    let true_visit_result = self.visit_stmts(if_expr.true_block);
+                    if let Some(result_mem_id) = result_mem_id {
+                        let (true_operand, true_ty) =
+                            self.get_operand_from_visit_result(true_visit_result);
+
+                        self.push_node(
+                            Node::new(
+                                NodeKind::StoreNode(
+                                    StoreNode::new(
+                                        PlaceKind::ResultMemId(result_mem_id),
+                                        true_ty,
+                                        true_operand,
+                                        StoreKind::Init
+                                    )
+                                )
+                            )
+                        );
+                    }
+                    (first_true_bb_id, self.get_curr_bb_id())
+                };
+
+                if let Some(false_branch) = &if_expr.false_block {
+                    let false_bb_id = self.new_basic_block();
+                    let bb_id_after_false_expr = BasicBlockId(false_bb_id.0 + 1);
+                    let branch_out_node = Node::new(
+                        NodeKind::BranchNode(BranchNode::new(bb_id_after_false_expr))
+                    );
+
+                    match false_branch {
+                        IfFalseBranchExpr::ElifExpr(if_expr) => {
+                            self.visit_if_expr(if_expr);
+
+                            for (cond, bb) in &bb_ids {
+                                self.push_node_to(
+                                    *bb,
+                                    Node::new(
+                                        NodeKind::BranchCondNode(
+                                            BranchCondNode::new(
+                                                *cond,
+                                                first_true_bb_id,
+                                                false_bb_id
+                                            )
+                                        )
+                                    )
+                                );
+                            }
+
+                            self.push_node_to(last_true_bb_id, branch_out_node);
+                            self.push_node_to(false_bb_id, branch_out_node);
                         }
-                        IfExprKind::IfExpr(elif_expr) => {
-                            self.visit_if_expr(elif_expr);
+                        IfFalseBranchExpr::ElseExpr(else_expr) => {
+                            let false_visit_result = self.visit_block_expr(else_expr);
+                            let (false_operand, false_ty) =
+                                self.get_operand_from_visit_result(false_visit_result);
+                            if let Some(result_mem_id) = result_mem_id {
+                                self.push_node(
+                                    Node::new(
+                                        NodeKind::StoreNode(
+                                            StoreNode::new(
+                                                PlaceKind::ResultMemId(result_mem_id),
+                                                false_ty,
+                                                false_operand,
+                                                StoreKind::Init
+                                            )
+                                        )
+                                    )
+                                );
+                            }
+                            for (cond, bb) in &bb_ids {
+                                self.push_node_to(
+                                    *bb,
+                                    Node::new(
+                                        NodeKind::BranchCondNode(
+                                            BranchCondNode::new(
+                                                *cond,
+                                                first_true_bb_id,
+                                                false_bb_id
+                                            )
+                                        )
+                                    )
+                                );
+                            }
+
+                            self.push_node_to(last_true_bb_id, branch_out_node);
+                            self.push_node_to(false_bb_id, branch_out_node);
+
+                            self.new_basic_block();
+                        }
+                    }
+                } else {
+                    let bb_id_after_true_expr = BasicBlockId(last_true_bb_id.0 + 1);
+                    self.push_node(
+                        Node::new(NodeKind::BranchNode(BranchNode::new(bb_id_after_true_expr)))
+                    );
+
+                    for (cond, bb) in &bb_ids {
+                        self.push_node_to(
+                            *bb,
+                            Node::new(
+                                NodeKind::BranchCondNode(
+                                    BranchCondNode::new(
+                                        *cond,
+                                        first_true_bb_id,
+                                        bb_id_after_true_expr
+                                    )
+                                )
+                            )
+                        );
+                    }
+
+                    self.new_basic_block();
+                }
+            }
+            CondKind::CondExpr(cond_expr) => {
+                let (cond_operand, _) = {
+                    let cond_visit_result = self.visit_expr(cond_expr);
+                    self.get_operand_from_visit_result(cond_visit_result)
+                };
+
+                let (first_true_bb_id, last_true_bb_id) = compile_true_block(
+                    self,
+                    if_expr.true_block,
+                    result_mem_id
+                );
+
+                if let Some(false_branch) = &if_expr.false_block {
+                    let false_bb_id = self.new_basic_block();
+                    let bb_id_after_false_expr = BasicBlockId(false_bb_id.0 + 1);
+                    let branch_out_node = Node::new(
+                        NodeKind::BranchNode(BranchNode::new(bb_id_after_false_expr))
+                    );
+
+                    match false_branch {
+                        IfFalseBranchExpr::ElifExpr(if_expr) => {
+                            self.visit_if_expr(if_expr);
                             // let cond_ty = self.icfg_builder.get_ty_from_node_id(
-                            //     get_node_id_from_expr(elif_expr.condition)
+                            //     get_node_id_from_expr(if_expr.condition)
                             // );
                             self.push_node_to(
                                 bb_id_before_if_expr,
@@ -581,53 +868,62 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
                             self.push_node_to(last_true_bb_id, branch_out_node);
                             self.push_node_to(false_bb_id, branch_out_node);
                         }
-                    }
-                }
-
-                IfFalseBranchExpr::ElseExpr(else_expr) => {
-                    let false_visit_result = self.visit_block_expr(else_expr);
-                    let (false_operand, false_ty) =
-                        self.get_operand_from_visit_result(false_visit_result);
-                    if let Some(result_mem_id) = result_mem_id {
-                        self.push_node(
-                            Node::new(
-                                NodeKind::StoreNode(
-                                    StoreNode::new(
-                                        PlaceKind::ResultMemId(result_mem_id),
-                                        false_ty,
-                                        false_operand,
-                                        StoreKind::Init
+                        IfFalseBranchExpr::ElseExpr(else_expr) => {
+                            let false_visit_result = self.visit_block_expr(else_expr);
+                            let (false_operand, false_ty) =
+                                self.get_operand_from_visit_result(false_visit_result);
+                            if let Some(result_mem_id) = result_mem_id {
+                                self.push_node(
+                                    Node::new(
+                                        NodeKind::StoreNode(
+                                            StoreNode::new(
+                                                PlaceKind::ResultMemId(result_mem_id),
+                                                false_ty,
+                                                false_operand,
+                                                StoreKind::Init
+                                            )
+                                        )
+                                    )
+                                );
+                            }
+                            self.push_node_to(
+                                bb_id_before_if_expr,
+                                Node::new(
+                                    NodeKind::BranchCondNode(
+                                        BranchCondNode::new(
+                                            cond_operand,
+                                            first_true_bb_id,
+                                            false_bb_id
+                                        )
                                     )
                                 )
-                            )
-                        );
+                            );
+                            self.push_node_to(last_true_bb_id, branch_out_node);
+                            self.push_node_to(false_bb_id, branch_out_node);
+
+                            self.new_basic_block();
+                        }
                     }
+                } else {
+                    let bb_id_after_true_expr = BasicBlockId(last_true_bb_id.0 + 1);
+                    self.push_node(
+                        Node::new(NodeKind::BranchNode(BranchNode::new(bb_id_after_true_expr)))
+                    );
                     self.push_node_to(
                         bb_id_before_if_expr,
                         Node::new(
                             NodeKind::BranchCondNode(
-                                BranchCondNode::new(cond_operand, first_true_bb_id, false_bb_id)
+                                BranchCondNode::new(
+                                    cond_operand,
+                                    first_true_bb_id,
+                                    bb_id_after_true_expr
+                                )
                             )
                         )
                     );
-                    self.push_node_to(last_true_bb_id, branch_out_node);
-                    self.push_node_to(false_bb_id, branch_out_node);
-
                     self.new_basic_block();
                 }
             }
-        } else {
-            let bb_id_after_true_expr = BasicBlockId(last_true_bb_id.0 + 1);
-            self.push_node(Node::new(NodeKind::BranchNode(BranchNode::new(bb_id_after_true_expr))));
-            self.push_node_to(
-                bb_id_before_if_expr,
-                Node::new(
-                    NodeKind::BranchCondNode(
-                        BranchCondNode::new(cond_operand, first_true_bb_id, bb_id_after_true_expr)
-                    )
-                )
-            );
-            self.new_basic_block();
         }
 
         if let Some(result_mem_id) = result_mem_id {
@@ -1015,7 +1311,7 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
                 self.set_def_id_to_local_mem_id(def_id, local_mem_id);
                 local_mem_id
             }
-            Pat::TuplePat(_) => unreachable!("Should have been caught by type checking"),
+            Pat::TupleStructPat(_) => unreachable!("Should have been caught by type checking"),
         };
 
         let value_visit_result = self.visit_expr(def_stmt.value_expr);

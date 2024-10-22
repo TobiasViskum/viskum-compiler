@@ -7,7 +7,6 @@ use crate::{
     visitor::{ walk_stmt, Visitor },
     Ast,
     IdentNode,
-    IfExprKind,
     IfFalseBranchExpr,
     Stmt,
     Typing,
@@ -340,10 +339,10 @@ impl<'ast, T> Visitor<'ast> for AstPrettifier<'ast, T> where T: AstState {
 
     fn visit_if_expr(&mut self, if_expr: &'ast crate::IfExpr<'ast>) -> Self::Result {
         write!(self.buffer, "if ")?;
-        self.visit_expr(if_expr.condition)?;
+        self.visit_cond_kind(if_expr.cond_kind)?;
         write!(self.buffer, " then\n")?;
         self.increment_scope_depth();
-        self.visit_stmts(if_expr.true_block.stmts)?;
+        self.visit_stmts(if_expr.true_block)?;
         self.decrement_scope_depth();
 
         match &if_expr.false_block {
@@ -356,17 +355,9 @@ impl<'ast, T> Visitor<'ast> for AstPrettifier<'ast, T> where T: AstState {
                         self.decrement_scope_depth();
                         write!(self.buffer, "\n{}end", self.get_indentation())?;
                     }
-                    IfFalseBranchExpr::IfExprKind(if_expr_kind) => {
-                        match if_expr_kind {
-                            IfExprKind::IfDefExpr(if_def_expr) => {
-                                write!(self.buffer, "\n{}el", self.get_indentation())?;
-                                self.visit_if_def_expr(if_def_expr)?;
-                            }
-                            IfExprKind::IfExpr(if_expr) => {
-                                write!(self.buffer, "\n{}el", self.get_indentation())?;
-                                self.visit_if_expr(if_expr)?;
-                            }
-                        }
+                    IfFalseBranchExpr::ElifExpr(if_expr) => {
+                        write!(self.buffer, "\n{}el", self.get_indentation())?;
+                        self.visit_if_expr(if_expr)?;
                     }
                 }
             }

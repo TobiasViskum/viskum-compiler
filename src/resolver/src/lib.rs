@@ -248,6 +248,10 @@ impl<'ctx, 'ast, T> AstVisitEmitter<'ctx, 'ast, T> for Resolver<'ctx, 'ast> wher
         self.global_mems.borrow_mut().push(global_mem);
         self.def_id_to_global_mem_id.insert(def_id, global_mem_id);
     }
+    fn get_ty_from_node_id(&self, node_id: NodeId) -> Ty {
+        let ty = self.node_id_to_ty.get(&node_id).expect("Expected type to node id");
+        *ty
+    }
     fn report_error(&mut self, error: Error) {
         self.errors.push(error);
     }

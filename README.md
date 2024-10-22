@@ -53,6 +53,8 @@ point := Point(x: 2, y: 3)
 point := Point { x: 2, y: 3 }
 
 
+## Function patter matching
+
 ## Example of Low level control
 
 

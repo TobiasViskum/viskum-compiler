@@ -15,14 +15,13 @@ use crate::{
     walk_break_expr,
     walk_call_expr,
     walk_field_expr,
-    walk_if_def_expr,
     walk_loop_expr,
     walk_path_field,
     walk_stmts_none_items,
     walk_struct_expr,
     walk_tuple_expr,
     walk_tuple_field_expr,
-    walk_tuple_pat,
+    walk_tuple_struct_pat,
     AssignStmt,
     Ast,
     BinaryExpr,
@@ -30,6 +29,7 @@ use crate::{
     BoolExpr,
     BreakExpr,
     CallExpr,
+    CondKind,
     ContinueExpr,
     DefineStmt,
     EnumItem,
@@ -37,7 +37,6 @@ use crate::{
     FnItem,
     GroupExpr,
     IdentNode,
-    IfDefExpr,
     IfExpr,
     IntegerExpr,
     ItemStmt,
@@ -51,7 +50,7 @@ use crate::{
     StructItem,
     TupleExpr,
     TupleFieldExpr,
-    TuplePat,
+    TupleStructPat,
     TypedefItem,
     Typing,
 };
@@ -91,6 +90,21 @@ pub struct AstVisitor<'ctx, 'ast, 'b, T, E> where T: AstState, E: AstVisitEmitte
     pub ast_visit_emitter: &'b mut E,
 }
 
+impl<'ctx, 'ast, 'b, T, E> AstVisitor<'ctx, 'ast, 'b, T, E>
+    where T: AstState, E: AstVisitEmitter<'ctx, 'ast, T>
+{
+    pub fn new(ast: Ast<'ast, T>, src: &'b str, ast_visit_emitter: &'b mut E) -> Self {
+        Self {
+            ast,
+            loop_ret_ty: None,
+            fn_ret_ty: None,
+            src,
+            ast_visit_emitter,
+            marker: PhantomData,
+        }
+    }
+}
+
 impl<'ctx, 'ast, 'b, E> AstVisitor<'ctx, 'ast, 'b, AstState0, E>
     where E: AstVisitEmitter<'ctx, 'ast, AstState0>
 {
@@ -123,21 +137,6 @@ impl<'ctx, 'ast, 'b, E> AstVisitor<'ctx, 'ast, 'b, AstState2, E>
     }
 }
 
-impl<'ctx, 'ast, 'b, T, E> AstVisitor<'ctx, 'ast, 'b, T, E>
-    where T: AstState, E: AstVisitEmitter<'ctx, 'ast, T>
-{
-    pub fn new(ast: Ast<'ast, T>, src: &'b str, ast_visit_emitter: &'b mut E) -> Self {
-        Self {
-            ast,
-            loop_ret_ty: None,
-            fn_ret_ty: None,
-            src,
-            ast_visit_emitter,
-            marker: PhantomData,
-        }
-    }
-}
-
 /// This can call functions on the Resolver struct in the resolver crate,
 /// which also implements this trait
 ///
@@ -165,6 +164,7 @@ pub trait AstVisitEmitter<'ctx, 'ast, T>: Sized where T: AstState {
     fn is_main_scope(&mut self) -> bool;
     fn append_fn(&mut self, fn_item: &'ast FnItem<'ast>);
     fn set_def_id_to_global_mem(&mut self, def_id: DefId);
+    fn get_ty_from_node_id(&self, node_id: NodeId) -> Ty;
 
     // fn define(&mut self, node_id: NodeId, symbol: Symbol, name_binding: NameBinding<'ctx>) -> DefId;
     // fn lookup_ident(
@@ -289,14 +289,9 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
         self.insert_query_entry(path_segment.ast_node_id, AstQueryEntry::IdentNode(path_segment))
     }
 
-    fn visit_tuple_pat(&mut self, tuple_pat: &'ast TuplePat<'ast>) -> Self::Result {
-        self.insert_query_entry(tuple_pat.ast_node_id, AstQueryEntry::TuplePat(tuple_pat));
-        walk_tuple_pat(self, tuple_pat)
-    }
-
-    fn visit_if_def_expr(&mut self, if_def_expr: &'ast IfDefExpr<'ast>) -> Self::Result {
-        self.insert_query_entry(if_def_expr.ast_node_id, AstQueryEntry::IfDefExpr(if_def_expr));
-        walk_if_def_expr(self, if_def_expr)
+    fn visit_tuple_struct_pat(&mut self, tuple_pat: &'ast TupleStructPat<'ast>) -> Self::Result {
+        self.insert_query_entry(tuple_pat.ast_node_id, AstQueryEntry::TupleStructPat(tuple_pat));
+        walk_tuple_struct_pat(self, tuple_pat)
     }
 
     fn visit_ident_pat(&mut self, ident_node: &'ast IdentNode) -> Self::Result {
@@ -407,6 +402,129 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
     }
 }
 
+#[derive(Debug)]
+pub enum PatVisitResult<'ast> {
+    IdentWildcard(&'ast IdentNode),
+    // UnderScore,
+    EnumVariant(DefId, Vec<PatVisitResult<'ast>>),
+}
+
+pub struct PatVisitor<'ctx, 'ast, 'b, E>
+    where 'ctx: 'ast, E: AstVisitEmitter<'ctx, 'ast, AstState2> {
+    ast_visit_emitter: &'b mut E,
+    src: &'b str,
+    marker: PhantomData<&'ast &'ctx ()>,
+}
+
+#[derive(Debug)]
+struct PatDefBindings {
+    bindings: Vec<DefId>,
+}
+
+impl<'ctx, 'ast, 'b, E> AstVisitor<'ctx, 'ast, 'b, AstState2, E>
+    where 'ctx: 'ast, E: AstVisitEmitter<'ctx, 'ast, AstState2>
+{
+    fn get_def_bindings_from_ty_and_pat_visit_result(
+        &mut self,
+        pat_visit_result: PatVisitResult,
+        ty: Ty
+    ) -> PatDefBindings {
+        match pat_visit_result {
+            PatVisitResult::IdentWildcard(ident_node) => {
+                let symbol = Symbol::new(&self.src[ident_node.span.get_byte_range()]);
+                let def_id = self.ast_visit_emitter.make_def_id(ident_node.ast_node_id, symbol);
+                self.ast_visit_emitter.bind_def_id_to_lexical_binding(def_id, ResKind::Variable);
+                self.ast_visit_emitter.set_type_to_node_id(ident_node.ast_node_id, ty);
+                PatDefBindings { bindings: vec![def_id] }
+            }
+            PatVisitResult::EnumVariant(def_id, pat_visit_results) => {
+                let name_binding = self.ast_visit_emitter.get_namebinding_from_def_id(def_id);
+                let variant_ty = match name_binding.kind {
+                    NameBindingKind::Adt(Adt::EnumVariant(_, _, variant_ty)) => variant_ty,
+                    _ => panic!("Expected enum variant"),
+                };
+
+                if pat_visit_results.len() != variant_ty.len() {
+                    todo!(
+                        "Expected {} arguments, got {}",
+                        variant_ty.len(),
+                        pat_visit_results.len()
+                    );
+                }
+
+                let mut bindings = Vec::with_capacity(pat_visit_results.len());
+                for (i, pat_visit_result) in pat_visit_results.into_iter().enumerate() {
+                    let field_ty = variant_ty[i];
+                    let field_def_bindings = self.get_def_bindings_from_ty_and_pat_visit_result(
+                        pat_visit_result,
+                        field_ty
+                    );
+                    bindings.extend(field_def_bindings.bindings);
+                }
+
+                PatDefBindings { bindings }
+            }
+        }
+    }
+}
+
+impl<'ctx, 'ast, 'b, E> PatVisitor<'ctx, 'ast, 'b, E>
+    where 'ctx: 'ast, E: AstVisitEmitter<'ctx, 'ast, AstState2>
+{
+    pub fn new(ast_visit_emitter: &'b mut E, src: &'b str) -> Self {
+        Self {
+            ast_visit_emitter,
+            src,
+            marker: PhantomData,
+        }
+    }
+}
+
+impl<'ctx, 'ast, 'b, E> Visitor<'ast>
+    for PatVisitor<'ctx, 'ast, 'b, E>
+    where 'ctx: 'ast, E: AstVisitEmitter<'ctx, 'ast, AstState2>
+{
+    type Result = PatVisitResult<'ast>;
+
+    fn default_result() -> Self::Result {
+        panic!("This shouldn't run");
+    }
+
+    fn visit_tuple_struct_pat(&mut self, tuple_pat: &'ast TupleStructPat<'ast>) -> Self::Result {
+        let lhs_ty = self.ast_visit_emitter.get_ty_from_node_id(tuple_pat.ast_node_id);
+        let def_id = self.ast_visit_emitter.get_def_id_from_node_id(tuple_pat.ast_node_id);
+
+        let adt = match lhs_ty {
+            Ty::Adt(def_id) => {
+                let name_binding = self.ast_visit_emitter.get_namebinding_from_def_id(def_id);
+                match name_binding.kind {
+                    NameBindingKind::Adt(adt) => adt,
+                    _ => panic!("Expected ADT"),
+                }
+            }
+            _ => panic!("Expected ADT"),
+        };
+
+        match adt {
+            Adt::EnumVariant(_, _, _) => {
+                let pats = tuple_pat.fields
+                    .iter()
+                    .map(|pat| self.visit_pat(*pat))
+                    .collect::<Vec<_>>();
+
+                PatVisitResult::EnumVariant(def_id, pats)
+            }
+            // Adt::TupleStruct(_) => todo!(),
+            _ =>
+                panic!("Only enum variants and tuple structs are allowed in tuple struct patterns"),
+        }
+    }
+
+    fn visit_ident_pat(&mut self, ident_node: &'ast IdentNode) -> Self::Result {
+        PatVisitResult::IdentWildcard(ident_node)
+    }
+}
+
 /// Implements the Visitor trait for the second pass (type checking)
 impl<'ctx, 'ast, 'b, E> Visitor<'ast>
     for AstVisitor<'ctx, 'ast, 'b, AstState2, E>
@@ -469,6 +587,9 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
         for item_stmt in item_iter {
             self.visit_item(*item_stmt);
         }
+
+        /* TODO: Add last pass of items, where structs, tuples etc. are laid out most optimally in memory */
+        /* But I should probably not do it here anyways (vielleicht the last pass of ICFG) */
 
         walk_stmts_none_items(self, stmts)
     }
@@ -998,8 +1119,85 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
         }
     }
 
-    fn visit_if_def_expr(&mut self, if_def_expr: &'ast IfDefExpr<'ast>) -> Self::Result {
-        todo!()
+    fn visit_tuple_struct_pat(&mut self, tuple_pat: &'ast TupleStructPat<'ast>) -> Self::Result {
+        let ty = self.visit_path(tuple_pat.path);
+
+        let (def_id, adt) = match ty {
+            Ty::AtdConstructer(def_id) => {
+                let name_binding = self.ast_visit_emitter.get_namebinding_from_def_id(def_id);
+                match name_binding.kind {
+                    NameBindingKind::Adt(adt) => (def_id, adt),
+                    _ => panic!("Expected adt"),
+                }
+            }
+            _ => panic!("Expected adt"),
+        };
+
+        match adt {
+            Adt::EnumVariant(enum_def_id, enum_variant_id, enum_ty) => {
+                let ty = Ty::Adt(def_id);
+                self.ast_visit_emitter.set_type_to_node_id(tuple_pat.ast_node_id, ty);
+                self.ast_visit_emitter.set_def_id_to_node_id(tuple_pat.ast_node_id, def_id);
+
+                for pat in tuple_pat.fields {
+                    self.visit_pat(*pat);
+                }
+
+                return ty;
+            }
+            // Adt::TupleStruct(_) => todo!("Tuple struct"),
+            _ => panic!("Expected enum variant"),
+        }
+    }
+
+    fn visit_ident_pat(&mut self, ident_node: &'ast IdentNode) -> Self::Result {
+        Ty::Unkown
+    }
+
+    fn visit_path_field(&mut self, path_field: &'ast PathField<'ast>) -> Self::Result {
+        let lhs_ty = self.visit_path(path_field.lhs);
+        let rhs_symbol = Symbol::new(&self.src[path_field.rhs.span.get_byte_range()]);
+
+        let def_id = match lhs_ty {
+            Ty::AtdConstructer(def_id) => def_id,
+            _ => panic!("Invalid lhs of path field"),
+        };
+
+        let name_binding = self.ast_visit_emitter.get_namebinding_from_def_id(def_id);
+
+        match name_binding.kind {
+            NameBindingKind::Adt(Adt::Struct(fields)) => {
+                todo!("Lookup constructer method for struct");
+            }
+            NameBindingKind::Adt(Adt::Enum(variants)) => {
+                let variant_def_id = variants.iter().find(|x| x.symbol.get() == rhs_symbol.get());
+
+                if let Some(variant_def_id) = variant_def_id {
+                    let atd_constructor_ty = Ty::AtdConstructer(*variant_def_id);
+                    self.ast_visit_emitter.set_type_to_node_id(
+                        path_field.rhs.ast_node_id,
+                        atd_constructor_ty
+                    );
+                    self.ast_visit_emitter.set_type_to_node_id(
+                        path_field.ast_node_id,
+                        atd_constructor_ty
+                    );
+                    return atd_constructor_ty;
+                } else {
+                    todo!(
+                        "Undefined variant: {}. Lookup constructer method instead (maybe this should be illegal here)",
+                        rhs_symbol.get()
+                    );
+                }
+            }
+            _ => panic!("Invalid lhs of path field"),
+        }
+    }
+
+    fn visit_path_segment(&mut self, path_segment: &'ast IdentNode) -> Self::Result {
+        let ty = self.visit_ident_expr(path_segment);
+        self.ast_visit_emitter.set_type_to_node_id(path_segment.ast_node_id, ty);
+        ty
     }
 
     fn visit_tuple_field_expr(
@@ -1181,14 +1379,43 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
     }
 
     fn visit_if_expr(&mut self, if_expr: &'ast IfExpr<'ast>) -> Self::Result {
-        let cond_type = self.visit_expr(if_expr.condition);
-        if !cond_type.can_be_dereffed_to_bool() {
-            self.ast_visit_emitter.report_error(
-                Error::new(ErrorKind::ExpectedBoolExpr(cond_type), if_expr.span)
-            );
+        match if_expr.cond_kind {
+            CondKind::CondExpr(cond_expr) => {
+                let cond_type = self.visit_expr(cond_expr);
+                if !cond_type.can_be_dereffed_to_bool() {
+                    self.ast_visit_emitter.report_error(
+                        Error::new(ErrorKind::ExpectedBoolExpr(cond_type), if_expr.span)
+                    );
+                }
+                self.ast_visit_emitter.start_scope();
+            }
+            CondKind::CondPat(pat, rhs_expr) => {
+                self.visit_pat(pat);
+                let rhs_ty = self.visit_expr(rhs_expr);
+
+                self.ast_visit_emitter.start_scope();
+                let mut pat_visitor = PatVisitor::new(self.ast_visit_emitter, self.src);
+                let pat_result = pat_visitor.visit_pat(pat);
+
+                let bindings = self.get_def_bindings_from_ty_and_pat_visit_result(
+                    pat_result,
+                    rhs_ty
+                );
+
+                for def_id in &bindings.bindings {
+                    let ty = self.ast_visit_emitter.get_ty_from_def_id(*def_id);
+                    println!(
+                        "IdentWildcard `{}` in pattern is of type `{}`",
+                        def_id.symbol.get(),
+                        ty
+                    );
+                }
+            }
         }
 
-        let true_type = self.visit_block_expr(if_expr.true_block);
+        let true_type = self.visit_stmts(if_expr.true_block);
+        self.ast_visit_emitter.end_scope();
+
         let false_type = if_expr.false_block
             .as_ref()
             .map(|expr| self.visit_if_false_branch_expr(*expr));

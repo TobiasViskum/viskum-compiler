@@ -248,11 +248,11 @@ pub enum Pat<'ast> {
     /// E.g. x in `x := 5`
     IdentPat(&'ast IdentNode),
     // E.g.  in `Option.Some(x) := val`
-    TuplePat(&'ast TuplePat<'ast>),
+    TupleStructPat(&'ast TupleStructPat<'ast>),
 }
 
 #[derive(Debug, new)]
-pub struct TuplePat<'ast> {
+pub struct TupleStructPat<'ast> {
     pub path: Path<'ast>,
     pub fields: &'ast [Pat<'ast>],
     pub ast_node_id: NodeId,
@@ -281,18 +281,7 @@ pub enum Expr<'ast> {
 pub enum ExprWithBlock<'ast> {
     BlockExpr(&'ast BlockExpr<'ast>),
     IfExpr(&'ast IfExpr<'ast>),
-    IfDefExpr(&'ast IfDefExpr<'ast>),
     LoopExpr(&'ast LoopExpr<'ast>),
-}
-
-#[derive(Debug, new)]
-pub struct IfDefExpr<'ast> {
-    pub pat: Pat<'ast>,
-    pub rhs: Expr<'ast>,
-    pub true_block: &'ast BlockExpr<'ast>,
-    pub false_block: Option<IfFalseBranchExpr<'ast>>,
-    pub ast_node_id: NodeId,
-    pub span: Span,
 }
 
 #[derive(Debug, new)]
@@ -307,25 +296,25 @@ pub struct BlockExpr<'ast> {
     pub ast_node_id: NodeId,
 }
 
+#[derive(Debug, new, Clone, Copy)]
+pub enum CondKind<'ast> {
+    CondExpr(Expr<'ast>),
+    CondPat(Pat<'ast>, Expr<'ast>),
+}
+
 #[derive(Debug, new)]
 pub struct IfExpr<'ast> {
-    pub condition: Expr<'ast>,
-    pub true_block: &'ast BlockExpr<'ast>,
+    pub cond_kind: CondKind<'ast>,
+    pub true_block: Stmts<'ast>,
     pub false_block: Option<IfFalseBranchExpr<'ast>>,
     pub ast_node_id: NodeId,
     pub span: Span,
 }
 
 #[derive(Debug, Clone, Copy)]
-pub enum IfExprKind<'ast> {
-    IfExpr(&'ast IfExpr<'ast>),
-    IfDefExpr(&'ast IfDefExpr<'ast>),
-}
-
-#[derive(Debug, Clone, Copy)]
 pub enum IfFalseBranchExpr<'ast> {
     ElseExpr(&'ast BlockExpr<'ast>),
-    IfExprKind(IfExprKind<'ast>),
+    ElifExpr(&'ast IfExpr<'ast>),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -454,7 +443,6 @@ pub fn get_node_id_from_expr(expr: Expr) -> NodeId {
             match expr_with_block {
                 ExprWithBlock::BlockExpr(block_expr) => block_expr.ast_node_id,
                 ExprWithBlock::IfExpr(if_expr) => if_expr.ast_node_id,
-                ExprWithBlock::IfDefExpr(if_def_expr) => if_def_expr.ast_node_id,
                 ExprWithBlock::LoopExpr(loop_expr) => loop_expr.ast_node_id,
             }
         }
@@ -497,6 +485,6 @@ pub fn get_node_id_from_value_expr(value_expr: ValueExpr) -> NodeId {
 pub fn get_node_id_from_pattern(pat: Pat) -> NodeId {
     match pat {
         Pat::IdentPat(ident_pat) => ident_pat.ast_node_id,
-        Pat::TuplePat(tuple_pat) => tuple_pat.ast_node_id,
+        Pat::TupleStructPat(tuple_pat) => tuple_pat.ast_node_id,
     }
 }

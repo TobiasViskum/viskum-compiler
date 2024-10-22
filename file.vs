@@ -36,19 +36,43 @@ fn fib(n Int) Int {
 }
 
 
+enum AnotherEnum {
+    FirstVariant,
+    SecondVariant(Int, Bool, Int),
+    ThirdVariant(Int, (Int, Int))
+}
+
+enum DepthOne {
+    VariantOne(Int, AnotherEnum),
+    VariantTwo(Int, Int)
+}
+
 enum Option {
     Some(Int),
     None
 }
 
-
 fn main() {
+    mut matched := false
+
+    anotherEnum1 := DepthOne.VariantOne(0, AnotherEnum.SecondVariant(2, false, 8))
+
+    anotherEnum2 := DepthOne.VariantTwo(4, 9)
+
+    if DepthOne.VariantOne(k, AnotherEnum.SecondVariant(x, y, z)) := anotherEnum1 {
+        abcabc := x + z
+        matched = true
+    }
+
 
     myEnum := Option.Some(2)
 
-    if Option.Some(value) := myEnum {
-        
+    if Option.Some(xk) := myEnum {
+        abcabc := xk
+        matched = true
     }
+
+   
 
     fib(45)
 
@@ -72,7 +96,7 @@ fn main() {
 
     adkg := iReturnVoid()
 
-    k := if boolean {
+    k := if boolean == true {
         l := 2
         2
     } elif a == 9 {

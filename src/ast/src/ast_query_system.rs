@@ -15,7 +15,6 @@ use crate::{
     FnItem,
     GroupExpr,
     IdentNode,
-    IfDefExpr,
     IfExpr,
     IntegerExpr,
     LoopExpr,
@@ -25,7 +24,7 @@ use crate::{
     StructItem,
     TupleExpr,
     TupleFieldExpr,
-    TuplePat,
+    TupleStructPat,
     TypedefItem,
 };
 
@@ -73,10 +72,9 @@ impl<'ast> AstQuerySystem<'ast> {
 pub enum AstQueryEntry<'ast> {
     TupleExpr(&'ast TupleExpr<'ast>),
     TypedefItem(&'ast TypedefItem<'ast>),
-    IfDefExpr(&'ast IfDefExpr<'ast>),
     LoopExpr(&'ast LoopExpr<'ast>),
     BreakExpr(&'ast BreakExpr<'ast>),
-    TuplePat(&'ast TuplePat<'ast>),
+    TupleStructPat(&'ast TupleStructPat<'ast>),
     StructExpr(&'ast StructExpr<'ast>),
     FieldExpr(&'ast FieldExpr<'ast>),
     PathField(&'ast PathField<'ast>),

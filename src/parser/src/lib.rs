@@ -8,6 +8,7 @@ use ast::{
     BlockExpr,
     BoolExpr,
     BreakExpr,
+    CondKind,
     ContinueExpr,
     EnumItem,
     EnumVariant,
@@ -18,9 +19,7 @@ use ast::{
     FnItem,
     GlobalScope,
     IdentNode,
-    IfDefExpr,
     IfExpr,
-    IfExprKind,
     IfFalseBranchExpr,
     IntegerExpr,
     ItemStmt,
@@ -32,7 +31,7 @@ use ast::{
     ReturnExpr,
     Stmt,
     StructItem,
-    TuplePat,
+    TupleStructPat,
     TypedefItem,
     Typing,
     ValueExpr,
@@ -203,9 +202,9 @@ impl<'a> ParserHandle<'a> for Parser<'a> {
                                     return None;
                                 }
 
-                                let final_pat = Pat::TuplePat(
+                                let final_pat = Pat::TupleStructPat(
                                     self.ast_arena.alloc_expr_or_stmt(
-                                        TuplePat::new(
+                                        TupleStructPat::new(
                                             path,
                                             self.ast_arena.alloc_vec(pat_args),
                                             call_expr.ast_node_id
@@ -887,13 +886,13 @@ impl<'a> Parser<'a> {
         expr_builder.take_expr().expect("TODO:Error handling")
     }
 
-    pub(crate) fn parse_if_expr(&mut self) -> IfExprKind<'a> {
+    pub(crate) fn parse_if_expr(&mut self) -> &'a IfExpr<'a> {
         let cond = self.parse_expr_and_take_with_terminate_infix_token(
             Precedence::PrecAssign.get_next(),
             Some(TokenKind::LeftCurly)
         );
 
-        let if_def_expr_data = if self.is_curr_kind(TokenKind::Define) {
+        let cond_kind = if self.is_curr_kind(TokenKind::Define) {
             // We have an IfDefExpr
             let pat = self.try_as_pat(cond).expect("Expected pattern");
 
@@ -904,14 +903,14 @@ impl<'a> Parser<'a> {
                 Some(TokenKind::LeftCurly)
             );
 
-            Some((pat, rhs))
+            CondKind::CondPat(pat, rhs)
         } else {
-            None
+            CondKind::CondExpr(cond)
         };
 
         self.consume(TokenKind::LeftCurly, "Expected `{` after if condition");
 
-        let true_block = self.parse_block();
+        let true_block = self.parse_block_as_stmts();
 
         self.consume(TokenKind::RightCurly, "Expected `}` after if block");
 
@@ -924,39 +923,15 @@ impl<'a> Parser<'a> {
                 self.consume(TokenKind::RightCurly, "Expected `}` after else block");
                 Some(IfFalseBranchExpr::ElseExpr(block_expr))
             }
-            TokenKind::Elif => Some(IfFalseBranchExpr::IfExprKind(self.parse_if_expr())),
+            TokenKind::Elif => Some(IfFalseBranchExpr::ElifExpr(self.parse_if_expr())),
             _ => None,
         };
 
-        match if_def_expr_data {
-            Some((pat, rhs)) => {
-                let if_def_expr = self.ast_arena.alloc_expr_or_stmt(
-                    IfDefExpr::new(
-                        pat,
-                        rhs,
-                        true_block,
-                        false_block,
-                        self.get_ast_node_id(),
-                        Span::dummy()
-                    )
-                );
+        let if_expr = self.ast_arena.alloc_expr_or_stmt(
+            IfExpr::new(cond_kind, true_block, false_block, self.get_ast_node_id(), Span::dummy())
+        );
 
-                return IfExprKind::IfDefExpr(if_def_expr);
-            }
-            None => {
-                let if_expr = self.ast_arena.alloc_expr_or_stmt(
-                    IfExpr::new(
-                        cond,
-                        true_block,
-                        false_block,
-                        self.get_ast_node_id(),
-                        Span::dummy()
-                    )
-                );
-
-                return IfExprKind::IfExpr(if_expr);
-            }
-        }
+        if_expr
     }
 
     fn parse_block_as_stmts(&mut self) -> &'a [Stmt<'a>] {

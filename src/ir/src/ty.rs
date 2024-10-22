@@ -122,7 +122,7 @@ impl Ty {
                 match name_binding.kind {
                     NameBindingKind::Adt(adt) => {
                         match adt {
-                            Adt::EnumVariant(_, _, ty) => todo!("EnumVariant"),
+                            Adt::EnumVariant(enum_def_id, _, ty) => Ty::Adt(enum_def_id),
                             Adt::Struct(fields) => {
                                 let mut expanded_fields = Vec::with_capacity(fields.len());
                                 for (_, ty) in fields.iter() {
@@ -134,7 +134,7 @@ impl Ty {
                                 Ty::Tuple(TyCtx::intern_many_types(expanded_fields))
                             }
                             Adt::Typedef(ty) => ty.get_expanded_ty(def_id_to_name_binding),
-                            Adt::Enum(variants) => { todo!("Enum variants") }
+                            Adt::Enum(variants) => *self,
                         }
                     }
                     _ => panic!("Invalid ADT"),
