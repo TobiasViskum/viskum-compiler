@@ -2,17 +2,19 @@ use std::cell::RefCell;
 
 use ast::{
     get_node_id_from_expr,
-    get_node_id_from_pattern,
     Ast,
     AstTypeChecked,
     CallExpr,
+    CompDeclItem,
     CondKind,
     Expr,
     FnItem,
     IdentNode,
     IfExpr,
     IfFalseBranchExpr,
+    ItemStmt,
     LoopExpr,
+    NullExpr,
     Pat,
     PlaceExpr,
     ReturnExpr,
@@ -49,7 +51,6 @@ use ir::{
     DefId,
     GetTyAttr,
     GlobalMem,
-    GlobalMemId,
     LocalMem,
     LocalMemId,
     Mutability,
@@ -63,6 +64,7 @@ use ir::{
     TempId,
     Ty,
     TyCtx,
+    BOOL_TY,
     NEVER_TY,
     VOID_TY,
 };
@@ -73,7 +75,8 @@ pub struct IcfgBuilder<'icfg, 'ast> {
     ast: Ast<'ast, AstTypeChecked>,
     cfgs: Vec<Cfg<'icfg>>,
     global_mems: &'icfg RefCell<Vec<GlobalMem>>,
-    resolved_information: &'ast ResolvedInformation<'ast>,
+    resolved_information: ResolvedInformation<'icfg>,
+    clib_fns: Vec<DefId>,
     src: &'ast str,
     arena: &'icfg Bump,
 }
@@ -81,7 +84,7 @@ pub struct IcfgBuilder<'icfg, 'ast> {
 impl<'icfg, 'ast> IcfgBuilder<'icfg, 'ast> {
     pub fn new(
         ast: Ast<'ast, AstTypeChecked>,
-        resolved_information: &'ast ResolvedInformation<'ast>,
+        resolved_information: ResolvedInformation<'icfg>,
         global_mems: &'icfg RefCell<Vec<GlobalMem>>,
         src: &'ast str,
         arena: &'icfg Bump
@@ -90,6 +93,7 @@ impl<'icfg, 'ast> IcfgBuilder<'icfg, 'ast> {
             ast,
             cfgs: Default::default(),
             global_mems,
+            clib_fns: Default::default(),
             resolved_information,
             src,
             arena,
@@ -97,6 +101,19 @@ impl<'icfg, 'ast> IcfgBuilder<'icfg, 'ast> {
     }
 
     pub fn build(mut self, resolved_functions: ResolvedFunctions<'ast>) -> Icfg<'icfg> {
+        for stmt in self.ast.main_scope.stmts {
+            if
+                let Stmt::ItemStmt(
+                    ItemStmt::CompDeclItem(CompDeclItem::CompFnDeclItem(fn_decl_item)),
+                ) = stmt
+            {
+                let def_id = self.resolved_information.get_def_id_from_node_id(
+                    &fn_decl_item.ident_node.ast_node_id
+                );
+                self.clib_fns.push(def_id);
+            }
+        }
+
         let main_fn = resolved_functions.main_fn.expect("Do something if main doesn't exist");
         let cfg_builder = self.new_cfg_builder(main_fn, true);
         let cfg = cfg_builder.build_cfg();
@@ -108,7 +125,7 @@ impl<'icfg, 'ast> IcfgBuilder<'icfg, 'ast> {
             self.cfgs.push(cfg);
         }
 
-        Icfg::new(self.cfgs, self.global_mems)
+        Icfg::new(self.cfgs, self.global_mems, self.resolved_information, self.clib_fns)
     }
 
     pub(crate) fn new_cfg_builder<'c>(
@@ -130,8 +147,8 @@ impl<'icfg, 'ast> IcfgBuilder<'icfg, 'ast> {
     }
 }
 
-pub struct CfgBuilder<'icfg, 'ast, 'b> {
-    icfg_builder: &'b mut IcfgBuilder<'icfg, 'ast>,
+pub struct CfgBuilder<'icfg, 'ast, 'c> {
+    icfg_builder: &'c mut IcfgBuilder<'icfg, 'ast>,
 
     is_main_fn: bool,
     compiling_fn: &'ast FnItem<'ast>,
@@ -152,9 +169,9 @@ pub struct CfgBuilder<'icfg, 'ast, 'b> {
     next_ssa_id: u32,
 }
 
-impl<'icfg, 'ast, 'b> CfgBuilder<'icfg, 'ast, 'b> {
+impl<'icfg, 'ast, 'c> CfgBuilder<'icfg, 'ast, 'c> {
     pub fn new(
-        icfg_builder: &'b mut IcfgBuilder<'icfg, 'ast>,
+        icfg_builder: &'c mut IcfgBuilder<'icfg, 'ast>,
         compiling_fn: &'ast FnItem<'ast>,
         is_main_fn: bool
     ) -> Self {
@@ -186,7 +203,7 @@ impl<'icfg, 'ast, 'b> CfgBuilder<'icfg, 'ast, 'b> {
             &def_id
         );
 
-        let ret_ty = if let NameBindingKind::Fn(fn_sig) = name_binding.kind {
+        let ret_ty = if let NameBindingKind::Fn(fn_sig, _) = name_binding.kind {
             fn_sig.ret_ty
         } else {
             panic!("Expected fn")
@@ -233,7 +250,7 @@ impl<'icfg, 'ast, 'b> CfgBuilder<'icfg, 'ast, 'b> {
                             StoreNode::new(
                                 PlaceKind::LocalMemId(arg_var_local_mem_id),
                                 arg_ty,
-                                Operand::TempId(arg_temp_id),
+                                Operand::from(arg_temp_id),
                                 StoreKind::Init
                             )
                         )
@@ -336,10 +353,20 @@ impl<'icfg, 'ast, 'b> CfgBuilder<'icfg, 'ast, 'b> {
     /// It will as insert many load (deref) instructions as needed to use it as a value
     pub(crate) fn get_operand_from_visit_result(
         &mut self,
-        visit_result: VisitResult
+        visit_result: VisitResult,
+        ty_to_match: Ty
     ) -> (Operand, Ty) {
         match visit_result {
             VisitResult::PlaceKind(place_kind, place_ty) => {
+                if
+                    place_ty.test_eq_strict(
+                        ty_to_match,
+                        &self.icfg_builder.resolved_information.def_id_to_name_binding
+                    )
+                {
+                    return (Operand::PlaceKind(place_kind), place_ty);
+                }
+
                 let (temp_id, ty) = match place_kind {
                     PlaceKind::TempId(temp_id) => (temp_id, place_ty),
                     // Now we have to load, because it refers to a stack allocated place
@@ -365,7 +392,16 @@ impl<'icfg, 'ast, 'b> CfgBuilder<'icfg, 'ast, 'b> {
                 let (mut temp_id, mut ty) = (temp_id, ty);
 
                 loop {
-                    if let Ty::Ptr(inner_ty) = ty {
+                    if
+                        ty.test_eq_strict(
+                            ty_to_match,
+                            &self.icfg_builder.resolved_information.def_id_to_name_binding
+                        )
+                    {
+                        break;
+                    }
+
+                    if let Ty::Ptr(inner_ty, _) = ty {
                         let new_temp_id = self.get_temp_id();
                         self.push_node(
                             Node::new(
@@ -385,7 +421,7 @@ impl<'icfg, 'ast, 'b> CfgBuilder<'icfg, 'ast, 'b> {
                     break;
                 }
 
-                (Operand::TempId(temp_id), ty)
+                (Operand::from(temp_id), ty)
             }
             VisitResult::Const(const_val) => (Operand::Const(const_val), const_val.get_ty()),
         }
@@ -413,8 +449,8 @@ impl Default for VisitResult {
     }
 }
 
-fn set_result_mem_id_to_if_expr_result<'icfg, 'ast, 'b>(
-    cfg_builder: &mut CfgBuilder<'icfg, 'ast, 'b>,
+fn set_result_mem_id_to_if_expr_result<'icfg, 'ast, 'c>(
+    cfg_builder: &mut CfgBuilder<'icfg, 'ast, 'c>,
     if_expr: &'ast IfExpr<'ast>
 ) -> ResultMemId {
     let result_mem_id = cfg_builder.set_result_mem_id_to_expr_result(
@@ -445,6 +481,10 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
 
     fn visit_bool_expr(&mut self, bool_expr: &'ast ast::BoolExpr) -> Self::Result {
         VisitResult::Const(Const::Bool(bool_expr.val))
+    }
+
+    fn visit_null_expr(&mut self, _: &'ast NullExpr) -> Self::Result {
+        VisitResult::Const(Const::Null)
     }
 
     fn visit_ident_expr(&mut self, ident_node: &'ast IdentNode) -> Self::Result {
@@ -491,7 +531,7 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
                     ty => {
                         let return_operand = {
                             let return_visit_result = self.visit_expr(expr);
-                            self.get_operand_from_visit_result(return_visit_result).0
+                            self.get_operand_from_visit_result(return_visit_result, ret_ty).0
                         };
 
                         self.push_node(
@@ -555,7 +595,7 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
                                     cmp_tmp_id,
                                     Ty::PrimTy(PrimTy::Int64),
                                     BinaryOp::ComparisonOp(ComparisonOp::Eq),
-                                    Operand::TempId(load_temp_id),
+                                    Operand::from(load_temp_id),
                                     Operand::Const(Const::Int(enum_variant_id.0 as i64))
                                 )
                             )
@@ -574,7 +614,7 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
                     }
 
                     let (mut false_bb_ids, mut store_nodes) = (
-                        vec![(Operand::TempId(cmp_tmp_id), current_bb_id)],
+                        vec![(Operand::from(cmp_tmp_id), current_bb_id)],
                         vec![],
                     );
                     let mut byte_offset = 8;
@@ -617,7 +657,7 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
                             let store_node = StoreNode::new(
                                 PlaceKind::LocalMemId(local_mem_id),
                                 *ty,
-                                Operand::TempId(load_temp_id),
+                                Operand::from(load_temp_id),
                                 StoreKind::Init
                             );
 
@@ -655,16 +695,21 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
             }
         }
 
+        let ty_to_match = self.icfg_builder.get_ty_from_node_id(if_expr.ast_node_id);
+
         fn compile_true_block<'icfg, 'ast, 'c>(
             cfg_builder: &mut CfgBuilder<'icfg, 'ast, 'c>,
             true_block: &'ast [Stmt<'ast>],
-            result_mem_id: Option<ResultMemId>
+            result_mem_id: Option<ResultMemId>,
+            ty_to_match: Ty
         ) -> (BasicBlockId, BasicBlockId) {
             let first_true_bb_id = cfg_builder.new_basic_block();
             let true_visit_result = cfg_builder.visit_stmts(true_block);
             if let Some(result_mem_id) = result_mem_id {
-                let (true_operand, true_ty) =
-                    cfg_builder.get_operand_from_visit_result(true_visit_result);
+                let (true_operand, true_ty) = cfg_builder.get_operand_from_visit_result(
+                    true_visit_result,
+                    ty_to_match
+                );
 
                 cfg_builder.push_node(
                     Node::new(
@@ -717,8 +762,10 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
 
                     let true_visit_result = self.visit_stmts(if_expr.true_block);
                     if let Some(result_mem_id) = result_mem_id {
-                        let (true_operand, true_ty) =
-                            self.get_operand_from_visit_result(true_visit_result);
+                        let (true_operand, true_ty) = self.get_operand_from_visit_result(
+                            true_visit_result,
+                            ty_to_match
+                        );
 
                         self.push_node(
                             Node::new(
@@ -767,8 +814,10 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
                         }
                         IfFalseBranchExpr::ElseExpr(else_expr) => {
                             let false_visit_result = self.visit_block_expr(else_expr);
-                            let (false_operand, false_ty) =
-                                self.get_operand_from_visit_result(false_visit_result);
+                            let (false_operand, false_ty) = self.get_operand_from_visit_result(
+                                false_visit_result,
+                                ty_to_match
+                            );
                             if let Some(result_mem_id) = result_mem_id {
                                 self.push_node(
                                     Node::new(
@@ -831,13 +880,14 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
             CondKind::CondExpr(cond_expr) => {
                 let (cond_operand, _) = {
                     let cond_visit_result = self.visit_expr(cond_expr);
-                    self.get_operand_from_visit_result(cond_visit_result)
+                    self.get_operand_from_visit_result(cond_visit_result, BOOL_TY)
                 };
 
                 let (first_true_bb_id, last_true_bb_id) = compile_true_block(
                     self,
                     if_expr.true_block,
-                    result_mem_id
+                    result_mem_id,
+                    ty_to_match
                 );
 
                 if let Some(false_branch) = &if_expr.false_block {
@@ -870,8 +920,10 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
                         }
                         IfFalseBranchExpr::ElseExpr(else_expr) => {
                             let false_visit_result = self.visit_block_expr(else_expr);
-                            let (false_operand, false_ty) =
-                                self.get_operand_from_visit_result(false_visit_result);
+                            let (false_operand, false_ty) = self.get_operand_from_visit_result(
+                                false_visit_result,
+                                ty_to_match
+                            );
                             if let Some(result_mem_id) = result_mem_id {
                                 self.push_node(
                                     Node::new(
@@ -934,8 +986,8 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
     }
 
     fn visit_loop_expr(&mut self, loop_expr: &'ast LoopExpr<'ast>) -> Self::Result {
-        fn set_result_mem_id_to_loop_expr_result<'icfg, 'ast, 'b>(
-            cfg_builder: &mut CfgBuilder<'icfg, 'ast, 'b>,
+        fn set_result_mem_id_to_loop_expr_result<'icfg, 'ast, 'c>(
+            cfg_builder: &mut CfgBuilder<'icfg, 'ast, 'c>,
             loop_expr: &'ast LoopExpr<'ast>
         ) -> ResultMemId {
             cfg_builder.set_result_mem_id_to_expr_result(
@@ -1015,17 +1067,17 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
     }
 
     fn visit_call_expr(&mut self, call_expr: &'ast CallExpr<'ast>) -> Self::Result {
-        let ty = self.icfg_builder.get_ty_from_node_id(call_expr.ast_node_id);
+        let ty = self.icfg_builder.get_ty_from_node_id(get_node_id_from_expr(call_expr.callee));
 
-        if let Ty::Adt(enum_variant_def_id) = ty {
+        if let Ty::AtdConstructer(enum_variant_def_id) = ty {
             let name_binding = self.icfg_builder.resolved_information.get_name_binding_from_def_id(
                 &enum_variant_def_id
             );
-            let (enum_ty, enum_variant_id) = match name_binding.kind {
-                NameBindingKind::Adt(Adt::EnumVariant(enum_def_id, enum_variant_id, _)) => {
-                    (Ty::Adt(enum_def_id), enum_variant_id)
+            let (enum_ty, enum_variant_id, enum_data) = match name_binding.kind {
+                NameBindingKind::Adt(Adt::EnumVariant(enum_def_id, enum_variant_id, enum_data)) => {
+                    (Ty::Adt(enum_def_id), enum_variant_id, enum_data)
                 }
-                _ => panic!("Expected fn"),
+                t => panic!("Expected enum variant, got {:?}", t),
             };
 
             let result_mem_id = self.new_result_mem(enum_ty);
@@ -1047,9 +1099,11 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
             // Now we store the data
             let arg_operands = call_expr.args
                 .iter()
-                .map(|arg| {
+                .enumerate()
+                .map(|(i, arg)| {
+                    let arg_ty = enum_data[i];
                     let visit_result = self.visit_expr(*arg);
-                    self.get_operand_from_visit_result(visit_result)
+                    self.get_operand_from_visit_result(visit_result, arg_ty)
                 })
                 .collect::<Vec<_>>();
 
@@ -1091,30 +1145,28 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
             );
         }
 
-        let get_fn_args_ty_from_callee_ty = |callee_ty: Ty| {
-            match callee_ty {
-                Ty::FnDef(def_id) => {
-                    let name_binding =
-                        self.icfg_builder.resolved_information.get_name_binding_from_def_id(
-                            &def_id
-                        );
-                    if let NameBindingKind::Fn(fn_sig) = name_binding.kind {
-                        fn_sig.args
-                    } else {
-                        panic!("Expected fn")
-                    }
+        let arg_tys = match ty.auto_deref() {
+            Ty::FnDef(def_id) => {
+                let name_binding =
+                    self.icfg_builder.resolved_information.get_name_binding_from_def_id(&def_id);
+                if let NameBindingKind::Fn(fn_sig, _) = name_binding.kind {
+                    fn_sig.args
+                } else {
+                    panic!("Expected fn")
                 }
-                Ty::FnSig(fn_sig) => fn_sig.args,
-                ty => panic!("Expected fn, got {}", ty),
             }
+            Ty::FnSig(fn_sig) => fn_sig.args,
+            ty => panic!("Expected fn, got {}", ty),
         };
 
         let arg_operands = {
             let arg_operands = call_expr.args
                 .iter()
-                .map(|arg| {
+                .enumerate()
+                .map(|(i, arg)| {
+                    let ty_to_match = arg_tys[i];
                     let visit_result = self.visit_expr(*arg);
-                    self.get_operand_from_visit_result(visit_result).0
+                    self.get_operand_from_visit_result(visit_result, ty_to_match).0
                 })
                 .collect::<Vec<_>>();
             TyCtx::intern_many_types(arg_operands)
@@ -1123,8 +1175,27 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
 
         let visit_result = self.visit_expr(call_expr.callee);
 
-        let (callee_operand, callee_ty) = self.get_operand_from_visit_result(visit_result);
-        let fn_args_ty = get_fn_args_ty_from_callee_ty(callee_ty);
+        let calle_ty = self.icfg_builder.get_ty_from_node_id(
+            get_node_id_from_expr(call_expr.callee)
+        );
+
+        let (callee_operand, callee_ty) = self.get_operand_from_visit_result(
+            visit_result,
+            ty.auto_deref()
+        );
+        let fn_args_ty = match callee_ty.auto_deref() {
+            Ty::FnDef(def_id) => {
+                let name_binding =
+                    self.icfg_builder.resolved_information.get_name_binding_from_def_id(&def_id);
+                if let NameBindingKind::Fn(fn_sig, _) = name_binding.kind {
+                    fn_sig.args
+                } else {
+                    panic!("Expected fn")
+                }
+            }
+            Ty::FnSig(fn_sig) => fn_sig.args,
+            ty => panic!("Expected fn, got {}", ty),
+        };
 
         let temp_id = self.get_temp_id();
         let call_node = Node::new(
@@ -1189,9 +1260,14 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
 
     /// Assumes read for now
     fn visit_field_expr(&mut self, field_expr: &'ast ast::FieldExpr<'ast>) -> Self::Result {
-        let lhs_visit_result = self.visit_expr(field_expr.lhs);
-        let lhs_place = match lhs_visit_result {
-            VisitResult::PlaceKind(place_kind, _) => place_kind,
+        let ty = self.icfg_builder.get_ty_from_node_id(get_node_id_from_expr(field_expr.lhs));
+
+        let visit_result = self.visit_expr(field_expr.lhs);
+
+        let lhs_place = match
+            self.get_operand_from_visit_result(visit_result, ty.deref_until_single_ptr())
+        {
+            (Operand::PlaceKind(place), _) => place,
             _ => unreachable!("This should be unreachable if type checking was successful"),
         };
 
@@ -1208,6 +1284,8 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
             None => unreachable!("Should not be able to go here if previous pass was successfull"),
         };
 
+        let is_mutable = ty.deref_until_single_ptr().is_mut_ptr();
+
         let mut byte_offset = 0;
         let elem_ty = struct_fields
             .iter()
@@ -1222,8 +1300,9 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
                 }
             ))
             .map(|x| x.1)
-            .expect("Expected field")
-            .to_ptr_ty();
+            .expect("Expected field");
+
+        let elem_ty = if is_mutable { elem_ty.to_mut_ptr_ty() } else { elem_ty.to_ptr_ty() };
 
         if byte_offset == 0 {
             VisitResult::PlaceKind(lhs_place, elem_ty)
@@ -1242,30 +1321,32 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
     }
 
     fn visit_assign_stmt(&mut self, assign_stmt: &'ast ast::AssignStmt<'ast>) -> Self::Result {
-        let local_mem_id = match assign_stmt.setter_expr {
+        let setter_place = match assign_stmt.setter_expr {
             PlaceExpr::IdentExpr(ident_expr) => {
-                // let ty = self.icfg_builder.get_ty_from_node_id(ident_expr.ast_node_id);
                 let def_id = self.icfg_builder.get_def_id_from_node_id(ident_expr.ast_node_id);
                 let local_mem_id = self.get_local_mem_id_from_def_id(def_id);
-                local_mem_id
+                PlaceKind::LocalMemId(local_mem_id)
             }
             PlaceExpr::TupleFieldExpr(_) => panic!("Tuple field expr not yet supported"),
-            PlaceExpr::FieldExpr(_) => panic!("Field expr not yet supported"),
+            PlaceExpr::FieldExpr(field_expr) => {
+                let visit_result = self.visit_field_expr(field_expr);
+                match visit_result {
+                    VisitResult::PlaceKind(place_kind, _) => place_kind,
+                    _ => unreachable!("Expected PlaceKind"),
+                }
+            }
+            PlaceExpr::IndexExpr(_) => todo!("Index expr not yet supported"),
         };
+        let ty_to_match = self.icfg_builder.get_ty_from_node_id(
+            get_node_id_from_expr(assign_stmt.value_expr)
+        );
 
         let value_visit_result = self.visit_expr(assign_stmt.value_expr);
-        let (operand, op_ty) = self.get_operand_from_visit_result(value_visit_result);
+        let (operand, op_ty) = self.get_operand_from_visit_result(value_visit_result, ty_to_match);
 
         self.push_node(
             Node::new(
-                NodeKind::StoreNode(
-                    StoreNode::new(
-                        PlaceKind::LocalMemId(local_mem_id),
-                        op_ty,
-                        operand,
-                        StoreKind::Assign
-                    )
-                )
+                NodeKind::StoreNode(StoreNode::new(setter_place, op_ty, operand, StoreKind::Assign))
             )
         );
 
@@ -1314,9 +1395,12 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
             Pat::TupleStructPat(_) => unreachable!("Should have been caught by type checking"),
         };
 
-        let value_visit_result = self.visit_expr(def_stmt.value_expr);
+        let ty_to_match = self.icfg_builder.get_ty_from_node_id(
+            get_node_id_from_expr(def_stmt.value_expr)
+        );
 
-        let (operand, op_ty) = self.get_operand_from_visit_result(value_visit_result);
+        let value_visit_result = self.visit_expr(def_stmt.value_expr);
+        let (operand, op_ty) = self.get_operand_from_visit_result(value_visit_result, ty_to_match);
 
         self.push_node(
             Node::new(
@@ -1382,12 +1466,28 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
 
     fn visit_binary_expr(&mut self, binary_expr: &'ast ast::BinaryExpr<'ast>) -> Self::Result {
         let (lhs_operand, lhs_ty) = {
+            let ty_to_match = self.icfg_builder.get_ty_from_node_id(
+                get_node_id_from_expr(binary_expr.lhs)
+            );
             let lhs_visit_result = self.visit_expr(binary_expr.lhs);
-            self.get_operand_from_visit_result(lhs_visit_result)
+            self.get_operand_from_visit_result(
+                lhs_visit_result,
+                ty_to_match.get_expanded_dereffed_ty(
+                    &self.icfg_builder.resolved_information.def_id_to_name_binding
+                )
+            )
         };
         let (rhs_operand, rhs_ty) = {
+            let ty_to_match = self.icfg_builder.get_ty_from_node_id(
+                get_node_id_from_expr(binary_expr.rhs)
+            );
             let rhs_visit_result = self.visit_expr(binary_expr.rhs);
-            self.get_operand_from_visit_result(rhs_visit_result)
+            self.get_operand_from_visit_result(
+                rhs_visit_result,
+                ty_to_match.get_expanded_dereffed_ty(
+                    &self.icfg_builder.resolved_information.def_id_to_name_binding
+                )
+            )
         };
 
         let result_ty = lhs_ty
@@ -1412,16 +1512,17 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
     }
 }
 
-impl<'icfg, 'ast, 'b> CfgBuilder<'icfg, 'ast, 'b> {
+impl<'icfg, 'ast, 'c> CfgBuilder<'icfg, 'ast, 'c> {
     fn init_tuple_or_struct_field(
         &mut self,
         expr: Expr<'ast>,
         result_mem_id: ResultMemId,
         byte_offset: usize
     ) -> usize {
+        let ty_to_match = self.icfg_builder.get_ty_from_node_id(get_node_id_from_expr(expr));
         let visit_result = self.visit_expr(expr);
 
-        let (operand, operand_ty) = self.get_operand_from_visit_result(visit_result);
+        let (operand, operand_ty) = self.get_operand_from_visit_result(visit_result, ty_to_match);
 
         if byte_offset == 0 {
             self.push_node(

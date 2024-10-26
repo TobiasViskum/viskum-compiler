@@ -6,10 +6,19 @@ use span::Span;
 
 use crate::{ Symbol, Ty };
 
-#[derive(PartialEq, Debug, Clone, Copy)]
+#[derive(Hash, Eq, PartialEq, Debug, Clone, Copy)]
 pub enum Mutability {
     Mutable,
     Immutable,
+}
+
+impl Display for Mutability {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Mutability::Mutable => write!(f, "mut "),
+            Mutability::Immutable => Ok(()),
+        }
+    }
 }
 
 #[derive(Eq, Hash, PartialEq, Debug, Clone, Copy)]
@@ -74,6 +83,14 @@ impl DefId {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum Externism {
+    /// Refers to a function in the Clib (Clang)
+    Clib,
+    /// Refers to all other funcitons
+    NoExtern,
+}
+
 /// Information about a definition
 #[derive(Debug, Clone, Copy)]
 pub struct NameBinding<'res> {
@@ -89,7 +106,7 @@ impl<'res> NameBinding<'res> {
         match self.kind {
             NameBindingKind::Variable(_) => ResKind::Variable,
             NameBindingKind::Adt(_) => ResKind::Adt,
-            NameBindingKind::Fn(_) => ResKind::Fn,
+            NameBindingKind::Fn(_, _) => ResKind::Fn,
         }
     }
 }
@@ -98,7 +115,7 @@ impl<'res> NameBinding<'res> {
 pub enum NameBindingKind<'res> {
     Variable(Mutability),
     Adt(Adt<'res>),
-    Fn(FnSig),
+    Fn(FnSig, Externism),
     // Module
     // Import
 }
@@ -167,6 +184,13 @@ impl<'res> ResolvedInformation<'res> {
         *self.def_id_to_global_mem_id
             .get(def_id)
             .expect("Expected global mem to be binded to def id")
+    }
+
+    pub fn is_clib_fn(&self, def_id: &DefId) -> bool {
+        match self.get_name_binding_from_def_id(def_id).kind {
+            NameBindingKind::Fn(_, Externism::Clib) => true,
+            _ => false,
+        }
     }
 }
 

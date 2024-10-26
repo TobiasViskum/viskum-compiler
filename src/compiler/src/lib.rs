@@ -9,11 +9,32 @@ use ir::{ GlobalMem, ResolvedInformation };
 use parser::Parser;
 use resolver::Resolver;
 
-pub struct Compiler;
+pub struct Compiler {
+    file: String,
+}
 
 impl Compiler {
     pub fn new() -> Self {
-        Self
+        let mut args = std::env::args();
+        args.next();
+
+        let input_file = if let Some(input_file) = args.next() {
+            input_file
+        } else {
+            println!("Missing file input");
+            std::process::exit(1);
+        };
+
+        // Ends with .vs
+
+        let input_file = if !input_file.ends_with(".vs") {
+            println!("File must end with .vs");
+            std::process::exit(1);
+        } else {
+            input_file.replace(".vs", "")
+        };
+
+        Self { file: input_file }
     }
 
     pub fn compile_entry(&self) {
@@ -21,14 +42,14 @@ impl Compiler {
 
         let arena = Bump::new();
         let global_mems = RefCell::new(Vec::new());
-        let (icfg, resolved_information) = self.build_to_icfg(&arena, &global_mems);
+        let icfg = self.build_to_icfg(&arena, &global_mems);
 
         // IcfgPrettifier::new(&icfg).print_icfg();
 
         println!("Viskum compilation took: {:?}", now.elapsed());
 
         let now = std::time::Instant::now();
-        CodeGen::new(&icfg).gen_code("file", &resolved_information);
+        CodeGen::new(&icfg).gen_code(&self.file);
         println!("LLVM compilation took: {:?}", now.elapsed());
     }
 
@@ -36,8 +57,8 @@ impl Compiler {
         &self,
         arena: &'a Bump,
         global_mems: &'a RefCell<Vec<GlobalMem>>
-    ) -> (Icfg<'a>, ResolvedInformation<'a>) {
-        let file_content = Self::get_file_content();
+    ) -> Icfg<'a> {
+        let file_content = self.get_file_content();
         let ast_arena = AstArena::new();
 
         let (resolved, ast) = {
@@ -64,26 +85,18 @@ impl Compiler {
         //     Some(&resolved_information.node_id_to_ty)
         // ).print_ast();
 
-        let icfg_builder = IcfgBuilder::new(ast, &resolved.1, global_mems, &file_content, arena);
+        let icfg_builder = IcfgBuilder::new(ast, resolved.1, global_mems, &file_content, arena);
         let icfg = icfg_builder.build(resolved.0);
-        (icfg, resolved.1)
+        icfg
     }
 
-    fn get_file_content() -> String {
-        let mut args = std::env::args();
-        args.next();
-
-        if let Some(input_file) = args.next() {
-            match std::fs::read_to_string(input_file) {
-                Ok(file_content) => file_content,
-                Err(e) => {
-                    eprintln!("Error reading file: {}", e);
-                    std::process::exit(1);
-                }
+    fn get_file_content(&self) -> String {
+        match std::fs::read_to_string(&format!("{}.vs", self.file)) {
+            Ok(file_content) => file_content,
+            Err(e) => {
+                eprintln!("Error reading file: {}", e);
+                std::process::exit(1);
             }
-        } else {
-            println!("Missing file input");
-            std::process::exit(1);
         }
     }
 }

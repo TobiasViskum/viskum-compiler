@@ -50,8 +50,8 @@ impl<'b> IcfgPrettifier<'b> {
             write!(temp_buffer, "(")?;
 
             match &operand {
-                Operand::TempId(place) => {
-                    let displayed_place = Self::display_place_kind(&PlaceKind::TempId(*place), cfg);
+                Operand::PlaceKind(place) => {
+                    let displayed_place = Self::display_place_kind(place, cfg);
                     write!(temp_buffer, "{}", displayed_place)?;
                 }
                 Operand::Const(const_val) => write!(temp_buffer, "{}", const_val)?,

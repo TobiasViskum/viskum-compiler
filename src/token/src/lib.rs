@@ -41,6 +41,10 @@ pub enum TokenKind {
     LeftCurly,
     /// `}`
     RightCurly,
+    /// `[`
+    LeftSquare,
+    /// `]`
+    RightSquare,
     /// `==`
     Eq,
     /// `!=`
@@ -94,6 +98,13 @@ pub enum TokenKind {
     /// Identifier e.g. `a`
     Ident,
 
+    /* Null */
+    /// Null literal `null`
+    Null,
+
+    /* Keywords */
+    /// Keyword `declare`
+    Declare,
     /// Keyword `def`
     Fn,
     /// Keyword `def`

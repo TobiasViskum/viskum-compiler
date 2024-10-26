@@ -15,8 +15,10 @@ use ast::{
     GroupExpr,
     IdentNode,
     IfExpr,
+    IndexExpr,
     IntegerExpr,
     LoopExpr,
+    NullExpr,
     PlaceExpr,
     Stmt,
     StructExpr,
@@ -119,6 +121,24 @@ impl<'ast> ExprBuilder<'ast> {
         let expr = Expr::ExprWithoutBlock(
             ExprWithoutBlock::PlaceExpr(PlaceExpr::TupleFieldExpr(tuple_field_expr))
         );
+        self.exprs.push(expr);
+    }
+
+    pub fn emit_index_expr(
+        &mut self,
+        value_expr: Expr<'ast>,
+        parser_handle: &mut impl ParserHandle<'ast>
+    ) {
+        let index_expr = {
+            let lhs = self.exprs.pop().expect("TODO: Error handling");
+            let index_expr = IndexExpr::new(lhs, value_expr, parser_handle.get_ast_node_id());
+            self.ast_arena.alloc_expr_or_stmt(index_expr)
+        };
+
+        let expr = Expr::ExprWithoutBlock(
+            ExprWithoutBlock::PlaceExpr(PlaceExpr::IndexExpr(index_expr))
+        );
+
         self.exprs.push(expr);
     }
 
@@ -231,6 +251,16 @@ impl<'ast> ExprBuilder<'ast> {
 
         let expr = Expr::ExprWithoutBlock(
             ExprWithoutBlock::PlaceExpr(PlaceExpr::IdentExpr(ident_node))
+        );
+
+        self.exprs.push(expr);
+    }
+
+    pub fn emit_null_expr(&mut self, null_expr: NullExpr) {
+        let null_expr = self.ast_arena.alloc_expr_or_stmt(null_expr);
+
+        let expr = Expr::ExprWithoutBlock(
+            ExprWithoutBlock::ValueExpr(ValueExpr::ConstExpr(ConstExpr::NullExpr(null_expr)))
         );
 
         self.exprs.push(expr);

@@ -10,6 +10,7 @@ use ast::{
     AstState3,
     AstTypeChecked,
     AstVisitEmitter,
+    CompFnDeclItem,
     FnItem,
 };
 use bumpalo::Bump;
@@ -53,6 +54,7 @@ pub struct Resolver<'ctx, 'ast> {
 
     found_main_fn: Option<&'ast FnItem<'ast>>,
     pending_functions: Vec<&'ast FnItem<'ast>>,
+    comp_decl_items: Vec<&'ast CompFnDeclItem<'ast>>,
 
     /* Arena */
     arena: &'ctx Bump,
@@ -133,6 +135,7 @@ impl<'ctx, 'ast> Resolver<'ctx, 'ast> where 'ctx: 'ast {
             next_context_id: ContextId(1),
             found_main_fn: None,
             pending_functions: Vec::with_capacity(ast.fn_count),
+            comp_decl_items: Default::default(),
             src,
             errors: Default::default(),
         };
@@ -261,7 +264,9 @@ impl<'ctx, 'ast, T> AstVisitEmitter<'ctx, 'ast, T> for Resolver<'ctx, 'ast> wher
     fn append_fn(&mut self, fn_item: &'ast FnItem<'ast>) {
         self.pending_functions.push(fn_item);
     }
-
+    fn append_comp_decl(&mut self, comp_fn_decl: ast::CompDeclItem<'ast>) {
+        panic!()
+    }
     fn set_main_fn(&mut self, main_fn: &'ast FnItem<'ast>) -> bool {
         if self.found_main_fn.is_none() {
             self.found_main_fn = Some(main_fn);

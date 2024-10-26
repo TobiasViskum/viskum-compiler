@@ -13,6 +13,8 @@ use crate::{
     BoolExpr,
     BreakExpr,
     CallExpr,
+    CompDeclItem,
+    CompFnDeclItem,
     CondKind,
     ConstExpr,
     ContinueExpr,
@@ -27,9 +29,11 @@ use crate::{
     IdentNode,
     IfExpr,
     IfFalseBranchExpr,
+    IndexExpr,
     IntegerExpr,
     ItemStmt,
     LoopExpr,
+    NullExpr,
     Pat,
     Path,
     PathField,
@@ -67,6 +71,10 @@ pub trait Visitor<'ast>: Sized {
     }
     #[allow(unused_variables)]
     fn visit_bool_expr(&mut self, bool_expr: &'ast BoolExpr) -> Self::Result {
+        Self::default_result()
+    }
+    #[allow(unused_variables)]
+    fn visit_null_expr(&mut self, null_expr: &'ast NullExpr) -> Self::Result {
         Self::default_result()
     }
     #[allow(unused_variables)]
@@ -153,7 +161,19 @@ pub trait Visitor<'ast>: Sized {
             ItemStmt::StructItem(struct_item) => self.visit_struct_item(struct_item),
             ItemStmt::TypedefItem(typedef_item) => self.visit_typedef_item(typedef_item),
             ItemStmt::EnumItem(enum_item) => self.visit_enum_item(enum_item),
+            ItemStmt::CompDeclItem(comp_decl_item) => self.visit_comp_decl_item(comp_decl_item),
         }
+    }
+
+    fn visit_comp_decl_item(&mut self, comp_decl_item: CompDeclItem<'ast>) -> Self::Result {
+        walk_comp_decl_item(self, comp_decl_item)
+    }
+
+    fn visit_comp_fn_decl_item(
+        &mut self,
+        comp_fn_decl_item: &'ast CompFnDeclItem<'ast>
+    ) -> Self::Result {
+        Self::default_result()
     }
 
     fn visit_typedef_item(&mut self, typedef_item: &'ast TypedefItem<'ast>) -> Self::Result {
@@ -190,6 +210,10 @@ pub trait Visitor<'ast>: Sized {
 
     fn visit_field_expr(&mut self, field_expr: &'ast FieldExpr<'ast>) -> Self::Result {
         walk_field_expr(self, field_expr)
+    }
+
+    fn visit_index_expr(&mut self, index_expr: &'ast IndexExpr<'ast>) -> Self::Result {
+        walk_index_expr(self, index_expr)
     }
 
     fn visit_struct_expr(&mut self, struct_expr: &'ast StructExpr<'ast>) -> Self::Result {
@@ -327,6 +351,7 @@ pub fn walk_place_expr<'a, V>(visitor: &mut V, place_expr: PlaceExpr<'a>) -> V::
         PlaceExpr::TupleFieldExpr(tuple_field_expr) =>
             visitor.visit_tuple_field_expr(tuple_field_expr),
         PlaceExpr::FieldExpr(field_expr) => visitor.visit_field_expr(field_expr),
+        PlaceExpr::IndexExpr(index_expr) => visitor.visit_index_expr(index_expr),
     }
 }
 
@@ -347,6 +372,13 @@ pub fn walk_field_expr<'a, V>(visitor: &mut V, field_expr: &'a FieldExpr<'a>) ->
     visitor.visit_ident_expr(field_expr.rhs)
 }
 
+pub fn walk_index_expr<'a, V>(visitor: &mut V, index_expr: &'a IndexExpr<'a>) -> V::Result
+    where V: Visitor<'a>
+{
+    visitor.visit_expr(index_expr.lhs);
+    visitor.visit_expr(index_expr.value_expr)
+}
+
 pub fn walk_value_expr<'a, V>(visitor: &mut V, value_expr: ValueExpr<'a>) -> V::Result
     where V: Visitor<'a>
 {
@@ -357,6 +389,15 @@ pub fn walk_value_expr<'a, V>(visitor: &mut V, value_expr: ValueExpr<'a>) -> V::
         ValueExpr::ConstExpr(const_expr) => visitor.visit_const_expr(const_expr),
         ValueExpr::StructExpr(struct_expr) => visitor.visit_struct_expr(struct_expr),
         ValueExpr::CallExpr(call_expr) => visitor.visit_call_expr(call_expr),
+    }
+}
+
+pub fn walk_comp_decl_item<'a, V>(visitor: &mut V, comp_decl_item: CompDeclItem<'a>) -> V::Result
+    where V: Visitor<'a>
+{
+    match comp_decl_item {
+        CompDeclItem::CompFnDeclItem(comp_fn_decl_item) =>
+            visitor.visit_comp_fn_decl_item(comp_fn_decl_item),
     }
 }
 
@@ -463,6 +504,7 @@ pub fn walk_const_expr<'a, V>(visitor: &mut V, const_expr: ConstExpr<'a>) -> V::
     match const_expr {
         ConstExpr::IntegerExpr(expr) => visitor.visit_interger_expr(expr),
         ConstExpr::BoolExpr(expr) => visitor.visit_bool_expr(expr),
+        ConstExpr::NullExpr(expr) => visitor.visit_null_expr(expr),
     }
 }
 

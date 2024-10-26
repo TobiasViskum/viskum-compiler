@@ -20,8 +20,10 @@ use op::{ ArithmeticOp, BinaryOp, ComparisonOp };
 use ir::{
     CfgFnKind,
     DefId,
+    Externism,
     GetTyAttr,
     LocalMem,
+    NameBindingKind,
     PrimTy,
     ResolvedInformation,
     ResultMem,
@@ -199,42 +201,18 @@ impl<'a> CodeGenUnit<'a> {
         *self.basic_block_id_to_ssa_id.get(bb_id).expect("Expected BasicBlockId")
     }
 
-    pub(crate) fn get_llvm_ty(&self, ty: Ty) -> String {
-        match &ty {
-            Ty::PrimTy(prim_ty) => {
-                match prim_ty {
-                    PrimTy::Bool => "i8".to_string(),
-                    PrimTy::Int => "i32".to_string(),
-                    PrimTy::Int64 => "i64".to_string(),
-                    PrimTy::Void => "void".to_string(),
-                }
-            }
-            Ty::Ptr(_) => "ptr".to_string(),
-            ty @ Ty::Tuple(_) => {
-                let ty_attr = ty.get_ty_attr(self.resolved_information);
-                format!("[{} x i8]", ty_attr.size_bytes)
-            }
-            ty @ Ty::Adt(_) => {
-                let ty_attr = ty.get_ty_attr(self.resolved_information);
-                format!("[{} x i8]", ty_attr.size_bytes)
-            }
-            Ty::FnSig(_) => "ptr".to_string(),
-            Ty::FnDef(_) => "ptr".to_string(),
-            Ty::AtdConstructer(_) => todo!(),
-
-            t @ (Ty::Unkown | Ty::Never | Ty::ZeroSized) =>
-                panic!("{} type (should not be this far in compilation)", t),
-        }
-    }
-
     pub(crate) fn get_llvm_operand(&self, operand: &Operand) -> String {
         let string = match &operand {
-            Operand::TempId(place) => {
-                format!("{}", self.get_ssa_id_from_place(&PlaceKind::TempId(*place)))
-            }
+            Operand::PlaceKind(place) => { format!("{}", self.get_ssa_id_from_place(place)) }
             Operand::Const(const_val) => {
                 match const_val {
-                    Const::FnPtr(def_id) => format!("{}", def_id),
+                    Const::FnPtr(def_id) => {
+                        if self.resolved_information.is_clib_fn(def_id) {
+                            format!("@{}", def_id.symbol.get())
+                        } else {
+                            format!("{}", def_id)
+                        }
+                    }
                     Const::Bool(bool) =>
                         (
                             match bool {
@@ -242,12 +220,43 @@ impl<'a> CodeGenUnit<'a> {
                                 false => "0",
                             }
                         ).to_string(),
+                    Const::Null => "null".to_string(),
                     Const::Int(int) => int.to_string(),
                     Const::Void => panic!("Void cannot be used as an operand"),
                 }
             }
         };
         string
+    }
+}
+
+fn get_llvm_ty<'a>(ty: Ty, resolved_information: &ResolvedInformation<'a>) -> String {
+    match &ty {
+        Ty::PrimTy(prim_ty) => {
+            match prim_ty {
+                PrimTy::Bool => "i8".to_string(),
+                PrimTy::Int => "i32".to_string(),
+                PrimTy::Int64 => "i64".to_string(),
+                PrimTy::Void => "void".to_string(),
+            }
+        }
+        Ty::Ptr(_, _) => "ptr".to_string(),
+        Ty::ManyPtr(_, _) => "ptr".to_string(),
+        Ty::Null => "ptr".to_string(),
+        ty @ Ty::Tuple(_) => {
+            let ty_attr = ty.get_ty_attr(resolved_information);
+            format!("[{} x i8]", ty_attr.size_bytes)
+        }
+        ty @ Ty::Adt(_) => {
+            let ty_attr = ty.get_ty_attr(resolved_information);
+            format!("[{} x i8]", ty_attr.size_bytes)
+        }
+        Ty::FnSig(_) => "ptr".to_string(),
+        Ty::FnDef(_) => "ptr".to_string(),
+        Ty::AtdConstructer(_) => todo!(),
+
+        t @ (Ty::Unkown | Ty::Never | Ty::ZeroSized) =>
+            panic!("{} type (should not be this far in compilation)", t),
     }
 }
 
@@ -262,13 +271,18 @@ impl<'a> CfgVisitor for CodeGenUnit<'a> {
         match cfg.cfg_fn_kind {
             CfgFnKind::Main => writeln!(self.buffer, "define i32 @main() {{")?,
             CfgFnKind::Fn(def_id) => {
-                write!(self.buffer, "define {} {}(", self.get_llvm_ty(cfg.ret_ty), def_id)?;
+                write!(
+                    self.buffer,
+                    "define {} {}(",
+                    get_llvm_ty(cfg.ret_ty, self.resolved_information),
+                    def_id
+                )?;
 
                 for (i, (temp_id, arg_ty)) in cfg.args.iter().enumerate() {
                     write!(
                         self.buffer,
                         "{} noundef {}",
-                        self.get_llvm_ty(*arg_ty),
+                        get_llvm_ty(*arg_ty, self.resolved_information),
                         self.get_ssa_id_from_place(&PlaceKind::TempId(*temp_id))
                     )?;
                     if i != cfg.args.len() - 1 {
@@ -348,7 +362,7 @@ impl<'a> CfgVisitor for CodeGenUnit<'a> {
             self.buffer,
             "{}store {} {}, ptr {}",
             " ".repeat(INDENTATION),
-            self.get_llvm_ty(store_node.op_ty),
+            get_llvm_ty(store_node.op_ty, self.resolved_information),
             val,
             var_place
         )
@@ -363,7 +377,7 @@ impl<'a> CfgVisitor for CodeGenUnit<'a> {
             "{}{} = getelementptr inbounds {}, ptr {}, i64 0, i64 {}",
             " ".repeat(INDENTATION),
             temp_id,
-            self.get_llvm_ty(index_node.place_ty),
+            get_llvm_ty(index_node.place_ty, self.resolved_information),
             array_id,
             index_node.index
         )
@@ -414,7 +428,7 @@ impl<'a> CfgVisitor for CodeGenUnit<'a> {
             "{}{} = load {}, ptr {}",
             " ".repeat(INDENTATION),
             ssa_id,
-            self.get_llvm_ty(load_node.load_ty),
+            get_llvm_ty(load_node.load_ty, self.resolved_information),
             var_place
         )
     }
@@ -444,7 +458,7 @@ impl<'a> CfgVisitor for CodeGenUnit<'a> {
             " ".repeat(INDENTATION),
             ssa_id,
             op_kw,
-            self.get_llvm_ty(binary_node.op_ty),
+            get_llvm_ty(binary_node.op_ty, self.resolved_information),
             lhs_op,
             rhs_op
         )
@@ -459,7 +473,7 @@ impl<'a> CfgVisitor for CodeGenUnit<'a> {
                     self.buffer,
                     "{}ret {} {}",
                     " ".repeat(INDENTATION),
-                    self.get_llvm_ty(ty),
+                    get_llvm_ty(ty, self.resolved_information),
                     return_operand
                 )
             }
@@ -476,11 +490,11 @@ impl<'a> CfgVisitor for CodeGenUnit<'a> {
             write!(self.buffer, "{} = ", ssa_id)?;
         }
 
-        write!(self.buffer, "call {} ", self.get_llvm_ty(call_node.ret_ty))?;
+        write!(self.buffer, "call {} ", get_llvm_ty(call_node.ret_ty, self.resolved_information))?;
 
         write!(self.buffer, "(")?;
         for (i, arg_ty) in call_node.args_ty.iter().enumerate() {
-            write!(self.buffer, "{}", self.get_llvm_ty(*arg_ty))?;
+            write!(self.buffer, "{}", get_llvm_ty(*arg_ty, self.resolved_information))?;
             if i != call_node.args_ty.len() - 1 {
                 write!(self.buffer, ", ")?;
             }
@@ -492,7 +506,12 @@ impl<'a> CfgVisitor for CodeGenUnit<'a> {
         for (i, arg) in call_node.args.iter().enumerate() {
             let ty = call_node.args_ty[i];
             let arg_str = self.get_llvm_operand(arg);
-            write!(self.buffer, "{} noundef {}", self.get_llvm_ty(ty), arg_str)?;
+            write!(
+                self.buffer,
+                "{} noundef {}",
+                get_llvm_ty(ty, self.resolved_information),
+                arg_str
+            )?;
             if i != call_node.args.len() - 1 {
                 write!(self.buffer, ", ")?;
             }
@@ -511,17 +530,44 @@ impl<'icfg> CodeGen<'icfg> {
         Self { icfg }
     }
 
-    pub fn gen_code(self, file_name: &str, resolved_information: &ResolvedInformation) {
+    pub fn gen_code(self, file_name: &str) {
         use std::io::Write;
-
-        let file_name_with_extension = format!("{}.ll", file_name);
-
         let mut buffer = String::with_capacity(4096);
 
-        for cfg in self.icfg.cfgs.iter() {
-            CodeGenUnit::new(cfg, resolved_information).gen_code(&mut buffer);
+        for (symbol, fn_sig) in self.icfg.clib_fns.iter().map(|def_id| {
+            let name_binding = self.icfg.resolved_information.get_name_binding_from_def_id(def_id);
+            match name_binding.kind {
+                NameBindingKind::Fn(fn_sig, Externism::Clib) => (def_id.symbol, fn_sig),
+                _ => panic!("Expected extern function"),
+            }
+        }) {
+            write!(
+                buffer,
+                "declare {} @{}(",
+                get_llvm_ty(*fn_sig.ret_ty, &self.icfg.resolved_information),
+                symbol.get()
+            ).expect("Error writing to buffer");
+
+            for (i, arg_ty) in fn_sig.args.iter().enumerate() {
+                write!(
+                    buffer,
+                    "{} noundef",
+                    get_llvm_ty(*arg_ty, &self.icfg.resolved_information)
+                ).expect("Error writing to buffer");
+                if i != fn_sig.args.len() - 1 {
+                    write!(buffer, ", ").expect("Error writing to buffer");
+                }
+            }
+            writeln!(buffer, ")").expect("Error writing to buffer");
         }
 
+        writeln!(buffer).expect("Error writing to buffer");
+
+        for cfg in self.icfg.cfgs.iter() {
+            CodeGenUnit::new(cfg, &self.icfg.resolved_information).gen_code(&mut buffer);
+        }
+
+        let file_name_with_extension = format!("{}.ll", file_name);
         let mut file = File::create(&file_name_with_extension).expect("Error creating file");
         file.write_all(buffer.as_bytes()).expect("Error writing to file");
         Command::new("clang")

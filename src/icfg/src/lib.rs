@@ -20,6 +20,7 @@ use ir::{
     LocalMem,
     LocalMemId,
     Mutability,
+    ResolvedInformation,
     ResultMem,
     ResultMemId,
     Symbol,
@@ -32,9 +33,11 @@ use ir::{
 };
 mod icfg_prettifier;
 mod cfg_visitor;
+mod cfg_analyzer;
 
 pub use icfg_prettifier::IcfgPrettifier;
 pub use cfg_visitor::*;
+pub use cfg_analyzer::*;
 
 enum Liveness {
     Alive,
@@ -44,11 +47,25 @@ enum Liveness {
 pub struct Icfg<'a> {
     pub cfgs: Vec<Cfg<'a>>,
     pub global_mems: &'a RefCell<Vec<GlobalMem>>,
+    pub resolved_information: ResolvedInformation<'a>,
+    pub clib_fns: Vec<DefId>,
 }
 impl<'a> Icfg<'a> {
-    pub fn new(cfgs: Vec<Cfg<'a>>, global_mems: &'a RefCell<Vec<GlobalMem>>) -> Self {
-        Self { cfgs, global_mems }
+    pub fn new(
+        cfgs: Vec<Cfg<'a>>,
+        global_mems: &'a RefCell<Vec<GlobalMem>>,
+        resolved_information: ResolvedInformation<'a>,
+        clib_fns: Vec<DefId>
+    ) -> Self {
+        Self { cfgs, global_mems, resolved_information, clib_fns }
     }
+
+    // pub fn analyze(&mut self) {
+    //     for cfg in self.cfgs.iter_mut() {
+    //         let mut analyzer = CfgAnalyzer { cfg };
+    //         analyzer.visit_cfg();
+    //     }
+    // }
 }
 
 /// One Cfg is constructed for each function
@@ -289,14 +306,14 @@ pub struct BinaryNode {
 
 #[derive(Debug, Clone, Copy)]
 pub enum Operand {
-    TempId(TempId),
+    PlaceKind(PlaceKind),
     Const(Const),
 }
 
 impl Display for Operand {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::TempId(place) => write!(f, "{}", place),
+            Self::PlaceKind(place) => write!(f, "{:?}", place),
             Self::Const(const_val) => write!(f, "{}", const_val),
         }
     }
@@ -304,7 +321,7 @@ impl Display for Operand {
 
 impl From<TempId> for Operand {
     fn from(value: TempId) -> Self {
-        Self::TempId(value)
+        Self::PlaceKind(PlaceKind::TempId(value))
     }
 }
 
@@ -357,6 +374,7 @@ pub enum Const {
     Int(i64),
     Bool(bool),
     FnPtr(DefId),
+    Null,
     Void,
 }
 
@@ -366,6 +384,7 @@ impl Const {
             Self::Void => VOID_TY,
             Self::Int(_) => INT_TY,
             Self::Bool(_) => BOOL_TY,
+            Self::Null => Ty::Null,
             Self::FnPtr(def_id) => Ty::FnDef(*def_id),
         }
     }
@@ -377,6 +396,7 @@ impl Display for Const {
             Self::Bool(bool) => write!(f, "{}", bool),
             Self::Int(int) => write!(f, "{}", int),
             Self::Void => write!(f, "()"),
+            Self::Null => write!(f, "null"),
             Self::FnPtr(def_id) => write!(f, "{}", def_id),
         }
     }

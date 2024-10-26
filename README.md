@@ -1,5 +1,11 @@
 # Viskum Compiler
 
+## Compiler IRs
+
+Parser produces an AST. This Ast is used for name resolution and type checking
+Ast is produced into an ICFG (inter-procedual control flow graph). In the ICFG all further analysis is done
+- (drop analysis, pointer analysis, lifetime analysis, dead code analysis)
+
 ## Todo: Intern types
 - This will make comparison between types MUCH faster.
 - Current implementation example:

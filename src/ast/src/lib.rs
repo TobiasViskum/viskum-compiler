@@ -50,6 +50,7 @@ Stmt(
 
 */
 
+mod typechecker;
 mod passes;
 mod visitor;
 mod ast_arena;
@@ -66,7 +67,7 @@ pub use ast_visitor::{ AstVisitEmitter, AstVisitor };
 pub use visitor::*;
 
 use std::{ cell::Cell, marker::PhantomData };
-use ir::NodeId;
+use ir::{ Mutability, NodeId };
 use op::BinaryOp;
 use span::Span;
 use derive_new::new;
@@ -144,6 +145,12 @@ impl<'ast> Ast<'ast, AstState3> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ItemType {
+    C,
+    Normal,
+}
+
 #[derive(Debug, new)]
 pub struct GlobalScope<'ast> {
     pub stmts: Stmts<'ast>,
@@ -153,6 +160,8 @@ pub struct GlobalScope<'ast> {
 pub enum Typing<'ast> {
     Ident(Span),
     Tuple(&'ast [Typing<'ast>]),
+    Ptr(&'ast Typing<'ast>, Mutability),
+    ManyPtr(&'ast Typing<'ast>),
     Fn(&'ast [Typing<'ast>], Option<&'ast Typing<'ast>>),
 }
 
@@ -170,12 +179,28 @@ pub enum ItemStmt<'ast> {
     StructItem(&'ast StructItem<'ast>),
     TypedefItem(&'ast TypedefItem<'ast>),
     EnumItem(&'ast EnumItem<'ast>),
+    CompDeclItem(CompDeclItem<'ast>),
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum CompDeclItem<'ast> {
+    CompFnDeclItem(&'ast CompFnDeclItem<'ast>),
+}
+
+#[derive(Debug, new)]
+pub struct CompFnDeclItem<'ast> {
+    pub ident_node: &'ast IdentNode,
+    pub args: &'ast [&'ast Field<'ast>],
+    pub return_ty: Option<Typing<'ast>>,
+    pub item_type: ItemType,
+    pub ast_node_id: NodeId,
 }
 
 #[derive(Debug, new)]
 pub struct TypedefItem<'ast> {
     pub ident_node: &'ast IdentNode,
     pub type_expr: Typing<'ast>,
+    pub item_type: ItemType,
     pub ast_node_id: NodeId,
 }
 
@@ -185,6 +210,7 @@ pub struct FnItem<'ast> {
     pub body: Stmts<'ast>,
     pub args: &'ast [&'ast Field<'ast>],
     pub return_ty: Option<Typing<'ast>>,
+    pub item_type: ItemType,
     pub ast_node_id: NodeId,
 }
 
@@ -192,6 +218,7 @@ pub struct FnItem<'ast> {
 pub struct StructItem<'ast> {
     pub ident_node: &'ast IdentNode,
     pub field_declarations: &'ast [&'ast Field<'ast>],
+    pub item_type: ItemType,
     pub ast_node_id: NodeId,
 }
 
@@ -199,6 +226,7 @@ pub struct StructItem<'ast> {
 pub struct EnumItem<'ast> {
     pub ident_node: &'ast IdentNode,
     pub variants: &'ast [EnumVariant<'ast>],
+    pub item_type: ItemType,
     pub ast_node_id: NodeId,
 }
 #[derive(Debug, new)]
@@ -348,6 +376,14 @@ pub enum PlaceExpr<'ast> {
     IdentExpr(&'ast IdentNode),
     TupleFieldExpr(&'ast TupleFieldExpr<'ast>),
     FieldExpr(&'ast FieldExpr<'ast>),
+    IndexExpr(&'ast IndexExpr<'ast>),
+}
+
+#[derive(Debug, new)]
+pub struct IndexExpr<'ast> {
+    pub lhs: Expr<'ast>,
+    pub value_expr: Expr<'ast>,
+    pub ast_node_id: NodeId,
 }
 
 #[derive(Debug, new)]
@@ -417,6 +453,13 @@ pub struct BinaryExpr<'ast> {
 pub enum ConstExpr<'ast> {
     IntegerExpr(&'ast IntegerExpr),
     BoolExpr(&'ast BoolExpr),
+    NullExpr(&'ast NullExpr),
+}
+
+#[derive(Debug, new)]
+pub struct NullExpr {
+    pub span: Span,
+    pub ast_node_id: NodeId,
 }
 
 #[derive(Debug, new)]
@@ -463,6 +506,7 @@ pub fn get_node_id_from_place_expr(place_expr: PlaceExpr) -> NodeId {
         PlaceExpr::IdentExpr(ident_expr) => ident_expr.ast_node_id,
         PlaceExpr::TupleFieldExpr(tuple_field_expr) => tuple_field_expr.ast_node_id,
         PlaceExpr::FieldExpr(field_expr) => field_expr.ast_node_id,
+        PlaceExpr::IndexExpr(index_expr) => index_expr.ast_node_id,
     }
 }
 
@@ -477,6 +521,7 @@ pub fn get_node_id_from_value_expr(value_expr: ValueExpr) -> NodeId {
             match const_expr {
                 ConstExpr::BoolExpr(bool_expr) => bool_expr.ast_node_id,
                 ConstExpr::IntegerExpr(integer_expr) => integer_expr.ast_node_id,
+                ConstExpr::NullExpr(null_expr) => null_expr.ast_node_id,
             }
         }
     }

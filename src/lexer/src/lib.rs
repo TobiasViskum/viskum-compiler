@@ -36,6 +36,8 @@ impl<'a> Lexer<'a> {
             ')' => self.make_token(TokenKind::RightParen),
             '{' => self.make_token(TokenKind::LeftCurly),
             '}' => self.make_token(TokenKind::RightCurly),
+            '[' => self.make_token(TokenKind::LeftSquare),
+            ']' => self.make_token(TokenKind::RightSquare),
             '!' => self.make_token_or_other_if(TokenKind::Bang, '=', TokenKind::Ne),
             '>' => self.make_token_or_other_if(TokenKind::Gt, '=', TokenKind::Ge),
             '<' => self.make_token_or_other_if(TokenKind::Lt, '=', TokenKind::Le),
@@ -106,11 +108,13 @@ impl<'a> Lexer<'a> {
         // Make a faster way than a match statement here (match a char at a time)
         match ident {
             "fn" => TokenKind::Fn,
+            "declare" => TokenKind::Declare,
             "def" => TokenKind::Def,
             "mut" => TokenKind::Mut,
             "class" => TokenKind::Class,
             "struct" => TokenKind::Struct,
             "enum" => TokenKind::Enum,
+            "null" => TokenKind::Null,
             "loop" => TokenKind::Loop,
             "while" => TokenKind::While,
             "if" => TokenKind::If,

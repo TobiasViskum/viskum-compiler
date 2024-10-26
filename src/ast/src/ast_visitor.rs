@@ -3,6 +3,8 @@ use std::marker::PhantomData;
 use crate::{
     ast_query_system::AstQueryEntry,
     ast_state::{ AstState, AstState0, AstState1, AstState2, AstState3 },
+    get_node_id_from_expr,
+    typechecker::{ ArgCmp, TypeChecker },
     visitor::{
         walk_binary_expr,
         walk_def_stmt,
@@ -14,7 +16,9 @@ use crate::{
     walk_assign_stmt,
     walk_break_expr,
     walk_call_expr,
+    walk_comp_decl_item,
     walk_field_expr,
+    walk_index_expr,
     walk_loop_expr,
     walk_path_field,
     walk_stmts_none_items,
@@ -29,6 +33,8 @@ use crate::{
     BoolExpr,
     BreakExpr,
     CallExpr,
+    CompDeclItem,
+    CompFnDeclItem,
     CondKind,
     ContinueExpr,
     DefineStmt,
@@ -40,7 +46,9 @@ use crate::{
     IfExpr,
     IntegerExpr,
     ItemStmt,
+    ItemType,
     LoopExpr,
+    NullExpr,
     Pat,
     PathField,
     PlaceExpr,
@@ -60,6 +68,7 @@ use ir::{
     DefId,
     DefIdToNameBinding,
     EmumVaraintId,
+    Externism,
     FnSig,
     Mutability,
     NameBinding,
@@ -67,6 +76,7 @@ use ir::{
     NodeId,
     ResKind,
     NEVER_TY,
+    NULL_TY,
 };
 
 use span::Span;
@@ -163,6 +173,7 @@ pub trait AstVisitEmitter<'ctx, 'ast, T>: Sized where T: AstState {
     fn set_main_fn(&mut self, main_fn: &'ast FnItem<'ast>) -> bool;
     fn is_main_scope(&mut self) -> bool;
     fn append_fn(&mut self, fn_item: &'ast FnItem<'ast>);
+    fn append_comp_decl(&mut self, comp_fn_decl: CompDeclItem<'ast>);
     fn set_def_id_to_global_mem(&mut self, def_id: DefId);
     fn get_ty_from_node_id(&self, node_id: NodeId) -> Ty;
 
@@ -213,6 +224,11 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
         self.insert_query_entry(bool_expr.ast_node_id, AstQueryEntry::BoolExpr(bool_expr));
     }
 
+    fn visit_index_expr(&mut self, index_expr: &'ast crate::IndexExpr<'ast>) -> Self::Result {
+        self.insert_query_entry(index_expr.ast_node_id, AstQueryEntry::IndexExpr(index_expr));
+        walk_index_expr(self, index_expr)
+    }
+
     fn visit_def_stmt(&mut self, def_stmt: &'ast DefineStmt<'ast>) -> Self::Result {
         self.insert_query_entry(def_stmt.ast_node_id, AstQueryEntry::DefineStmt(def_stmt));
         walk_def_stmt(self, def_stmt)
@@ -226,6 +242,10 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
     fn visit_break_expr(&mut self, break_expr: &'ast BreakExpr<'ast>) -> Self::Result {
         self.insert_query_entry(break_expr.ast_node_id, AstQueryEntry::BreakExpr(break_expr));
         walk_break_expr(self, break_expr)
+    }
+
+    fn visit_null_expr(&mut self, null_expr: &'ast NullExpr) -> Self::Result {
+        self.insert_query_entry(null_expr.ast_node_id, AstQueryEntry::NullExpr(null_expr));
     }
 
     fn visit_tuple_field_expr(
@@ -308,6 +328,20 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
         walk_group_expr(self, group_expr)
     }
 
+    fn visit_comp_fn_decl_item(
+        &mut self,
+        comp_fn_decl_item: &'ast CompFnDeclItem<'ast>
+    ) -> Self::Result {
+        self.insert_query_entry(
+            comp_fn_decl_item.ast_node_id,
+            AstQueryEntry::CompFnDeclItem(comp_fn_decl_item)
+        );
+        self.visit_ident_expr(comp_fn_decl_item.ident_node);
+        for arg in comp_fn_decl_item.args {
+            self.visit_ident_expr(arg.ident);
+        }
+    }
+
     fn visit_struct_item(&mut self, struct_item: &'ast StructItem<'ast>) -> Self::Result {
         self.insert_query_entry(struct_item.ast_node_id, AstQueryEntry::StructItem(struct_item));
         self.visit_ident_expr(struct_item.ident_node);
@@ -349,7 +383,8 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
 fn type_from_typing<'ctx, 'ast, 'b, E, T: AstState>(
     src: &str,
     typing: &Typing<'ast>,
-    e: &'b mut E
+    e: &'b mut E,
+    item_type: ItemType
 ) -> Ty
     where E: AstVisitEmitter<'ctx, 'ast, T>
 {
@@ -372,7 +407,7 @@ fn type_from_typing<'ctx, 'ast, 'b, E, T: AstState>(
         Typing::Tuple(tuple) => {
             let mut tuple_ty = Vec::with_capacity(tuple.len());
             for typing in tuple.iter() {
-                tuple_ty.push(type_from_typing(src, typing, e));
+                tuple_ty.push(type_from_typing(src, typing, e, item_type));
             }
             Ty::Tuple(TyCtx::intern_many_types(tuple_ty))
         }
@@ -380,12 +415,28 @@ fn type_from_typing<'ctx, 'ast, 'b, E, T: AstState>(
             let args_ty = {
                 let mut args_ty = Vec::with_capacity(args_typing.len());
                 for typing in args_typing.iter() {
-                    args_ty.push(type_from_typing(src, typing, e));
+                    args_ty.push(type_from_typing(src, typing, e, item_type));
                 }
                 TyCtx::intern_many_types(args_ty)
             };
-            let ret_ty = ret_typing.map(|typing| type_from_typing(src, typing, e));
+            let ret_ty = ret_typing.map(|typing| type_from_typing(src, typing, e, item_type));
             Ty::FnSig(FnSig::new(args_ty, TyCtx::intern_type(ret_ty.unwrap_or(VOID_TY))))
+        }
+        Typing::Ptr(typing, mutability) => {
+            if item_type == ItemType::Normal {
+                todo!("Report error: Cannot use pointers in this context");
+            }
+            Ty::Ptr(TyCtx::intern_type(type_from_typing(src, typing, e, item_type)), *mutability)
+        }
+        Typing::ManyPtr(typing) => {
+            if item_type == ItemType::Normal {
+                todo!("Report error: Cannot use pointers in this context");
+            }
+
+            Ty::ManyPtr(
+                TyCtx::intern_type(type_from_typing(src, typing, e, item_type)),
+                Mutability::Immutable
+            )
         }
     }
 }
@@ -399,129 +450,6 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
 
     fn default_result() -> Self::Result {
         println!("This shouldn't run");
-    }
-}
-
-#[derive(Debug)]
-pub enum PatVisitResult<'ast> {
-    IdentWildcard(&'ast IdentNode),
-    // UnderScore,
-    EnumVariant(DefId, Vec<PatVisitResult<'ast>>),
-}
-
-pub struct PatVisitor<'ctx, 'ast, 'b, E>
-    where 'ctx: 'ast, E: AstVisitEmitter<'ctx, 'ast, AstState2> {
-    ast_visit_emitter: &'b mut E,
-    src: &'b str,
-    marker: PhantomData<&'ast &'ctx ()>,
-}
-
-#[derive(Debug)]
-struct PatDefBindings {
-    bindings: Vec<DefId>,
-}
-
-impl<'ctx, 'ast, 'b, E> AstVisitor<'ctx, 'ast, 'b, AstState2, E>
-    where 'ctx: 'ast, E: AstVisitEmitter<'ctx, 'ast, AstState2>
-{
-    fn get_def_bindings_from_ty_and_pat_visit_result(
-        &mut self,
-        pat_visit_result: PatVisitResult,
-        ty: Ty
-    ) -> PatDefBindings {
-        match pat_visit_result {
-            PatVisitResult::IdentWildcard(ident_node) => {
-                let symbol = Symbol::new(&self.src[ident_node.span.get_byte_range()]);
-                let def_id = self.ast_visit_emitter.make_def_id(ident_node.ast_node_id, symbol);
-                self.ast_visit_emitter.bind_def_id_to_lexical_binding(def_id, ResKind::Variable);
-                self.ast_visit_emitter.set_type_to_node_id(ident_node.ast_node_id, ty);
-                PatDefBindings { bindings: vec![def_id] }
-            }
-            PatVisitResult::EnumVariant(def_id, pat_visit_results) => {
-                let name_binding = self.ast_visit_emitter.get_namebinding_from_def_id(def_id);
-                let variant_ty = match name_binding.kind {
-                    NameBindingKind::Adt(Adt::EnumVariant(_, _, variant_ty)) => variant_ty,
-                    _ => panic!("Expected enum variant"),
-                };
-
-                if pat_visit_results.len() != variant_ty.len() {
-                    todo!(
-                        "Expected {} arguments, got {}",
-                        variant_ty.len(),
-                        pat_visit_results.len()
-                    );
-                }
-
-                let mut bindings = Vec::with_capacity(pat_visit_results.len());
-                for (i, pat_visit_result) in pat_visit_results.into_iter().enumerate() {
-                    let field_ty = variant_ty[i];
-                    let field_def_bindings = self.get_def_bindings_from_ty_and_pat_visit_result(
-                        pat_visit_result,
-                        field_ty
-                    );
-                    bindings.extend(field_def_bindings.bindings);
-                }
-
-                PatDefBindings { bindings }
-            }
-        }
-    }
-}
-
-impl<'ctx, 'ast, 'b, E> PatVisitor<'ctx, 'ast, 'b, E>
-    where 'ctx: 'ast, E: AstVisitEmitter<'ctx, 'ast, AstState2>
-{
-    pub fn new(ast_visit_emitter: &'b mut E, src: &'b str) -> Self {
-        Self {
-            ast_visit_emitter,
-            src,
-            marker: PhantomData,
-        }
-    }
-}
-
-impl<'ctx, 'ast, 'b, E> Visitor<'ast>
-    for PatVisitor<'ctx, 'ast, 'b, E>
-    where 'ctx: 'ast, E: AstVisitEmitter<'ctx, 'ast, AstState2>
-{
-    type Result = PatVisitResult<'ast>;
-
-    fn default_result() -> Self::Result {
-        panic!("This shouldn't run");
-    }
-
-    fn visit_tuple_struct_pat(&mut self, tuple_pat: &'ast TupleStructPat<'ast>) -> Self::Result {
-        let lhs_ty = self.ast_visit_emitter.get_ty_from_node_id(tuple_pat.ast_node_id);
-        let def_id = self.ast_visit_emitter.get_def_id_from_node_id(tuple_pat.ast_node_id);
-
-        let adt = match lhs_ty {
-            Ty::Adt(def_id) => {
-                let name_binding = self.ast_visit_emitter.get_namebinding_from_def_id(def_id);
-                match name_binding.kind {
-                    NameBindingKind::Adt(adt) => adt,
-                    _ => panic!("Expected ADT"),
-                }
-            }
-            _ => panic!("Expected ADT"),
-        };
-
-        match adt {
-            Adt::EnumVariant(_, _, _) => {
-                let pats = tuple_pat.fields
-                    .iter()
-                    .map(|pat| self.visit_pat(*pat))
-                    .collect::<Vec<_>>();
-
-                PatVisitResult::EnumVariant(def_id, pats)
-            }
-            // Adt::TupleStruct(_) => todo!(),
-            _ =>
-                panic!("Only enum variants and tuple structs are allowed in tuple struct patterns"),
-        }
-    }
-
-    fn visit_ident_pat(&mut self, ident_node: &'ast IdentNode) -> Self::Result {
-        PatVisitResult::IdentWildcard(ident_node)
     }
 }
 
@@ -544,6 +472,11 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
     fn visit_bool_expr(&mut self, bool_expr: &'ast BoolExpr) -> Self::Result {
         self.ast_visit_emitter.set_type_to_node_id(bool_expr.ast_node_id, BOOL_TY);
         BOOL_TY
+    }
+
+    fn visit_null_expr(&mut self, null_expr: &'ast NullExpr) -> Self::Result {
+        self.ast_visit_emitter.set_type_to_node_id(null_expr.ast_node_id, NULL_TY);
+        NULL_TY
     }
 
     fn visit_block_expr(&mut self, expr: &'ast BlockExpr<'ast>) -> Self::Result {
@@ -581,6 +514,12 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
                 ItemStmt::StructItem(item) => bind_def_id_to_lexical_binding!(Adt, item),
                 ItemStmt::TypedefItem(item) => bind_def_id_to_lexical_binding!(Adt, item),
                 ItemStmt::EnumItem(item) => bind_def_id_to_lexical_binding!(Adt, item),
+                ItemStmt::CompDeclItem(comp_decl) => {
+                    match comp_decl {
+                        CompDeclItem::CompFnDeclItem(item) =>
+                            bind_def_id_to_lexical_binding!(Fn, item),
+                    }
+                }
             }
         }
 
@@ -588,8 +527,12 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
             self.visit_item(*item_stmt);
         }
 
-        /* TODO: Add last pass of items, where structs, tuples etc. are laid out most optimally in memory */
-        /* But I should probably not do it here anyways (vielleicht the last pass of ICFG) */
+        /*
+        TODO: Add last pass of items, where structs, tuples etc. are laid out most optimally in memory
+
+        But I should probably not do it here anyways (vielleicht the last pass of ICFG),
+        since each field could potentially be a pointer after analysis in the ICFG¨
+        */
 
         walk_stmts_none_items(self, stmts)
     }
@@ -601,12 +544,20 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
                 ResKind::Variable
             )
         {
+            let mutability = {
+                let name_binding = self.ast_visit_emitter.get_namebinding_from_def_id(def_id);
+                match name_binding.kind {
+                    NameBindingKind::Variable(mutability) => mutability,
+                    _ => panic!("Expected variable"),
+                }
+            };
+
             self.ast_visit_emitter.set_def_id_to_node_id(ident_node.ast_node_id, def_id);
-            let ident_ty = self.ast_visit_emitter.get_ty_from_def_id(def_id);
-            self.ast_visit_emitter.set_type_to_node_id(
-                ident_node.ast_node_id,
-                Ty::Ptr(TyCtx::intern_type(ident_ty))
+            let ident_ty = Ty::Ptr(
+                TyCtx::intern_type(self.ast_visit_emitter.get_ty_from_def_id(def_id)),
+                mutability
             );
+            self.ast_visit_emitter.set_type_to_node_id(ident_node.ast_node_id, ident_ty);
             ident_ty
         } else if
             let Some(def_id) = self.ast_visit_emitter.lookup_ident_declaration(
@@ -617,7 +568,7 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
             self.ast_visit_emitter.set_def_id_to_node_id(ident_node.ast_node_id, def_id);
 
             match self.ast_visit_emitter.get_namebinding_from_def_id(def_id).kind {
-                NameBindingKind::Fn(_) => {}
+                NameBindingKind::Fn(_, _) => {}
                 _ => panic!("Expected function"),
             }
             let ty = Ty::FnDef(def_id);
@@ -651,7 +602,12 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
                 _ => {}
             }
 
-            let ty = type_from_typing(self.src, &typedef_item.type_expr, self.ast_visit_emitter);
+            let ty = type_from_typing(
+                self.src,
+                &typedef_item.type_expr,
+                self.ast_visit_emitter,
+                typedef_item.item_type
+            );
 
             let def_id = self.ast_visit_emitter.make_def_id(
                 typedef_item.ident_node.ast_node_id,
@@ -673,16 +629,83 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
         VOID_TY
     }
 
+    fn visit_comp_fn_decl_item(
+        &mut self,
+        comp_fn_decl_item: &'ast CompFnDeclItem<'ast>
+    ) -> Self::Result {
+        let def_id = {
+            let def_id = self.ast_visit_emitter.get_def_id_from_node_id(
+                comp_fn_decl_item.ident_node.ast_node_id
+            );
+            let ret_ty = comp_fn_decl_item.return_ty
+                .map(|ty_expr|
+                    type_from_typing(
+                        &self.src,
+                        &ty_expr,
+                        self.ast_visit_emitter,
+                        comp_fn_decl_item.item_type
+                    )
+                )
+                .unwrap_or(VOID_TY);
+
+            let mut args_tys = Vec::with_capacity(comp_fn_decl_item.args.len());
+            for arg in comp_fn_decl_item.args {
+                let def_id = self.ast_visit_emitter.make_def_id(
+                    arg.ident.ast_node_id,
+                    Symbol::new(&self.src[arg.ident.span.get_byte_range()])
+                );
+                let res_ty = type_from_typing(
+                    self.src,
+                    &arg.type_expr,
+                    self.ast_visit_emitter,
+                    comp_fn_decl_item.item_type
+                );
+                self.ast_visit_emitter.set_type_to_node_id(arg.ident.ast_node_id, res_ty);
+
+                args_tys.push(res_ty);
+
+                /* Defines arg as a variable */
+                self.ast_visit_emitter.set_namebinding_to_def_id(
+                    def_id,
+                    NameBinding::new(NameBindingKind::Variable(Mutability::Immutable))
+                );
+                self.ast_visit_emitter.bind_def_id_to_lexical_binding(def_id, ResKind::Variable);
+            }
+
+            let name_binding = NameBinding::new(
+                NameBindingKind::Fn(
+                    FnSig::new(TyCtx::intern_many_types(args_tys), TyCtx::intern_type(ret_ty)),
+                    Externism::Clib
+                )
+            );
+            self.ast_visit_emitter.set_namebinding_to_def_id(def_id, name_binding);
+
+            def_id
+        };
+
+        self.ast_visit_emitter.set_type_to_node_id(
+            comp_fn_decl_item.ident_node.ast_node_id,
+            Ty::FnDef(def_id)
+        );
+
+        self.ast_visit_emitter.set_type_to_node_id(comp_fn_decl_item.ast_node_id, VOID_TY);
+
+        VOID_TY
+    }
+
     fn visit_fn_item(&mut self, fn_item: &'ast FnItem<'ast>) -> Self::Result {
         let def_id = {
             let def_id = self.ast_visit_emitter.get_def_id_from_node_id(
                 fn_item.ident_node.ast_node_id
             );
+
             let ret_ty = fn_item.return_ty
-                .map(|ty_expr| type_from_typing(&self.src, &ty_expr, self.ast_visit_emitter))
+                .map(|ty_expr|
+                    type_from_typing(&self.src, &ty_expr, self.ast_visit_emitter, fn_item.item_type)
+                )
                 .unwrap_or(VOID_TY);
 
-            let args_tys = {
+            {
                 let prev_ret_ty = std::mem::replace(&mut self.fn_ret_ty, Some(ret_ty));
                 self.fn_ret_ty = Some(ret_ty);
                 self.ast_visit_emitter.start_context();
@@ -693,7 +716,12 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
                         arg.ident.ast_node_id,
                         Symbol::new(&self.src[arg.ident.span.get_byte_range()])
                     );
-                    let res_ty = type_from_typing(self.src, &arg.type_expr, self.ast_visit_emitter);
+                    let res_ty = type_from_typing(
+                        self.src,
+                        &arg.type_expr,
+                        self.ast_visit_emitter,
+                        fn_item.item_type
+                    );
                     self.ast_visit_emitter.set_type_to_node_id(arg.ident.ast_node_id, res_ty);
 
                     args_tys.push(res_ty);
@@ -711,7 +739,8 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
 
                 let name_binding = NameBinding::new(
                     NameBindingKind::Fn(
-                        FnSig::new(TyCtx::intern_many_types(args_tys), TyCtx::intern_type(ret_ty))
+                        FnSig::new(TyCtx::intern_many_types(args_tys), TyCtx::intern_type(ret_ty)),
+                        Externism::NoExtern
                     )
                 );
                 self.ast_visit_emitter.set_namebinding_to_def_id(def_id, name_binding);
@@ -727,7 +756,7 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
 
                 self.ast_visit_emitter.end_context();
                 self.fn_ret_ty = prev_ret_ty;
-            };
+            }
 
             let symbol = Symbol::new(&self.src[fn_item.ident_node.span.get_byte_range()]);
             if symbol.get() == "main" && self.ast_visit_emitter.is_main_scope() {
@@ -777,13 +806,20 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
                 todo!("Expected {} arguments, got {}", variant_ty.len(), arg_tys.len());
             } else {
                 for (i, arg_ty) in arg_tys.iter().enumerate() {
-                    if
-                        !variant_ty[i].test_eq(
-                            *arg_ty,
-                            self.ast_visit_emitter.borrow_def_id_to_name_binding()
-                        )
-                    {
-                        todo!("Mismatched arg types");
+                    let is_valid_arg = TypeChecker::test_valid_arg(
+                        ArgCmp {
+                            arg_ty: variant_ty[i],
+                            provided_ty: *arg_ty,
+                        },
+                        self.ast_visit_emitter.borrow_def_id_to_name_binding()
+                    );
+
+                    if let Err(errors) = is_valid_arg {
+                        for error in errors {
+                            println!("{:?}", error);
+                        }
+
+                        todo!("Report error");
                     }
                 }
             }
@@ -796,10 +832,10 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
             return Ty::Adt(enum_def_id);
         }
 
-        let fn_sig = match calle_ty {
+        let fn_sig = match calle_ty.auto_deref() {
             Ty::FnDef(def_id) => {
                 if
-                    let NameBindingKind::Fn(fn_sig) =
+                    let NameBindingKind::Fn(fn_sig, _) =
                         self.ast_visit_emitter.get_namebinding_from_def_id(def_id).kind
                 {
                     fn_sig
@@ -812,6 +848,7 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
                 // self.ast_visit_emitter.report_error(
                 //     Error::new(ErrorKind::NotCallable, call_expr.callee.span)
                 // );
+                println!("Not callable");
                 return Ty::Unkown;
             }
         };
@@ -830,16 +867,22 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
 
             let given_arg_ty = self.visit_expr(*arg);
 
-            let are_arg_tys_eq = !arg_ty.test_eq(
-                given_arg_ty,
+            let arg_cmp = ArgCmp {
+                arg_ty: *arg_ty,
+                provided_ty: given_arg_ty,
+            };
+
+            let is_valid_arg = TypeChecker::test_valid_arg(
+                arg_cmp,
                 self.ast_visit_emitter.borrow_def_id_to_name_binding()
             );
 
-            if are_arg_tys_eq {
-                // self.ast_visit_emitter.report_error(
-                //     Error::new(ErrorKind::MismatchedArgTypes(arg_ty, *arg), call_expr.args[i].span)
-                // );
-                panic!("Mismatched arg types");
+            if let Err(errors) = is_valid_arg {
+                for error in errors {
+                    println!("{:?}", error);
+                }
+
+                todo!("Report error");
             }
         }
 
@@ -855,7 +898,17 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
         };
 
         if let Some(fn_ret_ty) = self.fn_ret_ty {
-            if !ret_ty.test_eq(fn_ret_ty, self.ast_visit_emitter.borrow_def_id_to_name_binding()) {
+            if
+                let Err(errors) = TypeChecker::test_eq_loose(
+                    ret_ty,
+                    fn_ret_ty,
+                    self.ast_visit_emitter.borrow_def_id_to_name_binding()
+                )
+            {
+                for error in errors {
+                    println!("{:?}", error);
+                }
+
                 self.ast_visit_emitter.report_error(
                     Error::new(ErrorKind::MismatchedReturnTypes(fn_ret_ty, ret_ty), Span::dummy())
                 );
@@ -892,7 +945,12 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
                             let mut res_ty = Vec::with_capacity(typing.len());
                             for field in typing.iter() {
                                 res_ty.push(
-                                    type_from_typing(self.src, field, self.ast_visit_emitter)
+                                    type_from_typing(
+                                        self.src,
+                                        field,
+                                        self.ast_visit_emitter,
+                                        enum_item.item_type
+                                    )
                                 );
                             }
                             res_ty
@@ -947,7 +1005,12 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
                     field.ident.ast_node_id,
                     Symbol::new(&self.src[field.ident.span.get_byte_range()])
                 );
-                let res_ty = type_from_typing(self.src, &field.type_expr, self.ast_visit_emitter);
+                let res_ty = type_from_typing(
+                    self.src,
+                    &field.type_expr,
+                    self.ast_visit_emitter,
+                    struct_item.item_type
+                );
 
                 self.ast_visit_emitter.set_type_to_node_id(field.ident.ast_node_id, res_ty);
                 struct_binding_fields.push((def_id, res_ty));
@@ -1007,14 +1070,20 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
         for (i, given_ty) in tys_iter.iter().enumerate() {
             let (field_name, ty) = struct_fields[i];
 
-            if !given_ty.test_eq(ty, self.ast_visit_emitter.borrow_def_id_to_name_binding()) {
+            if
+                let Err(errors) = TypeChecker::test_eq_loose(
+                    *given_ty,
+                    ty,
+                    self.ast_visit_emitter.borrow_def_id_to_name_binding()
+                )
+            {
                 self.ast_visit_emitter.report_error(
                     Error::new(
                         ErrorKind::MismatchedFieldTypes(
                             atd_constructer_def_id.symbol,
                             field_name.symbol,
-                            ty,
-                            *given_ty
+                            *given_ty,
+                            ty
                         ),
                         Span::dummy()
                     )
@@ -1070,12 +1139,14 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
                 let adt = lhs_ty.try_deref_as_adt(
                     self.ast_visit_emitter.borrow_def_id_to_name_binding()
                 );
+
                 match adt {
                     Some(adt) => adt,
                     None => {
                         self.ast_visit_emitter.report_error(
                             Error::new(ErrorKind::InvalidStruct(lhs_ty), Span::dummy())
                         );
+
                         self.ast_visit_emitter.set_type_to_node_id(
                             field_expr.rhs.ast_node_id,
                             Ty::Unkown
@@ -1084,6 +1155,7 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
                             field_expr.ast_node_id,
                             Ty::Unkown
                         );
+
                         return Ty::Unkown;
                     }
                 }
@@ -1098,12 +1170,25 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
 
             for (field_symbol, field_ty) in struct_fields {
                 if field_symbol.symbol.get() == field_access_symbol.get() {
-                    self.ast_visit_emitter.set_type_to_node_id(field_expr.ast_node_id, *field_ty);
+                    let mutability = if lhs_ty.deref_until_single_ptr().is_mut_ptr() {
+                        Mutability::Mutable
+                    } else {
+                        Mutability::Immutable
+                    };
+
+                    let field_ty = Ty::Ptr(TyCtx::intern_type(*field_ty), mutability);
+
+                    self.ast_visit_emitter.set_type_to_node_id(field_expr.ast_node_id, field_ty);
                     self.ast_visit_emitter.set_type_to_node_id(
                         field_expr.rhs.ast_node_id,
-                        *field_ty
+                        field_ty
                     );
-                    return *field_ty;
+                    self.ast_visit_emitter.set_def_id_to_node_id(
+                        field_expr.rhs.ast_node_id,
+                        def_id
+                    );
+
+                    return field_ty;
                 }
             }
 
@@ -1115,6 +1200,7 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
             );
             self.ast_visit_emitter.set_type_to_node_id(field_expr.ast_node_id, Ty::Unkown);
             self.ast_visit_emitter.set_type_to_node_id(field_expr.rhs.ast_node_id, Ty::Unkown);
+
             Ty::Unkown
         }
     }
@@ -1139,8 +1225,32 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
                 self.ast_visit_emitter.set_type_to_node_id(tuple_pat.ast_node_id, ty);
                 self.ast_visit_emitter.set_def_id_to_node_id(tuple_pat.ast_node_id, def_id);
 
-                for pat in tuple_pat.fields {
-                    self.visit_pat(*pat);
+                if enum_ty.len() != tuple_pat.fields.len() {
+                    todo!("Expected {} fields, got {}", enum_ty.len(), tuple_pat.fields.len());
+                }
+
+                for (i, pat) in tuple_pat.fields.iter().enumerate() {
+                    let field_ty = enum_ty[i];
+
+                    if let Pat::IdentPat(ident_pat) = pat {
+                        let symbol = Symbol::new(&self.src[ident_pat.span.get_byte_range()]);
+                        let def_id = self.ast_visit_emitter.make_def_id(
+                            ident_pat.ast_node_id,
+                            symbol
+                        );
+
+                        self.ast_visit_emitter.bind_def_id_to_lexical_binding(
+                            def_id,
+                            ResKind::Variable
+                        );
+                        self.ast_visit_emitter.set_namebinding_to_def_id(
+                            def_id,
+                            NameBinding::new(NameBindingKind::Variable(Mutability::Immutable))
+                        );
+                        self.ast_visit_emitter.set_type_to_node_id(ident_pat.ast_node_id, field_ty);
+                    } else {
+                        self.visit_pat(*pat);
+                    }
                 }
 
                 return ty;
@@ -1233,7 +1343,17 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
             self.ast_visit_emitter.set_type_to_node_id(tuple_field_expr.ast_node_id, Ty::Unkown);
             return Ty::Unkown;
         } else {
-            let access_ty = tuple_ty[tuple_field_expr.rhs.val as usize];
+            let mutability = if lhs_ty.deref_until_single_ptr().is_mut_ptr() {
+                Mutability::Mutable
+            } else {
+                Mutability::Immutable
+            };
+
+            let access_ty = Ty::Ptr(
+                TyCtx::intern_type(tuple_ty[tuple_field_expr.rhs.val as usize]),
+                mutability
+            );
+
             self.ast_visit_emitter.set_type_to_node_id(tuple_field_expr.ast_node_id, access_ty);
 
             access_ty
@@ -1247,34 +1367,41 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
         let (name_binding, symbol) = match &assign_stmt.setter_expr {
             PlaceExpr::IdentExpr(ident_expr) => {
                 let def_id = self.ast_visit_emitter.get_def_id_from_node_id(ident_expr.ast_node_id);
-                let symbol = Symbol::new(&self.src[ident_expr.span.get_byte_range()]);
                 let name_binding = self.ast_visit_emitter.get_namebinding_from_def_id(def_id);
-                (name_binding, symbol)
+                (name_binding, def_id.symbol)
             }
             PlaceExpr::TupleFieldExpr(_) => {
                 panic!("Not working yet (tuple_field_expr in assignment)")
             }
 
-            PlaceExpr::FieldExpr(_) => { panic!("Not working yet (field_expr in assignment)") }
+            PlaceExpr::FieldExpr(field_expr) => {
+                let def_id = self.ast_visit_emitter.get_def_id_from_node_id(
+                    field_expr.rhs.ast_node_id
+                );
+                let name_binding = self.ast_visit_emitter.get_namebinding_from_def_id(def_id);
+                (name_binding, def_id.symbol)
+            }
+            PlaceExpr::IndexExpr(index_expr) => { todo!("Index expression in assignment") }
         };
 
-        match &name_binding.kind {
-            NameBindingKind::Variable(mutability) => {
-                if *mutability == Mutability::Immutable {
-                    self.ast_visit_emitter.report_error(
-                        Error::new(ErrorKind::AssignmentToImmutable(symbol), assign_stmt.span)
-                    );
-                }
-            }
-            _ => panic!("sfd"),
+        if !setter_ty.is_mut_ptr() {
+            self.ast_visit_emitter.report_error(
+                Error::new(ErrorKind::AssignmentToImmutable(symbol), assign_stmt.span)
+            );
         }
 
-        if setter_ty.test_eq(value_ty, self.ast_visit_emitter.borrow_def_id_to_name_binding()) {
+        if
+            let Err(errors) = TypeChecker::test_eq_loose(
+                setter_ty,
+                value_ty,
+                self.ast_visit_emitter.borrow_def_id_to_name_binding()
+            )
+        {
+            panic!("Not same type in assignment: {}, {}", setter_ty, value_ty);
+        } else {
             self.ast_visit_emitter.set_type_to_node_id(assign_stmt.ast_node_id, VOID_TY);
             // Returns void type, because assignments in itself return void
             VOID_TY
-        } else {
-            panic!("Not same type in assignment: {}, {}", setter_ty, value_ty);
         }
     }
 
@@ -1294,7 +1421,6 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
 
     fn visit_def_stmt(&mut self, def_stmt: &'ast DefineStmt<'ast>) -> Self::Result {
         // When tuple patterns are implemented, compare if tuple on lhs, is same as tuple type on rhs
-        let value_type = self.visit_expr(def_stmt.value_expr);
 
         match &def_stmt.setter_expr {
             Pat::IdentPat(ident_pat) => {
@@ -1310,6 +1436,8 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
                     NameBinding::new(NameBindingKind::Variable(mutability))
                 );
                 self.ast_visit_emitter.bind_def_id_to_lexical_binding(def_id, ResKind::Variable);
+
+                let value_type = self.visit_expr(def_stmt.value_expr);
 
                 self.ast_visit_emitter.set_type_to_node_id(ident_pat.ast_node_id, value_type);
             }
@@ -1355,8 +1483,9 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
         if let Some(loop_ret_ty) = &mut self.loop_ret_ty {
             if let Some(expected_ty) = loop_ret_ty {
                 if
-                    !break_ty.test_eq(
+                    let Err(errors) = TypeChecker::test_eq_loose(
                         *expected_ty,
+                        break_ty,
                         self.ast_visit_emitter.borrow_def_id_to_name_binding()
                     )
                 {
@@ -1390,30 +1519,16 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
                 self.ast_visit_emitter.start_scope();
             }
             CondKind::CondPat(pat, rhs_expr) => {
-                self.visit_pat(pat);
-                let rhs_ty = self.visit_expr(rhs_expr);
+                self.visit_expr(rhs_expr);
 
                 self.ast_visit_emitter.start_scope();
-                let mut pat_visitor = PatVisitor::new(self.ast_visit_emitter, self.src);
-                let pat_result = pat_visitor.visit_pat(pat);
 
-                let bindings = self.get_def_bindings_from_ty_and_pat_visit_result(
-                    pat_result,
-                    rhs_ty
-                );
-
-                for def_id in &bindings.bindings {
-                    let ty = self.ast_visit_emitter.get_ty_from_def_id(*def_id);
-                    println!(
-                        "IdentWildcard `{}` in pattern is of type `{}`",
-                        def_id.symbol.get(),
-                        ty
-                    );
-                }
+                self.visit_pat(pat);
             }
         }
 
         let true_type = self.visit_stmts(if_expr.true_block);
+
         self.ast_visit_emitter.end_scope();
 
         let false_type = if_expr.false_block
@@ -1422,14 +1537,15 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
 
         let if_expr_ty = if let Some(false_type) = false_type {
             if
-                true_type.test_eq(
+                let Err(errors) = TypeChecker::test_eq_loose(
+                    true_type,
                     false_type,
                     self.ast_visit_emitter.borrow_def_id_to_name_binding()
                 )
             {
-                true_type
-            } else {
                 Ty::Unkown
+            } else {
+                true_type
             }
         } else {
             true_type

@@ -8,6 +8,7 @@ use crate::{
     DefId,
     DefIdToNameBinding,
     FnSig,
+    Mutability,
     NameBindingKind,
     ResolvedInformation,
     Symbol,
@@ -18,6 +19,7 @@ pub const INT_TY: Ty = Ty::PrimTy(PrimTy::Int);
 pub const BOOL_TY: Ty = Ty::PrimTy(PrimTy::Bool);
 pub const NEVER_TY: Ty = Ty::Never;
 pub const UNKOWN_TY: Ty = Ty::Unkown;
+pub const NULL_TY: Ty = Ty::Null;
 
 /// For now, this is just used as a way to intern types
 pub struct TyCtx;
@@ -72,10 +74,14 @@ pub enum Ty {
     AtdConstructer(DefId),
     /// Reference to an algebraic data type definition
     Adt(DefId),
-    /// Used internally by the compiler `*Ty`
-    Ptr(&'static Ty),
+    /// Used internally by the compiler `*Ty` or in C-mode
+    Ptr(&'static Ty, Mutability),
+    /// Used internally by the compiler `[*]Ty` or in C-mode
+    ManyPtr(&'static Ty, Mutability),
     /// Compiler types e.g. `Int, Uint, Float, String, etc.`
     PrimTy(PrimTy),
+    /// Type `null` can be coerced to any pointer type
+    Null,
     /// All code after this point is unreachable
     Never,
     /// Zero sized type
@@ -88,7 +94,14 @@ impl Ty {
     pub fn to_ptr_ty(&self) -> Ty {
         match self {
             Self::Unkown | Self::PrimTy(PrimTy::Void) => *self,
-            _ => Self::Ptr(TyCtx::intern_type(*self)),
+            _ => Self::Ptr(TyCtx::intern_type(*self), Mutability::Immutable),
+        }
+    }
+
+    pub fn to_mut_ptr_ty(&self) -> Ty {
+        match self {
+            Self::Unkown | Self::PrimTy(PrimTy::Void) => *self,
+            _ => Self::Ptr(TyCtx::intern_type(*self), Mutability::Mutable),
         }
     }
 
@@ -105,49 +118,73 @@ impl Ty {
     }
 
     pub fn is_ptr(&self) -> bool {
-        if let Self::Ptr(_) = self { true } else { false }
+        if let Self::Ptr(_, _) | Self::ManyPtr(_, _) = self { true } else { false }
     }
 
-    pub fn test_eq<'a>(&self, other: Ty, def_id_to_name_binding: &DefIdToNameBinding<'a>) -> bool {
-        let lhs = self.get_expanded_ty(def_id_to_name_binding);
-        let rhs = other.get_expanded_ty(def_id_to_name_binding);
+    pub fn is_mut_ptr(&self) -> bool {
+        if let Self::Ptr(_, Mutability::Mutable) | Self::ManyPtr(_, Mutability::Mutable) = self {
+            true
+        } else {
+            false
+        }
+    }
 
-        lhs == rhs
+    pub fn is_null(&self) -> bool {
+        self.auto_deref() == NULL_TY
+    }
+
+    pub fn test_eq_strict<'a>(
+        &self,
+        other: Ty,
+        def_id_to_name_binding: &DefIdToNameBinding<'a>
+    ) -> bool {
+        *self == other
+    }
+
+    pub fn get_expanded_dereffed_ty<'a>(
+        &self,
+        def_id_to_name_binding: &DefIdToNameBinding<'a>
+    ) -> Ty {
+        self.auto_deref().get_expanded_ty(def_id_to_name_binding)
+    }
+
+    pub fn deref_until_single_ptr(&self) -> Ty {
+        let mut ty = *self;
+
+        let final_ty = loop {
+            if let Ty::Ptr(inner_ty, _) | Ty::ManyPtr(inner_ty, _) = ty {
+                if let Ty::Ptr(_, _) | Ty::ManyPtr(_, _) = *inner_ty {
+                    ty = *inner_ty;
+                } else {
+                    break ty;
+                }
+            } else {
+                break ty;
+            }
+        };
+
+        final_ty
     }
 
     fn get_expanded_ty<'a>(&self, def_id_to_name_binding: &DefIdToNameBinding<'a>) -> Ty {
         match self {
-            Self::Adt(def_id) => {
-                let name_binding = def_id_to_name_binding.get(&def_id).unwrap();
-                match name_binding.kind {
-                    NameBindingKind::Adt(adt) => {
-                        match adt {
-                            Adt::EnumVariant(enum_def_id, _, ty) => Ty::Adt(enum_def_id),
-                            Adt::Struct(fields) => {
-                                let mut expanded_fields = Vec::with_capacity(fields.len());
-                                for (_, ty) in fields.iter() {
-                                    expanded_fields.push(
-                                        ty.get_expanded_ty(def_id_to_name_binding)
-                                    );
-                                }
-
-                                Ty::Tuple(TyCtx::intern_many_types(expanded_fields))
-                            }
-                            Adt::Typedef(ty) => ty.get_expanded_ty(def_id_to_name_binding),
-                            Adt::Enum(variants) => *self,
-                        }
-                    }
-                    _ => panic!("Invalid ADT"),
-                }
-            }
             Self::FnDef(def_id) => {
                 let name_binding = def_id_to_name_binding.get(&def_id).unwrap();
                 match name_binding.kind {
-                    NameBindingKind::Fn(fn_sig) => Ty::FnSig(fn_sig),
+                    NameBindingKind::Fn(fn_sig, _) => Ty::FnSig(fn_sig),
                     _ => panic!("Expected fn"),
                 }
             }
-            _ => self.auto_deref(),
+            Self::Adt(def_id) => {
+                let name_binding = def_id_to_name_binding.get(&def_id).unwrap();
+                match name_binding.kind {
+                    NameBindingKind::Adt(Adt::Typedef(ty)) =>
+                        ty.get_expanded_ty(def_id_to_name_binding),
+                    _ => Ty::Adt(*def_id),
+                }
+            }
+
+            _ => *self,
         }
     }
 
@@ -157,12 +194,13 @@ impl Ty {
         op: BinaryOp,
         def_id_to_name_binding: &DefIdToNameBinding
     ) -> Option<Ty> {
-        let lhs = self.auto_deref().get_expanded_ty(def_id_to_name_binding);
-        let rhs = other.auto_deref().get_expanded_ty(def_id_to_name_binding);
+        let lhs = self.get_expanded_dereffed_ty(def_id_to_name_binding);
+        let rhs = other.get_expanded_dereffed_ty(def_id_to_name_binding);
 
         match op {
             BinaryOp::ArithmeticOp(arithmetic_op) => {
                 use ArithmeticOp::*;
+
                 match (lhs, arithmetic_op, rhs) {
                     (INT_TY, Add | Sub | Mul | Div, INT_TY) => Some(INT_TY),
                     _ => None,
@@ -184,6 +222,7 @@ impl Ty {
         def_id_to_name_binding: &DefIdToNameBinding
     ) -> Option<&'static [Ty]> {
         let ty = self.auto_deref().get_expanded_ty(def_id_to_name_binding);
+
         match ty {
             Ty::Tuple(tuple_ty) => Some(tuple_ty),
             _ => None,
@@ -228,10 +267,10 @@ impl Ty {
         self.auto_deref() == BOOL_TY
     }
 
-    fn auto_deref(&self) -> Ty {
+    pub fn auto_deref(&self) -> Ty {
         let mut ty = *self;
         loop {
-            if let Ty::Ptr(inner_ty) = ty {
+            if let Ty::Ptr(inner_ty, _) | Ty::ManyPtr(inner_ty, _) = ty {
                 ty = *inner_ty;
             } else {
                 break ty;
@@ -240,7 +279,11 @@ impl Ty {
     }
 
     pub fn try_deref_once(&self) -> Option<Ty> {
-        if let Ty::Ptr(inner_ty) = *self { Some(*inner_ty) } else { None }
+        if let Ty::Ptr(inner_ty, _) | Ty::ManyPtr(inner_ty, _) = *self {
+            Some(*inner_ty)
+        } else {
+            None
+        }
     }
 }
 
@@ -251,6 +294,7 @@ impl GetTyAttr for Ty {
             Self::ZeroSized => TyAttr::new(0, 0),
             Self::FnDef(_) => TyAttr::new(8, 8),
             Self::FnSig(_) => TyAttr::new(8, 8),
+            Self::Null => TyAttr::new(8, 8),
             Self::Tuple(tuple) => {
                 let mut total_size = 0;
                 let mut alignment = None;
@@ -342,7 +386,8 @@ impl GetTyAttr for Ty {
 
                 ty_attr
             }
-            Self::Ptr(_) => TyAttr::new(8, 8),
+            Self::Ptr(_, _) => TyAttr::new(8, 8),
+            Self::ManyPtr(_, _) => TyAttr::new(8, 8),
             Self::PrimTy(prim_ty) => prim_ty.get_ty_attr(resolved_information),
             t @ (Self::Unkown | Self::Never) => panic!("{} has no size and alignment", t),
         }
@@ -352,11 +397,13 @@ impl GetTyAttr for Ty {
 impl Display for Ty {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::Null => write!(f, "null"),
             Self::AtdConstructer(def_id) => write!(f, "{}", def_id.symbol.get()),
             Self::ZeroSized => write!(f, "ZeroSized"),
             Self::FnDef(def_id) => write!(f, "FnDef({})", def_id.symbol.get()),
             Self::FnSig(_) => write!(f, "FnSig"),
-            Self::Ptr(inner) => write!(f, "*{}", inner),
+            Self::Ptr(inner, mutability) => { write!(f, "*{}{}", mutability, inner) }
+            Self::ManyPtr(inner, mutability) => { write!(f, "[*{}]{}", mutability, inner) }
             Self::Unkown => write!(f, "{{unkown}}"),
             Self::Never => write!(f, "!"),
             Self::PrimTy(prim_ty) => prim_ty.fmt(f),

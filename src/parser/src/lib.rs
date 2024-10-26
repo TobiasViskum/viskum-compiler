@@ -1,5 +1,3 @@
-use std::collections::VecDeque;
-
 use ast::{
     Ast,
     AstArena,
@@ -8,6 +6,8 @@ use ast::{
     BlockExpr,
     BoolExpr,
     BreakExpr,
+    CompDeclItem,
+    CompFnDeclItem,
     CondKind,
     ContinueExpr,
     EnumItem,
@@ -23,7 +23,9 @@ use ast::{
     IfFalseBranchExpr,
     IntegerExpr,
     ItemStmt,
+    ItemType,
     LoopExpr,
+    NullExpr,
     Pat,
     Path,
     PathField,
@@ -38,8 +40,7 @@ use ast::{
 };
 use error::Error;
 use expr_builder::ExprBuilder;
-use fxhash::FxHashMap;
-use ir::{ DefId, NodeId, Symbol };
+use ir::{ Mutability, NodeId, Symbol };
 use lexer::Lexer;
 use make_parse_rule::make_parse_rule;
 use op::{ ArithmeticOp, BinaryOp, ComparisonOp };
@@ -52,7 +53,7 @@ mod precedence;
 
 const PARSE_RULE_COUNT: usize = enum_iterator::cardinality::<TokenKind>();
 
-pub type ParseRuleMethod = for<'a, 'b> fn(&'b mut Parser<'a>, &'b mut ExprBuilder<'a>);
+type ParseRuleMethod = for<'a, 'b> fn(&'b mut Parser<'a>, &'b mut ExprBuilder<'a>);
 
 /// Each token kind is asociated with a ParseRule (specified in function: Parser::create_parse_rule)
 ///
@@ -114,6 +115,7 @@ impl<'a> ParserHandle<'a> for Parser<'a> {
                                 Some(Path::PathSegment(ident_expr))
                             }
                             PlaceExpr::TupleFieldExpr(_) => None,
+                            PlaceExpr::IndexExpr(_) => None,
                             PlaceExpr::FieldExpr(field_expr) => {
                                 let lhs = self.try_as_path(field_expr.lhs);
 
@@ -163,6 +165,7 @@ impl<'a> ParserHandle<'a> for Parser<'a> {
                         match expr {
                             PlaceExpr::TupleFieldExpr(_) => None,
                             PlaceExpr::FieldExpr(_) => None,
+                            PlaceExpr::IndexExpr(_) => None,
                             PlaceExpr::IdentExpr(ident_expr) =>
                                 Some(
                                     Pat::IdentPat(
@@ -265,6 +268,7 @@ impl<'a> ParserHandle<'a> for Parser<'a> {
                             PlaceExpr::IdentExpr(expr) => Some(expr),
                             PlaceExpr::TupleFieldExpr(_) => None,
                             PlaceExpr::FieldExpr(_) => None,
+                            PlaceExpr::IndexExpr(_) => None,
                         }
                     }
                 }
@@ -329,9 +333,35 @@ impl<'a> Parser<'a> {
             TokenKind::Break => self.break_expr(),
             TokenKind::Continue => self.continue_expr(),
             TokenKind::Fn => self.function_statement(),
+            TokenKind::Declare => self.declare_statement(),
             TokenKind::Return => self.return_expr(),
             _ => self.expression_statement(),
         }
+    }
+
+    pub(crate) fn declare_statement(&mut self) -> Stmt<'a> {
+        self.advance();
+
+        let comp_decl_item = match self.current.get_kind() {
+            TokenKind::Fn => {
+                let (item_type, fn_ident, args, ret_typing) = self.parse_fn_signature();
+
+                CompDeclItem::CompFnDeclItem(
+                    self.ast_arena.alloc_expr_or_stmt(
+                        CompFnDeclItem::new(
+                            fn_ident,
+                            args,
+                            ret_typing,
+                            item_type,
+                            self.get_ast_node_id()
+                        )
+                    )
+                )
+            }
+            _ => panic!("Only function declaration is supported for now"),
+        };
+
+        Stmt::ItemStmt(ItemStmt::CompDeclItem(comp_decl_item))
     }
 
     pub(crate) fn typedef_statement(&mut self) -> Stmt<'a> {
@@ -344,6 +374,7 @@ impl<'a> Parser<'a> {
                 TypedefItem::new(
                     self.ast_arena.alloc_expr_or_stmt(ident_node),
                     ty,
+                    ItemType::Normal,
                     self.get_ast_node_id()
                 )
             )
@@ -408,6 +439,7 @@ impl<'a> Parser<'a> {
         let enum_item = EnumItem::new(
             self.ast_arena.alloc_expr_or_stmt(ident_node),
             self.ast_arena.alloc_vec(variants),
+            ItemType::Normal,
             self.get_ast_node_id()
         );
 
@@ -416,6 +448,16 @@ impl<'a> Parser<'a> {
 
     pub(crate) fn struct_item(&mut self) -> Stmt<'a> {
         self.advance();
+
+        let item_type = if self.is_curr_kind(TokenKind::Dot) {
+            self.advance();
+            let ident_span = self.consume_ident_span("Currently available item types is: `C`");
+            assert!(&self.src[ident_span.get_byte_range()] == "C");
+            ItemType::C
+        } else {
+            ItemType::Normal
+        };
+
         let ident_node = self.consume_ident("Expected identifier after struct");
         let mut fields = Vec::with_capacity(8);
 
@@ -449,6 +491,7 @@ impl<'a> Parser<'a> {
         let struct_stmt = StructItem::new(
             self.ast_arena.alloc_expr_or_stmt(ident_node),
             fields,
+            item_type,
             self.get_ast_node_id()
         );
 
@@ -473,34 +516,58 @@ impl<'a> Parser<'a> {
             parser.ast_arena.alloc_vec(tuple_typing)
         }
 
-        if self.is_curr_kind(TokenKind::Ident) {
-            let ident = self.consume_ident_span("Expected ident");
-            Some(Typing::Ident(ident))
-        } else if self.is_curr_kind(TokenKind::LeftParen) {
-            self.advance();
-            let typing = self.parse_typing().expect("Expected typing");
-
-            match self.current.get_kind() {
-                TokenKind::RightParen => {
-                    self.advance();
-                    Some(typing)
-                }
-                TokenKind::Comma => {
-                    self.advance();
-                    let tuple_typing = parse_many_typings(self, vec![typing]);
-                    Some(Typing::Tuple(tuple_typing))
-                }
-                t => panic!("Unexpected token in typing: {}", t),
+        match self.current.get_kind() {
+            TokenKind::Ident => {
+                let ident = self.consume_ident_span("Expected ident");
+                Some(Typing::Ident(ident))
             }
-        } else if self.is_curr_kind(TokenKind::Fn) {
-            self.advance();
-            self.consume(TokenKind::LeftParen, "Expected `(` before function args");
-            let args_typing = parse_many_typings(self, vec![]);
-            let ret_typing = self.parse_typing().map(|x| self.ast_arena.alloc_expr_or_stmt(x));
+            TokenKind::Star => {
+                self.advance();
+                let mutability = if self.is_curr_kind(TokenKind::Mut) {
+                    self.advance();
+                    Mutability::Mutable
+                } else {
+                    Mutability::Immutable
+                };
+                let ty = self.parse_typing().expect("Expected type after `*`");
+                Some(Typing::Ptr(self.ast_arena.alloc_expr_or_stmt(ty), mutability))
+            }
+            TokenKind::Fn => {
+                self.advance();
+                self.consume(TokenKind::LeftParen, "Expected `(` before function args");
+                let args_typing = parse_many_typings(self, vec![]);
+                let ret_typing = self.parse_typing().map(|x| self.ast_arena.alloc_expr_or_stmt(x));
+                Some(Typing::Fn(args_typing, ret_typing))
+            }
+            TokenKind::LeftSquare => {
+                self.advance();
+                if self.is_curr_kind(TokenKind::Star) {
+                    self.advance();
+                    self.consume(TokenKind::RightSquare, "Expected `]` after `[*`");
+                    let ty = self.parse_typing().expect("Expected type after `[*]`");
+                    Some(Typing::ManyPtr(self.ast_arena.alloc_expr_or_stmt(ty)))
+                } else {
+                    todo!("Array typing");
+                }
+            }
+            TokenKind::LeftParen => {
+                self.advance();
+                let typing = self.parse_typing().expect("Expected typing");
 
-            Some(Typing::Fn(args_typing, ret_typing))
-        } else {
-            None
+                match self.current.get_kind() {
+                    TokenKind::RightParen => {
+                        self.advance();
+                        Some(typing)
+                    }
+                    TokenKind::Comma => {
+                        self.advance();
+                        let tuple_typing = parse_many_typings(self, vec![typing]);
+                        Some(Typing::Tuple(tuple_typing))
+                    }
+                    t => panic!("Unexpected token in typing: {}", t),
+                }
+            }
+            _ => None,
         }
     }
 
@@ -529,8 +596,18 @@ impl<'a> Parser<'a> {
         Stmt::ExprStmt(expr)
     }
 
-    pub(crate) fn function_statement(&mut self) -> Stmt<'a> {
+    pub(crate) fn parse_fn_signature(
+        &mut self
+    ) -> (ItemType, &'a IdentNode, &'a [&'a Field<'a>], Option<Typing<'a>>) {
         self.advance();
+        let item_type = if self.is_curr_kind(TokenKind::Dot) {
+            self.advance();
+            let ident_span = self.consume_ident_span("Currently available item types is: `C`");
+            assert!(&self.src[ident_span.get_byte_range()] == "C");
+            ItemType::C
+        } else {
+            ItemType::Normal
+        };
 
         let ident_expr = self.consume_ident("Expected ident after `def`");
 
@@ -559,6 +636,12 @@ impl<'a> Parser<'a> {
 
         let return_ty = self.parse_typing();
 
+        (item_type, self.ast_arena.alloc_expr_or_stmt(ident_expr), args, return_ty)
+    }
+
+    pub(crate) fn function_statement(&mut self) -> Stmt<'a> {
+        let (item_type, fn_ident, args, ret_typing) = self.parse_fn_signature();
+
         self.consume(TokenKind::LeftCurly, "Expected `{` before function body");
 
         let body = self.parse_block_as_stmts();
@@ -566,13 +649,7 @@ impl<'a> Parser<'a> {
         self.consume(TokenKind::RightCurly, "Expected `}` after function body");
 
         let fn_stmt = self.ast_arena.alloc_expr_or_stmt(
-            FnItem::new(
-                self.ast_arena.alloc_expr_or_stmt(ident_expr),
-                body,
-                args,
-                return_ty,
-                self.get_ast_node_id()
-            )
+            FnItem::new(fn_ident, body, args, ret_typing, item_type, self.get_ast_node_id())
         );
 
         self.parsed_fn_count += 1;
@@ -690,13 +767,19 @@ impl<'a> Parser<'a> {
         expr_builder.emit_ident_expr(ident_expr);
     }
 
-    /// Parse rule method: `true_literal`
+    /// Parse rule method: `null_lit`
+    pub(crate) fn null_lit(&mut self, expr_builder: &mut ExprBuilder<'a>) {
+        let null_expr = NullExpr::new(Span::dummy(), self.get_ast_node_id());
+        expr_builder.emit_null_expr(null_expr);
+    }
+
+    /// Parse rule method: `true_lit`
     pub(crate) fn true_lit(&mut self, expr_builder: &mut ExprBuilder<'a>) {
         let bool_expr = BoolExpr::new(true, self.get_ast_node_id());
         expr_builder.emit_bool_expr(bool_expr)
     }
 
-    /// Parse rule method: `false_literal`
+    /// Parse rule method: `false_lit`
     pub(crate) fn false_lit(&mut self, expr_builder: &mut ExprBuilder<'a>) {
         let bool_expr = BoolExpr::new(false, self.get_ast_node_id());
         expr_builder.emit_bool_expr(bool_expr)
@@ -742,6 +825,14 @@ impl<'a> Parser<'a> {
         self.consume(TokenKind::RightCurly, "Expected `}` after struct expression");
 
         expr_builder.emit_struct_expr(initialization_fields, self)
+    }
+
+    /// Parse rule method: `index_expr`
+    pub(crate) fn index_expr(&mut self, expr_builder: &mut ExprBuilder<'a>) {
+        self.advance();
+        let index_expr = self.parse_expr_and_take(Precedence::PrecAssign.get_next());
+        self.consume(TokenKind::RightSquare, "Expected `]` after index expression");
+        expr_builder.emit_index_expr(index_expr, self)
     }
 
     /// Parse rule method: `dot_expr`
@@ -1135,8 +1226,10 @@ impl<'a> Parser<'a> {
     /*                   method     prec        method      prec                    method      prec    */
         LeftParen   = { (grouping   None),      (call       PrecCall        ),      (None       None) },
         RightParen  = { (None       None),      (None       None            ),      (None       None) },
-        LeftCurly   = { (block_expr None),      (struct_expr PrecPrimary            ),      (None       None) },
+        LeftCurly   = { (block_expr None),      (struct_expr PrecPrimary    ),      (None       None) },
         RightCurly  = { (None       None),      (None       None            ),      (None       None) },
+        LeftSquare  = { (None       None),      (index_expr None            ),      (None       None) },
+        RightSquare = { (None       None),      (None       None            ),      (None       None) },
         Eq          = { (None       None),      (eq         PrecEquality    ),      (None       None) },
         Ne          = { (None       None),      (ne         PrecEquality    ),      (None       None) },
         Ge          = { (None       None),      (ge         PrecComparison  ),      (None       None) },
@@ -1161,9 +1254,12 @@ impl<'a> Parser<'a> {
         Integer     = { (integer    None),      (None       None            ),      (None       None) },
         Float       = { (float      None),      (None       None            ),      (None       None) },
 
+        // Literal `null``
+        Null        = { (null_lit   None),      (None       None            ),      (None       None) },
+
         // Booleans
-        True        = { (true_lit   None),      (None       None            ),      (None       None)   },
-        False       = { (false_lit  None),      (None       None            ),      (None       None)   },
+        True        = { (true_lit   None),      (None       None            ),      (None       None) },
+        False       = { (false_lit  None),      (None       None            ),      (None       None) },
             
         // Identifier
         Ident       = { (ident      None),      (None       None            ),      (None       None) },
@@ -1171,6 +1267,7 @@ impl<'a> Parser<'a> {
         // Keywords
         Def         = { (None       None),      (None       None            ),      (None       None) },
         Fn          = { (None       None),      (None       None            ),      (None       None) },
+        Declare     = { (None       None),      (None       None            ),      (None       None) },
         Typedef     = { (None       None),      (None       None            ),      (None       None) },
         Mut         = { (None       None),      (None       None            ),      (None       None) },
         Class       = { (None       None),      (None       None            ),      (None       None) },

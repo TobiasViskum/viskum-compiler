@@ -101,6 +101,17 @@ fn write_typing<'ast>(buffer: &mut String, src: &str, typing: &Typing<'ast>) {
                 write_typing(buffer, src, ret_typing);
             }
         }
+        Typing::Ptr(typing, mutability) => {
+            write!(buffer, "*").expect("Unexpected write error");
+            if *mutability == crate::Mutability::Mutable {
+                write!(buffer, "mut ").expect("Unexpected write error");
+            }
+            write_typing(buffer, src, typing)
+        }
+        Typing::ManyPtr(typing) => {
+            write!(buffer, "[*]").expect("Unexpected write error");
+            write_typing(buffer, src, typing)
+        }
     }
 }
 
