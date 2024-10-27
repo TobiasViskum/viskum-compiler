@@ -12,6 +12,7 @@ use ast::{
     IdentNode,
     IfExpr,
     IfFalseBranchExpr,
+    IndexExpr,
     ItemStmt,
     LoopExpr,
     NullExpr,
@@ -35,6 +36,7 @@ use icfg::{
     Cfg,
     Const,
     Icfg,
+    IndexNode,
     LoadNode,
     Node,
     NodeKind,
@@ -1320,26 +1322,70 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
         }
     }
 
+    fn visit_index_expr(&mut self, index_expr: &'ast IndexExpr<'ast>) -> Self::Result {
+        let lhs_ty = self.icfg_builder.get_ty_from_node_id(get_node_id_from_expr(index_expr.lhs));
+
+        let lhs_place = {
+            let lhs_visit_result = self.visit_expr(index_expr.lhs);
+            let operand = self.get_operand_from_visit_result(
+                lhs_visit_result,
+                lhs_ty.deref_until_single_ptr()
+            ).0;
+
+            match operand {
+                Operand::PlaceKind(place) => place,
+                _ => unreachable!("Expected PlaceKind"),
+            }
+        };
+
+        let value_operand = {
+            let value_visit_result = self.visit_expr(index_expr.value_expr);
+            self.get_operand_from_visit_result(value_visit_result, Ty::PrimTy(PrimTy::Int64)).0
+        };
+
+        let elem_ty = self.icfg_builder.get_ty_from_node_id(index_expr.ast_node_id);
+
+        let temp_id = self.get_temp_id();
+        self.push_node(
+            Node::new(
+                NodeKind::IndexNode(IndexNode::new(temp_id, lhs_place, elem_ty, value_operand))
+            )
+        );
+
+        VisitResult::PlaceKind(PlaceKind::TempId(temp_id), elem_ty)
+    }
+
     fn visit_assign_stmt(&mut self, assign_stmt: &'ast ast::AssignStmt<'ast>) -> Self::Result {
-        let setter_place = match assign_stmt.setter_expr {
+        let (setter_place, ty) = match assign_stmt.setter_expr {
             PlaceExpr::IdentExpr(ident_expr) => {
                 let def_id = self.icfg_builder.get_def_id_from_node_id(ident_expr.ast_node_id);
                 let local_mem_id = self.get_local_mem_id_from_def_id(def_id);
-                PlaceKind::LocalMemId(local_mem_id)
+                let ty = self.icfg_builder
+                    .get_ty_from_node_id(ident_expr.ast_node_id)
+                    .try_deref_once()
+                    .expect("Expected ptr");
+                (PlaceKind::LocalMemId(local_mem_id), ty)
             }
             PlaceExpr::TupleFieldExpr(_) => panic!("Tuple field expr not yet supported"),
             PlaceExpr::FieldExpr(field_expr) => {
                 let visit_result = self.visit_field_expr(field_expr);
                 match visit_result {
-                    VisitResult::PlaceKind(place_kind, _) => place_kind,
+                    VisitResult::PlaceKind(place_kind, ty) => (place_kind, ty),
                     _ => unreachable!("Expected PlaceKind"),
                 }
             }
-            PlaceExpr::IndexExpr(_) => todo!("Index expr not yet supported"),
+            PlaceExpr::IndexExpr(index_expr) => {
+                let visit_result = self.visit_index_expr(index_expr);
+
+                match visit_result {
+                    VisitResult::PlaceKind(place_kind, ty) =>
+                        (place_kind, ty.try_deref_once().expect("Expected ptr")),
+                    _ => unreachable!("Expected PlaceKind"),
+                }
+            }
         };
-        let ty_to_match = self.icfg_builder.get_ty_from_node_id(
-            get_node_id_from_expr(assign_stmt.value_expr)
-        );
+
+        let ty_to_match = ty;
 
         let value_visit_result = self.visit_expr(assign_stmt.value_expr);
         let (operand, op_ty) = self.get_operand_from_visit_result(value_visit_result, ty_to_match);

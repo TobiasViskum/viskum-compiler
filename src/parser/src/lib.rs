@@ -829,7 +829,6 @@ impl<'a> Parser<'a> {
 
     /// Parse rule method: `index_expr`
     pub(crate) fn index_expr(&mut self, expr_builder: &mut ExprBuilder<'a>) {
-        self.advance();
         let index_expr = self.parse_expr_and_take(Precedence::PrecAssign.get_next());
         self.consume(TokenKind::RightSquare, "Expected `]` after index expression");
         expr_builder.emit_index_expr(index_expr, self)
@@ -1226,9 +1225,9 @@ impl<'a> Parser<'a> {
     /*                   method     prec        method      prec                    method      prec    */
         LeftParen   = { (grouping   None),      (call       PrecCall        ),      (None       None) },
         RightParen  = { (None       None),      (None       None            ),      (None       None) },
-        LeftCurly   = { (block_expr None),      (struct_expr PrecPrimary    ),      (None       None) },
+        LeftCurly   = { (block_expr None),     (struct_expr PrecPrimary    ),      (None       None) },
         RightCurly  = { (None       None),      (None       None            ),      (None       None) },
-        LeftSquare  = { (None       None),      (index_expr None            ),      (None       None) },
+        LeftSquare  = { (None       None),      (index_expr PrecIndex       ),      (None       None) },
         RightSquare = { (None       None),      (None       None            ),      (None       None) },
         Eq          = { (None       None),      (eq         PrecEquality    ),      (None       None) },
         Ne          = { (None       None),      (ne         PrecEquality    ),      (None       None) },

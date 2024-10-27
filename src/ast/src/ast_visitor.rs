@@ -44,6 +44,7 @@ use crate::{
     GroupExpr,
     IdentNode,
     IfExpr,
+    IndexExpr,
     IntegerExpr,
     ItemStmt,
     ItemType,
@@ -1396,34 +1397,54 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
         }
     }
 
+    fn visit_index_expr(&mut self, index_expr: &'ast IndexExpr<'ast>) -> Self::Result {
+        let lhs_ty = self.visit_expr(index_expr.lhs);
+
+        println!("Need a way to know if it should deref or not");
+        let is_mutable = lhs_ty.is_mut_ptr();
+
+        match
+            self
+                .visit_expr(index_expr.value_expr)
+                .get_expanded_dereffed_ty(self.ast_visit_emitter.borrow_def_id_to_name_binding())
+        {
+            INT_TY => {}
+            ty => {
+                todo!("Expected integer, got {}", ty);
+            }
+        }
+
+        let result_ty = match lhs_ty.deref_until_single_ptr() {
+            Ty::ManyPtr(inner_ty, _) => {
+                let mutability = if is_mutable {
+                    Mutability::Mutable
+                } else {
+                    Mutability::Immutable
+                };
+                Ty::Ptr(inner_ty, mutability)
+            }
+            ty => {
+                let full_lhs_ty = lhs_ty.get_expanded_dereffed_ty(
+                    self.ast_visit_emitter.borrow_def_id_to_name_binding()
+                );
+                todo!("Expected many-item-pointer, got {}", ty);
+            }
+        };
+
+        self.ast_visit_emitter.set_type_to_node_id(index_expr.ast_node_id, result_ty);
+
+        result_ty
+    }
+
     fn visit_assign_stmt(&mut self, assign_stmt: &'ast AssignStmt<'ast>) -> Self::Result {
         let setter_ty = self.visit_place_expr(assign_stmt.setter_expr);
         let value_ty = self.visit_expr(assign_stmt.value_expr);
 
-        let (name_binding, symbol) = match &assign_stmt.setter_expr {
-            PlaceExpr::IdentExpr(ident_expr) => {
-                let def_id = self.ast_visit_emitter.get_def_id_from_node_id(ident_expr.ast_node_id);
-                let name_binding = self.ast_visit_emitter.get_namebinding_from_def_id(def_id);
-                (name_binding, def_id.symbol)
-            }
-            PlaceExpr::TupleFieldExpr(_) => {
-                panic!("Not working yet (tuple_field_expr in assignment)")
-            }
-
-            PlaceExpr::FieldExpr(field_expr) => {
-                let def_id = self.ast_visit_emitter.get_def_id_from_node_id(
-                    field_expr.rhs.ast_node_id
-                );
-                let name_binding = self.ast_visit_emitter.get_namebinding_from_def_id(def_id);
-                (name_binding, def_id.symbol)
-            }
-            PlaceExpr::IndexExpr(index_expr) => { todo!("Index expression in assignment") }
-        };
-
         if !setter_ty.is_mut_ptr() {
-            self.ast_visit_emitter.report_error(
-                Error::new(ErrorKind::AssignmentToImmutable(symbol), assign_stmt.span)
-            );
+            // self.ast_visit_emitter.report_error(
+            //     Error::new(ErrorKind::AssignmentToImmutable(symbol), assign_stmt.span)
+            // );
+            todo!("Assignment to immutable, expected mutable: {}", setter_ty);
         }
 
         if

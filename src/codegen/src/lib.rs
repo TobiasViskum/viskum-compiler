@@ -374,12 +374,12 @@ impl<'a> CfgVisitor for CodeGenUnit<'a> {
 
         writeln!(
             self.buffer,
-            "{}{} = getelementptr inbounds {}, ptr {}, i64 0, i64 {}",
+            "{}{} = getelementptr inbounds {}, ptr {}, i32 {}",
             " ".repeat(INDENTATION),
             temp_id,
             get_llvm_ty(index_node.place_ty, self.resolved_information),
             array_id,
-            index_node.index
+            self.get_llvm_operand(&index_node.index)
         )
     }
 

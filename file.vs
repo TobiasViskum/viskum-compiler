@@ -1,5 +1,5 @@
-declare fn.C realloc(prevItems *Int, bytesize Int) *Int
-declare fn.C malloc(bytesize Int) *Int
+declare fn.C realloc(prevItems *Int, bytesize Int) [*]Int
+declare fn.C malloc(bytesize Int) [*]Int
 declare fn.C socket(domain Int, type Int, protocol Int) Int
 declare fn.C exit(status Int)
 
@@ -22,15 +22,12 @@ fn.C newVec() Vec {
 fn.C push(vec *mut Vec, item Int) {
     if vec.len == vec.cap {
         vec.cap = if vec.cap == 0 { 2 } else { vec.cap * 2 }
-        vec.items = malloc(vec.cap * 4)
+        size := vec.cap * 4
+        vec.items = if vec.len == 0 { malloc(size) } else { realloc(vec.items, size) }
     }
 
-    vec.items[0] = item
-
-    exit(vec.cap)
+    vec.items[vec.len++] = item
 }
-
-
 
 struct Point {
     x Int,
@@ -81,9 +78,6 @@ enum DepthOne {
 }
 
 
-fn getEnum() Option {
-    ret Option.Some(2)
-}
 
 enum Option {
     Some(Int),
@@ -96,7 +90,11 @@ enum Option {
 fn main() {
 
     mut vec := newVec()
+    push(vec, 0)
+    push(vec, 1)
+    push(vec, 0)
     push(vec, 2)
+    push(vec, 0)
 
     mut matched := false
 

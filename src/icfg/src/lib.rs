@@ -234,13 +234,14 @@ pub struct CallNode<'a> {
     pub ret_ty: Ty,
 }
 
-/// Not implemented yet
+/// Different from `ByteAccessNode` as this is only used with actual indexing supplied by the user.
+/// E.g. `indexableOperand[2]`
 #[derive(Debug, new, Clone, Copy)]
 pub struct IndexNode {
     pub result_place: TempId,
     pub array_place: PlaceKind,
     pub place_ty: Ty,
-    pub index: usize,
+    pub index: Operand,
 }
 
 /// Used to load a value from the stack
