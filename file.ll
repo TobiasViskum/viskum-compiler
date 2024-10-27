@@ -437,3 +437,15 @@ define i32 @fib131(i32 noundef %0) {
     unreachable
 }
 
+define [12 x i8] @getEnum163() {
+    %1 = alloca [12 x i8], align 4
+    br label %2
+2:
+    store i64 0, ptr %1
+    %3 = getelementptr inbounds i8, ptr %1, i64 8
+    store i32 2, ptr %3
+    %4 = load [12 x i8], ptr %1
+    ret [4 x i8] %4
+    unreachable
+}
+

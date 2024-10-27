@@ -25,10 +25,12 @@ fn.C push(vec *mut Vec, item Int) {
         vec.items = malloc(vec.cap * 4)
     }
 
-
     vec.items[0] = item
+
     exit(vec.cap)
 }
+
+
 
 struct Point {
     x Int,
@@ -79,10 +81,16 @@ enum DepthOne {
 }
 
 
+fn getEnum() Option {
+    ret Option.Some(2)
+}
+
 enum Option {
     Some(Int),
     None
 }
+
+
 
 
 fn main() {

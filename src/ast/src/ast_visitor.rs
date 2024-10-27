@@ -21,7 +21,7 @@ use crate::{
     walk_index_expr,
     walk_loop_expr,
     walk_path_field,
-    walk_stmts_none_items,
+    walk_stmts_none_items_but_fns,
     walk_struct_expr,
     walk_tuple_expr,
     walk_tuple_field_expr,
@@ -524,7 +524,61 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
         }
 
         for item_stmt in item_iter {
-            self.visit_item(*item_stmt);
+            match item_stmt {
+                ItemStmt::FnItem(fn_item) => {
+                    let def_id = self.ast_visit_emitter.get_def_id_from_node_id(
+                        fn_item.ident_node.ast_node_id
+                    );
+
+                    let ret_ty = fn_item.return_ty
+                        .map(|ty_expr|
+                            type_from_typing(
+                                &self.src,
+                                &ty_expr,
+                                self.ast_visit_emitter,
+                                fn_item.item_type
+                            )
+                        )
+                        .unwrap_or(VOID_TY);
+
+                    let args_tys = fn_item.args
+                        .iter()
+                        .map(|arg| {
+                            let def_id = self.ast_visit_emitter.make_def_id(
+                                arg.ident.ast_node_id,
+                                Symbol::new(&self.src[arg.ident.span.get_byte_range()])
+                            );
+                            self.ast_visit_emitter.set_def_id_to_node_id(
+                                arg.ident.ast_node_id,
+                                def_id
+                            );
+
+                            let ty = type_from_typing(
+                                self.src,
+                                &arg.type_expr,
+                                self.ast_visit_emitter,
+                                fn_item.item_type
+                            );
+                            self.ast_visit_emitter.set_type_to_node_id(arg.ident.ast_node_id, ty);
+                            ty
+                        })
+                        .collect::<Vec<_>>();
+
+                    let name_binding = NameBinding::new(
+                        NameBindingKind::Fn(
+                            FnSig::new(
+                                TyCtx::intern_many_types(args_tys),
+                                TyCtx::intern_type(ret_ty)
+                            ),
+                            Externism::NoExtern
+                        )
+                    );
+                    self.ast_visit_emitter.set_namebinding_to_def_id(def_id, name_binding);
+                }
+                item => {
+                    self.visit_item(*item);
+                }
+            }
         }
 
         /*
@@ -534,7 +588,7 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
         since each field could potentially be a pointer after analysis in the ICFG¨
         */
 
-        walk_stmts_none_items(self, stmts)
+        walk_stmts_none_items_but_fns(self, stmts)
     }
 
     fn visit_ident_expr(&mut self, ident_node: &'ast IdentNode) -> Self::Result {
@@ -698,35 +752,25 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
             let def_id = self.ast_visit_emitter.get_def_id_from_node_id(
                 fn_item.ident_node.ast_node_id
             );
-
-            let ret_ty = fn_item.return_ty
-                .map(|ty_expr|
-                    type_from_typing(&self.src, &ty_expr, self.ast_visit_emitter, fn_item.item_type)
-                )
-                .unwrap_or(VOID_TY);
+            let fn_sig = {
+                let name_binding = self.ast_visit_emitter.get_namebinding_from_def_id(def_id);
+                match name_binding.kind {
+                    NameBindingKind::Fn(fn_sig, _) => fn_sig,
+                    _ => panic!("Expected function"),
+                }
+            };
+            let ret_ty = *fn_sig.ret_ty;
 
             {
                 let prev_ret_ty = std::mem::replace(&mut self.fn_ret_ty, Some(ret_ty));
                 self.fn_ret_ty = Some(ret_ty);
                 self.ast_visit_emitter.start_context();
 
-                let mut args_tys = Vec::with_capacity(fn_item.args.len());
                 for arg in fn_item.args {
-                    let def_id = self.ast_visit_emitter.make_def_id(
-                        arg.ident.ast_node_id,
-                        Symbol::new(&self.src[arg.ident.span.get_byte_range()])
+                    let def_id = self.ast_visit_emitter.get_def_id_from_node_id(
+                        arg.ident.ast_node_id
                     );
-                    let res_ty = type_from_typing(
-                        self.src,
-                        &arg.type_expr,
-                        self.ast_visit_emitter,
-                        fn_item.item_type
-                    );
-                    self.ast_visit_emitter.set_type_to_node_id(arg.ident.ast_node_id, res_ty);
 
-                    args_tys.push(res_ty);
-
-                    /* Defines arg as a variable */
                     self.ast_visit_emitter.set_namebinding_to_def_id(
                         def_id,
                         NameBinding::new(NameBindingKind::Variable(Mutability::Immutable))
@@ -736,14 +780,6 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
                         ResKind::Variable
                     );
                 }
-
-                let name_binding = NameBinding::new(
-                    NameBindingKind::Fn(
-                        FnSig::new(TyCtx::intern_many_types(args_tys), TyCtx::intern_type(ret_ty)),
-                        Externism::NoExtern
-                    )
-                );
-                self.ast_visit_emitter.set_namebinding_to_def_id(def_id, name_binding);
 
                 // Type of the body (not equal to the return type)
                 // If the body_ty is the NEVER_TY then the functions ends with a return statement no matter the path (e.g. if expresions)

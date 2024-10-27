@@ -475,15 +475,20 @@ pub fn walk_stmts<'a, V>(visitor: &mut V, stmts: &'a [Stmt<'a>]) -> V::Result wh
     }
 }
 
-pub fn walk_stmts_none_items<'a, V>(visitor: &mut V, stmts: &'a [Stmt<'a>]) -> V::Result
+pub fn walk_stmts_none_items_but_fns<'a, V>(visitor: &mut V, stmts: &'a [Stmt<'a>]) -> V::Result
     where V: Visitor<'a>
 {
     let mut result: Option<V::Result> = None;
 
     for stmt in stmts.iter() {
         match stmt {
-            Stmt::ItemStmt(_) => {
-                continue;
+            Stmt::ItemStmt(item) => {
+                match item {
+                    ItemStmt::FnItem(fn_item) => {
+                        result = Some(visitor.visit_fn_item(fn_item));
+                    }
+                    _ => {}
+                }
             }
             stmt => {
                 result = Some(visitor.visit_stmt(*stmt));
