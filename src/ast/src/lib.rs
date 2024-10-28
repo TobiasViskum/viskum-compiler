@@ -67,7 +67,7 @@ pub use ast_visitor::{ AstVisitEmitter, AstVisitor };
 pub use visitor::*;
 
 use std::{ cell::Cell, marker::PhantomData };
-use ir::{ Mutability, NodeId };
+use ir::{ HasVariadicArgs, Mutability, NodeId, Symbol };
 use op::BinaryOp;
 use span::Span;
 use derive_new::new;
@@ -162,6 +162,7 @@ pub enum Typing<'ast> {
     Tuple(&'ast [Typing<'ast>]),
     Ptr(&'ast Typing<'ast>, Mutability),
     ManyPtr(&'ast Typing<'ast>),
+    VariadicArgs,
     Fn(&'ast [Typing<'ast>], Option<&'ast Typing<'ast>>),
 }
 
@@ -192,7 +193,6 @@ pub struct CompFnDeclItem<'ast> {
     pub ident_node: &'ast IdentNode,
     pub args: &'ast [&'ast Field<'ast>],
     pub return_ty: Option<Typing<'ast>>,
-    pub item_type: ItemType,
     pub ast_node_id: NodeId,
 }
 
@@ -454,6 +454,7 @@ pub enum ConstExpr<'ast> {
     IntegerExpr(&'ast IntegerExpr),
     BoolExpr(&'ast BoolExpr),
     NullExpr(&'ast NullExpr),
+    StringExpr(&'ast StringExpr),
 }
 
 #[derive(Debug, new)]
@@ -471,6 +472,13 @@ pub struct BoolExpr {
 #[derive(Debug, new)]
 pub struct IntegerExpr {
     pub val: i64,
+    pub ast_node_id: NodeId,
+}
+
+#[derive(Debug, new)]
+pub struct StringExpr {
+    pub val: Symbol,
+    pub len: usize,
     pub ast_node_id: NodeId,
 }
 
@@ -522,6 +530,7 @@ pub fn get_node_id_from_value_expr(value_expr: ValueExpr) -> NodeId {
                 ConstExpr::BoolExpr(bool_expr) => bool_expr.ast_node_id,
                 ConstExpr::IntegerExpr(integer_expr) => integer_expr.ast_node_id,
                 ConstExpr::NullExpr(null_expr) => null_expr.ast_node_id,
+                ConstExpr::StringExpr(string_expr) => string_expr.ast_node_id,
             }
         }
     }

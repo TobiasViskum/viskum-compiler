@@ -21,6 +21,7 @@ use ast::{
     PlaceExpr,
     ReturnExpr,
     Stmt,
+    StringExpr,
     Visitor,
 };
 
@@ -54,6 +55,7 @@ use ir::{
     DefId,
     GetTyAttr,
     GlobalMem,
+    HasVariadicArgs,
     LocalMem,
     LocalMemId,
     Mutability,
@@ -80,6 +82,7 @@ pub struct IcfgBuilder<'icfg, 'ast> {
     global_mems: &'icfg RefCell<Vec<GlobalMem>>,
     resolved_information: ResolvedInformation<'icfg>,
     clib_fns: Vec<DefId>,
+
     src: &'ast str,
     arena: &'icfg Bump,
 }
@@ -97,6 +100,7 @@ impl<'icfg, 'ast> IcfgBuilder<'icfg, 'ast> {
             cfgs: Default::default(),
             global_mems,
             clib_fns: Default::default(),
+
             resolved_information,
             src,
             arena,
@@ -221,6 +225,7 @@ impl<'icfg, 'ast, 'c> CfgBuilder<'icfg, 'ast, 'c> {
                 self.result_mems,
                 self.basic_blocks,
                 CfgFnKind::Main,
+                HasVariadicArgs::No,
                 *ret_ty
             )
         } else {
@@ -269,6 +274,7 @@ impl<'icfg, 'ast, 'c> CfgBuilder<'icfg, 'ast, 'c> {
                 self.result_mems,
                 self.basic_blocks,
                 CfgFnKind::Fn(def_id),
+                HasVariadicArgs::No,
                 *ret_ty
             )
         }
@@ -484,6 +490,11 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
 
     fn visit_bool_expr(&mut self, bool_expr: &'ast ast::BoolExpr) -> Self::Result {
         VisitResult::Const(Const::Bool(bool_expr.val))
+    }
+
+    fn visit_string_expr(&mut self, string_expr: &'ast StringExpr) -> Self::Result {
+        let def_id = self.icfg_builder.get_def_id_from_node_id(string_expr.ast_node_id);
+        VisitResult::Const(Const::Str(def_id))
     }
 
     fn visit_null_expr(&mut self, _: &'ast NullExpr) -> Self::Result {
@@ -1136,7 +1147,7 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
             );
         }
 
-        let arg_tys = match ty.auto_deref() {
+        let fn_args_tys = match ty.auto_deref() {
             Ty::FnDef(def_id) => {
                 let name_binding =
                     self.icfg_builder.resolved_information.get_name_binding_from_def_id(&def_id);
@@ -1150,12 +1161,32 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
             ty => panic!("Expected fn, got {}", ty),
         };
 
+        let mut call_args_tys = Vec::with_capacity(call_expr.args.len());
+        let mut found_variadic = false;
         let arg_operands = {
             let arg_operands = call_expr.args
                 .iter()
                 .enumerate()
                 .map(|(i, arg)| {
-                    let ty_to_match = arg_tys[i];
+                    let mut ty_to_match = if found_variadic {
+                        self.icfg_builder.get_ty_from_node_id(get_node_id_from_expr(*arg))
+                    } else {
+                        fn_args_tys[i]
+                    };
+
+                    if ty_to_match.is_variadic_args() {
+                        found_variadic = true;
+                        call_args_tys.push(Ty::VariadicArgs);
+                        ty_to_match = self.icfg_builder.get_ty_from_node_id(
+                            get_node_id_from_expr(*arg)
+                        );
+                    }
+                    if found_variadic {
+                        ty_to_match = ty_to_match.deref_if_stack_ptr();
+                    }
+
+                    call_args_tys.push(ty_to_match);
+
                     let visit_result = self.visit_expr(*arg);
                     self.get_operand_from_visit_result(visit_result, ty_to_match).0
                 })
@@ -1166,32 +1197,18 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
 
         let visit_result = self.visit_expr(call_expr.callee);
 
-        let calle_ty = self.icfg_builder.get_ty_from_node_id(
-            get_node_id_from_expr(call_expr.callee)
-        );
-
-        let (callee_operand, callee_ty) = self.get_operand_from_visit_result(
-            visit_result,
-            ty.auto_deref()
-        );
-        let fn_args_ty = match callee_ty.auto_deref() {
-            Ty::FnDef(def_id) => {
-                let name_binding =
-                    self.icfg_builder.resolved_information.get_name_binding_from_def_id(&def_id);
-                if let NameBindingKind::Fn(fn_sig, _) = name_binding.kind {
-                    fn_sig.args
-                } else {
-                    panic!("Expected fn")
-                }
-            }
-            Ty::FnSig(fn_sig) => fn_sig.args,
-            ty => panic!("Expected fn, got {}", ty),
-        };
+        let (callee_operand, _) = self.get_operand_from_visit_result(visit_result, ty.auto_deref());
 
         let temp_id = self.get_temp_id();
         let call_node = Node::new(
             NodeKind::CallNode(
-                CallNode::new(temp_id, callee_operand, arg_operands, fn_args_ty, ret_ty)
+                CallNode::new(
+                    temp_id,
+                    callee_operand,
+                    arg_operands,
+                    TyCtx::intern_many_types(call_args_tys),
+                    ret_ty
+                )
             )
         );
         self.push_node(call_node);
@@ -1461,9 +1478,7 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
             Pat::TupleStructPat(_) => unreachable!("Should have been caught by type checking"),
         };
 
-        let ty_to_match = self.icfg_builder.get_ty_from_node_id(
-            get_node_id_from_expr(def_stmt.value_expr)
-        );
+        let ty_to_match = ty;
 
         let value_visit_result = self.visit_expr(def_stmt.value_expr);
         let (operand, op_ty) = self.get_operand_from_visit_result(value_visit_result, ty_to_match);

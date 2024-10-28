@@ -22,6 +22,7 @@ use ir::{
     DefId,
     Externism,
     GetTyAttr,
+    HasVariadicArgs,
     LocalMem,
     NameBindingKind,
     PrimTy,
@@ -145,14 +146,28 @@ impl<'a> CfgVisitor for CodeGenUnitHelper<'a> {
 
 pub enum LLVMSSA {
     SSAId(usize),
-    Global(DefId),
+    Global(GlobalSSA),
+}
+
+enum GlobalSSA {
+    Fn(DefId),
+    Str(DefId),
+}
+
+impl Display for GlobalSSA {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            GlobalSSA::Fn(def_id) => write!(f, "{}", def_id.display_as_fn()),
+            GlobalSSA::Str(def_id) => write!(f, "{}", def_id.display_as_str()),
+        }
+    }
 }
 
 impl Display for LLVMSSA {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             LLVMSSA::SSAId(ssa_id) => write!(f, "%{}", ssa_id),
-            LLVMSSA::Global(def_id) => write!(f, "{}", def_id),
+            LLVMSSA::Global(global_ssa) => write!(f, "{}", global_ssa),
         }
     }
 }
@@ -187,14 +202,7 @@ impl<'a> CodeGenUnit<'a> {
     }
 
     pub(crate) fn get_ssa_id_from_place(&self, place: &PlaceKind) -> LLVMSSA {
-        match place {
-            // PlaceKind::GlobalMemId(global_mem_id) => {
-            //     let borrow = self.cfg.global_mems.borrow();
-            //     let global_mem = borrow.get(global_mem_id.0 as usize).expect("Expected global mem");
-            //     LLVMSSA::Global(global_mem.def_id)
-            // }
-            _ => LLVMSSA::SSAId(*self.place_to_ssa_id.get(place).expect("Expected place")),
-        }
+        LLVMSSA::SSAId(*self.place_to_ssa_id.get(place).expect("Expected place"))
     }
 
     pub(crate) fn get_bb_id(&self, bb_id: &BasicBlockId) -> usize {
@@ -210,9 +218,10 @@ impl<'a> CodeGenUnit<'a> {
                         if self.resolved_information.is_clib_fn(def_id) {
                             format!("@{}", def_id.symbol.get())
                         } else {
-                            format!("{}", def_id)
+                            def_id.display_as_fn()
                         }
                     }
+                    Const::Str(def_id) => { def_id.display_as_str() }
                     Const::Bool(bool) =>
                         (
                             match bool {
@@ -238,8 +247,10 @@ fn get_llvm_ty<'a>(ty: Ty, resolved_information: &ResolvedInformation<'a>) -> St
                 PrimTy::Int => "i32".to_string(),
                 PrimTy::Int64 => "i64".to_string(),
                 PrimTy::Void => "void".to_string(),
+                PrimTy::Str => "ptr".to_string(),
             }
         }
+        Ty::VariadicArgs => "...".to_string(),
         Ty::Ptr(_, _) => "ptr".to_string(),
         Ty::ManyPtr(_, _) => "ptr".to_string(),
         Ty::StackPtr(_, _) => "ptr".to_string(),
@@ -276,7 +287,7 @@ impl<'a> CfgVisitor for CodeGenUnit<'a> {
                     self.buffer,
                     "define {} {}(",
                     get_llvm_ty(cfg.ret_ty, self.resolved_information),
-                    def_id
+                    def_id.display_as_fn()
                 )?;
 
                 for (i, (temp_id, arg_ty)) in cfg.args.iter().enumerate() {
@@ -496,6 +507,9 @@ impl<'a> CfgVisitor for CodeGenUnit<'a> {
         write!(self.buffer, "(")?;
         for (i, arg_ty) in call_node.args_ty.iter().enumerate() {
             write!(self.buffer, "{}", get_llvm_ty(*arg_ty, self.resolved_information))?;
+            if arg_ty.is_variadic_args() {
+                break;
+            }
             if i != call_node.args_ty.len() - 1 {
                 write!(self.buffer, ", ")?;
             }
@@ -504,13 +518,21 @@ impl<'a> CfgVisitor for CodeGenUnit<'a> {
 
         write!(self.buffer, " {}(", callee)?;
 
-        for (i, arg) in call_node.args.iter().enumerate() {
-            let ty = call_node.args_ty[i];
+        let mut found_variadic_args = false;
+        for (i, arg_ty) in call_node.args_ty.iter().enumerate() {
+            let i = if found_variadic_args { i - 1 } else { i };
+
+            if arg_ty.is_variadic_args() {
+                found_variadic_args = true;
+                continue;
+            }
+
+            let arg = &call_node.args[i];
             let arg_str = self.get_llvm_operand(arg);
             write!(
                 self.buffer,
                 "{} noundef {}",
-                get_llvm_ty(ty, self.resolved_information),
+                get_llvm_ty(*arg_ty, self.resolved_information),
                 arg_str
             )?;
             if i != call_node.args.len() - 1 {
@@ -550,16 +572,30 @@ impl<'icfg> CodeGen<'icfg> {
             ).expect("Error writing to buffer");
 
             for (i, arg_ty) in fn_sig.args.iter().enumerate() {
-                write!(
-                    buffer,
-                    "{} noundef",
-                    get_llvm_ty(*arg_ty, &self.icfg.resolved_information)
-                ).expect("Error writing to buffer");
+                write!(buffer, "{}", get_llvm_ty(*arg_ty, &self.icfg.resolved_information)).expect(
+                    "Error writing to buffer"
+                );
+                if *arg_ty != Ty::VariadicArgs {
+                    write!(buffer, " noundef").expect("Error writing to buffer");
+                }
                 if i != fn_sig.args.len() - 1 {
                     write!(buffer, ", ").expect("Error writing to buffer");
                 }
             }
+
             writeln!(buffer, ")").expect("Error writing to buffer");
+        }
+
+        writeln!(buffer).expect("Error writing to buffer");
+
+        for (const_str, const_str_len) in self.icfg.resolved_information.const_strs.iter() {
+            writeln!(
+                buffer,
+                "{} = private unnamed_addr constant [{} x i8] c\"{}\"",
+                const_str.display_as_str(),
+                const_str_len.0,
+                const_str.symbol.get()
+            ).expect("Error writing to buffer");
         }
 
         writeln!(buffer).expect("Error writing to buffer");

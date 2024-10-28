@@ -32,6 +32,7 @@ use ast::{
     PlaceExpr,
     ReturnExpr,
     Stmt,
+    StringExpr,
     StructItem,
     TupleStructPat,
     TypedefItem,
@@ -40,7 +41,7 @@ use ast::{
 };
 use error::Error;
 use expr_builder::ExprBuilder;
-use ir::{ Mutability, NodeId, Symbol };
+use ir::{ HasVariadicArgs, Mutability, NodeId, Symbol };
 use lexer::Lexer;
 use make_parse_rule::make_parse_rule;
 use op::{ ArithmeticOp, BinaryOp, ComparisonOp };
@@ -344,17 +345,15 @@ impl<'a> Parser<'a> {
 
         let comp_decl_item = match self.current.get_kind() {
             TokenKind::Fn => {
-                let (item_type, fn_ident, args, ret_typing) = self.parse_fn_signature();
+                let (item_type, fn_ident, args, ret_typing) = self.parse_fn_signature(true);
+
+                if ItemType::Normal == item_type {
+                    panic!("Error: Declare statement must be a C function declaration");
+                }
 
                 CompDeclItem::CompFnDeclItem(
                     self.ast_arena.alloc_expr_or_stmt(
-                        CompFnDeclItem::new(
-                            fn_ident,
-                            args,
-                            ret_typing,
-                            item_type,
-                            self.get_ast_node_id()
-                        )
+                        CompFnDeclItem::new(fn_ident, args, ret_typing, self.get_ast_node_id())
                     )
                 )
             }
@@ -517,6 +516,10 @@ impl<'a> Parser<'a> {
         }
 
         match self.current.get_kind() {
+            TokenKind::Ellipsis => {
+                self.advance();
+                Some(Typing::VariadicArgs)
+            }
             TokenKind::Ident => {
                 let ident = self.consume_ident_span("Expected ident");
                 Some(Typing::Ident(ident))
@@ -597,7 +600,8 @@ impl<'a> Parser<'a> {
     }
 
     pub(crate) fn parse_fn_signature(
-        &mut self
+        &mut self,
+        from_declare: bool
     ) -> (ItemType, &'a IdentNode, &'a [&'a Field<'a>], Option<Typing<'a>>) {
         self.advance();
         let item_type = if self.is_curr_kind(TokenKind::Dot) {
@@ -623,6 +627,13 @@ impl<'a> Parser<'a> {
             };
             args.push(arg);
 
+            if let Typing::VariadicArgs = arg.type_expr {
+                if !from_declare {
+                    panic!("Error: Variadic args not allowed in function declaration");
+                }
+                break;
+            }
+
             if self.is_curr_kind(TokenKind::Comma) {
                 self.advance();
                 continue;
@@ -640,7 +651,7 @@ impl<'a> Parser<'a> {
     }
 
     pub(crate) fn function_statement(&mut self) -> Stmt<'a> {
-        let (item_type, fn_ident, args, ret_typing) = self.parse_fn_signature();
+        let (item_type, fn_ident, args, ret_typing) = self.parse_fn_signature(false);
 
         self.consume(TokenKind::LeftCurly, "Expected `{` before function body");
 
@@ -744,11 +755,42 @@ impl<'a> Parser<'a> {
     /// Parse rule method: `string`
     pub(crate) fn string(&mut self, expr_builder: &mut ExprBuilder<'a>) {
         let mut string_builder = String::with_capacity(16);
+        let mut str_len = 0;
+
         while !self.is_eof() && !self.is_curr_kind(TokenKind::DoubleQuote) {
             let char = &self.src[self.current.get_span().get_byte_range()];
-            string_builder.push_str(lexeme);
-            self.advance();
+            if char == "\\" {
+                self.advance();
+
+                match &self.src[self.current.get_span().get_byte_range()] {
+                    "n" => {
+                        string_builder += "\\0A";
+                        self.advance();
+                    }
+                    "0" => {
+                        string_builder += "\\00";
+                        self.advance();
+                    }
+                    next_char => {
+                        string_builder += char;
+                        string_builder += next_char;
+                    }
+                }
+            } else {
+                string_builder += char;
+                self.advance();
+            }
+            str_len += 1;
         }
+        self.consume(TokenKind::DoubleQuote, "Expected `\"` after string");
+
+        let string_expr = StringExpr::new(
+            Symbol::new(string_builder.as_str()),
+            str_len,
+            self.get_ast_node_id()
+        );
+
+        expr_builder.emit_string_expr(string_expr);
     }
 
     /// Parse rule method: `call`
@@ -1259,6 +1301,8 @@ impl<'a> Parser<'a> {
         Increment   = { (pre_inc    None),      (None       None            ),      (post_inc   None) },
         Decrement   = { (pre_dec    None),      (None       None            ),      (post_dec   None) },
         DoubleQuote = { (string     None),      (None       None            ),      (None       None) },
+        StringChar  = { (None       None),      (None       None            ),      (None       None) },
+        Ellipsis    = { (None       None),      (None       None            ),      (None       None) },
         
             
         // Numbers

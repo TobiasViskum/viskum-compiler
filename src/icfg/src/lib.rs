@@ -17,6 +17,7 @@ use ir::{
     DefId,
     GlobalMem,
     GlobalMemId,
+    HasVariadicArgs,
     LocalMem,
     LocalMemId,
     Mutability,
@@ -29,6 +30,7 @@ use ir::{
     TyCtx,
     BOOL_TY,
     INT_TY,
+    STR_TY,
     VOID_TY,
 };
 mod icfg_prettifier;
@@ -39,7 +41,7 @@ pub use icfg_prettifier::IcfgPrettifier;
 pub use cfg_visitor::*;
 pub use cfg_analyzer::*;
 
-enum Liveness {
+pub enum Liveness {
     Alive,
     Dead,
 }
@@ -73,6 +75,7 @@ pub struct Cfg<'a> {
     /// All variables used or referenced in the function
     pub global_mems: &'a RefCell<Vec<GlobalMem>>,
     pub args: Vec<(TempId, Ty)>,
+    pub has_variadic_args: HasVariadicArgs,
     pub local_mems: Vec<LocalMem>,
     pub result_mems: Vec<ResultMem>,
     pub basic_blocks: Vec<BasicBlock<'a>>,
@@ -90,6 +93,7 @@ impl<'a> Cfg<'a> {
         result_mems: Vec<ResultMem>,
         basic_blocks: Vec<BasicBlock<'a>>,
         cfg_fn_kind: CfgFnKind,
+        has_variadic_args: HasVariadicArgs,
         ret_ty: Ty
     ) -> Self {
         Self {
@@ -100,6 +104,7 @@ impl<'a> Cfg<'a> {
             basic_blocks,
             cfg_fn_kind,
             ret_ty,
+            has_variadic_args,
             liveness: Liveness::Dead,
         }
     }
@@ -375,6 +380,7 @@ pub enum Const {
     Int(i64),
     Bool(bool),
     FnPtr(DefId),
+    Str(DefId),
     Null,
     Void,
 }
@@ -387,6 +393,7 @@ impl Const {
             Self::Bool(_) => BOOL_TY,
             Self::Null => Ty::Null,
             Self::FnPtr(def_id) => Ty::FnDef(*def_id),
+            Self::Str(_) => STR_TY,
         }
     }
 }
@@ -398,7 +405,8 @@ impl Display for Const {
             Self::Int(int) => write!(f, "{}", int),
             Self::Void => write!(f, "()"),
             Self::Null => write!(f, "null"),
-            Self::FnPtr(def_id) => write!(f, "{}", def_id),
+            Self::FnPtr(def_id) => write!(f, "{}", def_id.display_as_fn()),
+            Self::Str(def_id) => write!(f, "{}", def_id.display_as_str()),
         }
     }
 }

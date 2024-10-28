@@ -71,15 +71,17 @@ pub struct DefId {
     pub node_id: NodeId,
 }
 
-impl Display for DefId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "@{}{}", self.symbol.get(), self.node_id.0)
-    }
-}
-
 impl DefId {
     pub fn new(symbol: Symbol, node_id: NodeId) -> Self {
         Self { symbol, node_id }
+    }
+
+    pub fn display_as_fn(&self) -> String {
+        format!("@{}{}", self.symbol.get(), self.node_id.0)
+    }
+
+    pub fn display_as_str(&self) -> String {
+        format!("@.str.{}", self.node_id.0)
     }
 }
 
@@ -107,6 +109,7 @@ impl<'res> NameBinding<'res> {
             NameBindingKind::Variable(_) => ResKind::Variable,
             NameBindingKind::Adt(_) => ResKind::Adt,
             NameBindingKind::Fn(_, _) => ResKind::Fn,
+            NameBindingKind::ConstStr(_) => ResKind::ConstStr,
         }
     }
 }
@@ -116,9 +119,13 @@ pub enum NameBindingKind<'res> {
     Variable(Mutability),
     Adt(Adt<'res>),
     Fn(FnSig, Externism),
+    ConstStr(ConstStrLen),
     // Module
     // Import
 }
+
+#[derive(Debug, Clone, Copy)]
+pub struct ConstStrLen(pub u32);
 
 #[derive(Debug, Clone, Copy)]
 pub struct EmumVaraintId(pub u32);
@@ -145,6 +152,12 @@ impl FnSig {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum HasVariadicArgs {
+    Yes,
+    No,
+}
+
 #[derive(Eq, Hash, PartialEq, Debug, Clone, Copy)]
 pub struct AdtId(pub DefId);
 
@@ -154,6 +167,7 @@ pub enum ResKind {
     Variable,
     Adt,
     Fn,
+    ConstStr,
 }
 
 pub type NodeIdToTy = FxHashMap<NodeId, Ty>;
@@ -165,6 +179,7 @@ pub struct ResolvedInformation<'res> {
     pub node_id_to_def_id: NodeIdToDefId,
     pub def_id_to_name_binding: DefIdToNameBinding<'res>,
     pub def_id_to_global_mem_id: FxHashMap<DefId, GlobalMemId>,
+    pub const_strs: Vec<(DefId, ConstStrLen)>,
 }
 
 impl<'res> ResolvedInformation<'res> {
@@ -241,7 +256,6 @@ pub struct GlobalMem {
     pub global_mem_id: GlobalMemId,
     pub def_id: DefId,
     pub span: Span,
-    pub ty: Ty,
 }
 
 impl Display for GlobalMem {

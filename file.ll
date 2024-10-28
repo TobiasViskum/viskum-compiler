@@ -2,6 +2,14 @@ declare ptr @realloc(ptr noundef, i32 noundef)
 declare ptr @malloc(i32 noundef)
 declare i32 @socket(i32 noundef, i32 noundef, i32 noundef)
 declare void @exit(i32 noundef)
+declare i32 @printf(ptr noundef, ...)
+
+@.str.181 = private unnamed_addr constant [14 x i8] c"Value is: %i\0A\00"
+@.str.308 = private unnamed_addr constant [14 x i8] c"vec[%d] = %d\0A\00"
+@.str.239 = private unnamed_addr constant [31 x i8] c"Assert failed. Info:\0A%d != %d\0A\00"
+@.str.302 = private unnamed_addr constant [15 x i8] c"Items in vec:\0A\00"
+@.str.228 = private unnamed_addr constant [4 x i8] c"%s\0A\00"
+@.str.272 = private unnamed_addr constant [10 x i8] c"%d != %d\0A\00"
 
 define i32 @main() {
     %1 = alloca [16 x i8], align 4
@@ -10,18 +18,20 @@ define i32 @main() {
     %4 = alloca [8 x i8], align 8
     br label %5
 5:
-    %6 = call [16 x i8] () @newVec22()
+    call void (i32) @printInt178(i32 noundef 2)
+    call void () @runTests248()
+    %6 = call [16 x i8] () @newVec26()
     store [16 x i8] %6, ptr %1
-    call void (ptr, i32) @push33(ptr noundef %1, i32 noundef 0)
-    %7 = call ptr (ptr) @getLastMut127(ptr noundef %1)
+    call void (ptr, i32) @push37(ptr noundef %1, i32 noundef 0)
+    %7 = call ptr (ptr) @getLastMut131(ptr noundef %1)
     store ptr %7, ptr %2
     %8 = load ptr, ptr %2
     %9 = load ptr, ptr %2
     store i32 0, ptr %9
-    %10 = call i32 (ptr) @pop107(ptr noundef %1)
+    %10 = call i32 (ptr) @pop111(ptr noundef %1)
     store i32 %10, ptr %3
-    call void (ptr, i32) @push33(ptr noundef %1, i32 noundef 0)
-    %11 = call ptr (ptr) @getLast140(ptr noundef %1)
+    call void (ptr, i32) @push37(ptr noundef %1, i32 noundef 0)
+    %11 = call ptr (ptr) @getLast144(ptr noundef %1)
     store ptr %11, ptr %4
     %12 = load ptr, ptr %4
     %13 = load i32, ptr %12
@@ -29,7 +39,7 @@ define i32 @main() {
     ret i32 0
 }
 
-define [16 x i8] @newVec22() {
+define [16 x i8] @newVec26() {
     %1 = alloca [16 x i8], align 4
     br label %2
 2:
@@ -43,7 +53,7 @@ define [16 x i8] @newVec22() {
     unreachable
 }
 
-define void @push33(ptr noundef %0, i32 noundef %1) {
+define void @push37(ptr noundef %0, i32 noundef %1) {
     %3 = alloca [8 x i8], align 8
     %4 = alloca [4 x i8], align 4
     %5 = alloca [4 x i8], align 4
@@ -138,7 +148,7 @@ define void @push33(ptr noundef %0, i32 noundef %1) {
     ret void
 }
 
-define i32 @pop107(ptr noundef %0) {
+define i32 @pop111(ptr noundef %0) {
     %2 = alloca [8 x i8], align 8
     br label %3
 3:
@@ -160,7 +170,7 @@ define i32 @pop107(ptr noundef %0) {
     unreachable
 }
 
-define ptr @getLastMut127(ptr noundef %0) {
+define ptr @getLastMut131(ptr noundef %0) {
     %2 = alloca [8 x i8], align 8
     br label %3
 3:
@@ -176,7 +186,7 @@ define ptr @getLastMut127(ptr noundef %0) {
     unreachable
 }
 
-define ptr @getLast140(ptr noundef %0) {
+define ptr @getLast144(ptr noundef %0) {
     %2 = alloca [8 x i8], align 8
     br label %3
 3:
@@ -192,7 +202,7 @@ define ptr @getLast140(ptr noundef %0) {
     unreachable
 }
 
-define i32 @fib153(i32 noundef %0) {
+define i32 @fib157(i32 noundef %0) {
     %2 = alloca [4 x i8], align 4
     br label %3
 3:
@@ -207,12 +217,124 @@ define i32 @fib153(i32 noundef %0) {
 9:
     %10 = load i32, ptr %2
     %11 = sub nsw i32 %10, 2
-    %12 = call i32 (i32) @fib153(i32 noundef %11)
+    %12 = call i32 (i32) @fib157(i32 noundef %11)
     %13 = load i32, ptr %2
     %14 = sub nsw i32 %13, 1
-    %15 = call i32 (i32) @fib153(i32 noundef %14)
+    %15 = call i32 (i32) @fib157(i32 noundef %14)
     %16 = add nsw i32 %12, %15
     ret i32 %16
     unreachable
+}
+
+define void @printInt178(i32 noundef %0) {
+    %2 = alloca [4 x i8], align 4
+    br label %3
+3:
+    store i32 %0, ptr %2
+    %4 = load i32, ptr %2
+    %5 = call i32 (ptr, ...) @printf(ptr noundef @.str.181, i32 noundef %4)
+    ret void
+}
+
+define void @printStr225(ptr noundef %0) {
+    %2 = alloca [8 x i8], align 8
+    br label %3
+3:
+    store ptr %0, ptr %2
+    %4 = load ptr, ptr %2
+    %5 = call i32 (ptr, ...) @printf(ptr noundef @.str.228, ptr noundef %4)
+    ret void
+}
+
+define void @assertInt232(i32 noundef %0, i32 noundef %1) {
+    %3 = alloca [4 x i8], align 4
+    %4 = alloca [4 x i8], align 4
+    br label %5
+5:
+    store i32 %0, ptr %3
+    store i32 %1, ptr %4
+    %6 = load i32, ptr %3
+    %7 = load i32, ptr %4
+    %8 = icmp ne i32 %6, %7
+    br i1 %8, label %9, label %13
+9:
+    %10 = load i32, ptr %3
+    %11 = load i32, ptr %4
+    %12 = call i32 (ptr, ...) @printf(ptr noundef @.str.239, i32 noundef %10, i32 noundef %11)
+    call void (i32) @exit(i32 noundef 1)
+    br label %13
+13:
+    ret void
+}
+
+define void @runTests248() {
+    %1 = alloca [16 x i8], align 4
+    %2 = alloca [8 x i8], align 8
+    br label %3
+3:
+    call void (i32, i32) @assertInt232(i32 noundef 1, i32 noundef 2)
+    %4 = call [16 x i8] () @newVec26()
+    store [16 x i8] %4, ptr %1
+    call void (ptr, i32) @push37(ptr noundef %1, i32 noundef 2)
+    %5 = getelementptr inbounds i8, ptr %1, i64 8
+    %6 = load ptr, ptr %5
+    %7 = getelementptr inbounds i32, ptr %6, i32 0
+    store ptr %7, ptr %2
+    %8 = load ptr, ptr %2
+    %9 = load i32, ptr %8
+    %10 = icmp ne i32 %9, 2
+    br i1 %10, label %11, label %16
+11:
+    %12 = load ptr, ptr %2
+    %13 = load i32, ptr %12
+    %14 = add nsw i32 %13, 0
+    %15 = call i32 (ptr, ...) @printf(ptr noundef @.str.272, i32 noundef %14, i32 noundef 0)
+    call void (i32) @exit(i32 noundef 1)
+    br label %16
+16:
+    call void (ptr) @printVec299(ptr noundef %1)
+    call void (ptr, i32) @push37(ptr noundef %1, i32 noundef 4)
+    call void (ptr) @printVec299(ptr noundef %1)
+    %17 = call i32 (ptr) @pop111(ptr noundef %1)
+    call void (ptr) @printVec299(ptr noundef %1)
+    ret void
+}
+
+define void @printVec299(ptr noundef %0) {
+    %2 = alloca [8 x i8], align 8
+    %3 = alloca [4 x i8], align 4
+    br label %4
+4:
+    store ptr %0, ptr %2
+    %5 = call i32 (ptr) @printf(ptr noundef @.str.302)
+    store i32 0, ptr %3
+    br label %6
+6:
+    %7 = load i32, ptr %3
+    %8 = load ptr, ptr %2
+    %9 = getelementptr inbounds i8, ptr %8, i64 8
+    %10 = load ptr, ptr %9
+    %11 = load i32, ptr %3
+    %12 = getelementptr inbounds i32, ptr %10, i32 %11
+    %13 = load i32, ptr %12
+    %14 = add nsw i32 %13, 0
+    %15 = call i32 (ptr, ...) @printf(ptr noundef @.str.308, i32 noundef %7, i32 noundef %14)
+    %16 = load i32, ptr %3
+    %17 = add nsw i32 %16, 1
+    %18 = load ptr, ptr %2
+    %19 = load i32, ptr %18
+    %20 = icmp eq i32 %17, %19
+    br i1 %20, label %21, label %23
+21:
+    br label %26
+22:
+    br label %23
+23:
+    %24 = load i32, ptr %3
+    %25 = add nsw i32 %24, 1
+    store i32 %25, ptr %3
+    br label %6
+26:
+    ret void
 }
 

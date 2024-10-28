@@ -55,6 +55,7 @@ use crate::{
     PlaceExpr,
     ReturnExpr,
     Stmt,
+    StringExpr,
     StructExpr,
     StructItem,
     TupleExpr,
@@ -78,6 +79,7 @@ use ir::{
     ResKind,
     NEVER_TY,
     NULL_TY,
+    STR_TY,
 };
 
 use span::Span;
@@ -177,6 +179,7 @@ pub trait AstVisitEmitter<'ctx, 'ast, T>: Sized where T: AstState {
     fn append_comp_decl(&mut self, comp_fn_decl: CompDeclItem<'ast>);
     fn set_def_id_to_global_mem(&mut self, def_id: DefId);
     fn get_ty_from_node_id(&self, node_id: NodeId) -> Ty;
+    fn make_const_str(&mut self, str_expr: &'ast StringExpr) -> DefId;
 
     // fn define(&mut self, node_id: NodeId, symbol: Symbol, name_binding: NameBinding<'ctx>) -> DefId;
     // fn lookup_ident(
@@ -263,6 +266,10 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
     fn visit_call_expr(&mut self, call_expr: &'ast CallExpr<'ast>) -> Self::Result {
         self.insert_query_entry(call_expr.ast_node_id, AstQueryEntry::CallExpr(call_expr));
         walk_call_expr(self, call_expr)
+    }
+
+    fn visit_string_expr(&mut self, string_expr: &'ast crate::StringExpr) -> Self::Result {
+        self.insert_query_entry(string_expr.ast_node_id, AstQueryEntry::StringExpr(string_expr));
     }
 
     fn visit_field_expr(&mut self, field_expr: &'ast FieldExpr<'ast>) -> Self::Result {
@@ -390,12 +397,14 @@ fn type_from_typing<'ctx, 'ast, 'b, E, T: AstState>(
     where E: AstVisitEmitter<'ctx, 'ast, T>
 {
     match typing {
+        Typing::VariadicArgs => Ty::VariadicArgs,
         Typing::Ident(span) => {
             let lexeme = &src[span.get_byte_range()];
             match lexeme {
                 "Int" => INT_TY,
                 "Bool" => BOOL_TY,
                 "Void" => VOID_TY,
+                "Str" => STR_TY,
                 str => {
                     if let Some(def_id) = e.lookup_ident_declaration(*span, ResKind::Adt) {
                         Ty::Adt(def_id)
@@ -478,6 +487,14 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
     fn visit_null_expr(&mut self, null_expr: &'ast NullExpr) -> Self::Result {
         self.ast_visit_emitter.set_type_to_node_id(null_expr.ast_node_id, NULL_TY);
         NULL_TY
+    }
+
+    fn visit_string_expr(&mut self, string_expr: &'ast StringExpr) -> Self::Result {
+        let def_id = self.ast_visit_emitter.make_const_str(string_expr);
+        self.ast_visit_emitter.set_def_id_to_node_id(string_expr.ast_node_id, def_id);
+        self.ast_visit_emitter.set_def_id_to_global_mem(def_id);
+        self.ast_visit_emitter.set_type_to_node_id(string_expr.ast_node_id, STR_TY);
+        STR_TY
     }
 
     fn visit_block_expr(&mut self, expr: &'ast BlockExpr<'ast>) -> Self::Result {
@@ -694,12 +711,7 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
             );
             let ret_ty = comp_fn_decl_item.return_ty
                 .map(|ty_expr|
-                    type_from_typing(
-                        &self.src,
-                        &ty_expr,
-                        self.ast_visit_emitter,
-                        comp_fn_decl_item.item_type
-                    )
+                    type_from_typing(&self.src, &ty_expr, self.ast_visit_emitter, ItemType::C)
                 )
                 .unwrap_or(VOID_TY);
 
@@ -713,7 +725,7 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
                     self.src,
                     &arg.type_expr,
                     self.ast_visit_emitter,
-                    comp_fn_decl_item.item_type
+                    ItemType::C
                 );
                 self.ast_visit_emitter.set_type_to_node_id(arg.ident.ast_node_id, res_ty);
 
@@ -891,8 +903,14 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
         };
         let ret_ty = *fn_sig.ret_ty;
 
-        for (i, arg_ty) in fn_sig.args.iter().enumerate() {
-            let arg = if let Some(arg) = call_expr.args.get(i) {
+        let mut found_variadic = false;
+        for (i, arg) in call_expr.args.iter().enumerate() {
+            let given_arg_ty = self.visit_expr(*arg);
+            if found_variadic {
+                continue;
+            }
+
+            let arg_ty = if let Some(arg) = fn_sig.args.get(i) {
                 arg
             } else {
                 // self.ast_visit_emitter.report_error(
@@ -902,7 +920,10 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
                 break;
             };
 
-            let given_arg_ty = self.visit_expr(*arg);
+            if *arg_ty == Ty::VariadicArgs {
+                found_variadic = true;
+                continue;
+            }
 
             let arg_cmp = ArgCmp {
                 arg_ty: *arg_ty,
@@ -1494,7 +1515,7 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
                 );
                 self.ast_visit_emitter.bind_def_id_to_lexical_binding(def_id, ResKind::Variable);
 
-                let value_type = self.visit_expr(def_stmt.value_expr).deref_if_stack_ptr();
+                let value_type = self.visit_expr(def_stmt.value_expr);
 
                 self.ast_visit_emitter.set_type_to_node_id(ident_pat.ast_node_id, value_type);
             }

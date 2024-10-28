@@ -146,6 +146,7 @@ impl ErrorKind {
                     ResKind::Adt => "struct",
                     ResKind::Variable => "varable",
                     ResKind::Fn => "function",
+                    ResKind::ConstStr => "constant string",
                 };
 
                 write!(

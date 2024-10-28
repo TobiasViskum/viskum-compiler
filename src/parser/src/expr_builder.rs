@@ -21,6 +21,7 @@ use ast::{
     NullExpr,
     PlaceExpr,
     Stmt,
+    StringExpr,
     StructExpr,
     TupleExpr,
     TupleFieldExpr,
@@ -251,6 +252,16 @@ impl<'ast> ExprBuilder<'ast> {
 
         let expr = Expr::ExprWithoutBlock(
             ExprWithoutBlock::PlaceExpr(PlaceExpr::IdentExpr(ident_node))
+        );
+
+        self.exprs.push(expr);
+    }
+
+    pub fn emit_string_expr(&mut self, string_expr: StringExpr) {
+        let string_expr = self.ast_arena.alloc_expr_or_stmt(string_expr);
+
+        let expr = Expr::ExprWithoutBlock(
+            ExprWithoutBlock::ValueExpr(ValueExpr::ConstExpr(ConstExpr::StringExpr(string_expr)))
         );
 
         self.exprs.push(expr);

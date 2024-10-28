@@ -11,6 +11,7 @@ pub struct Lexer<'a> {
     byte_current: usize,
     line: usize,
     current_char: char,
+    str_layer: usize,
 }
 
 impl<'a> Lexer<'a> {
@@ -21,11 +22,22 @@ impl<'a> Lexer<'a> {
             byte_current: 0,
             line: 1,
             current_char: EOF_CHAR,
+            str_layer: 0,
         }
     }
 
     pub fn scan_token(&mut self) -> Token {
         let char = self.advance();
+
+        if self.is_tokenizing_string() {
+            return match char {
+                '"' => {
+                    self.str_layer -= 1;
+                    return self.make_token(TokenKind::DoubleQuote);
+                }
+                _ => self.make_token(TokenKind::StringChar),
+            };
+        }
 
         match char {
             '+' => self.make_token_or_other_if(TokenKind::Plus, '+', TokenKind::Increment),
@@ -38,7 +50,10 @@ impl<'a> Lexer<'a> {
             '}' => self.make_token(TokenKind::RightCurly),
             '[' => self.make_token(TokenKind::LeftSquare),
             ']' => self.make_token(TokenKind::RightSquare),
-            '"' => self.make_token(TokenKind::DoubleQuote),
+            '"' => {
+                self.str_layer += 1;
+                self.make_token(TokenKind::DoubleQuote)
+            }
             '!' => self.make_token_or_other_if(TokenKind::Bang, '=', TokenKind::Ne),
             '>' => self.make_token_or_other_if(TokenKind::Gt, '=', TokenKind::Ge),
             '<' => self.make_token_or_other_if(TokenKind::Lt, '=', TokenKind::Le),
@@ -51,7 +66,16 @@ impl<'a> Lexer<'a> {
             // '.' if Self::can_be_before_dot_float(prev) && Self::is_digit(self.peek_next()) => {
             //     self.make_float_number()
             // }
-            '.' => self.make_token(TokenKind::Dot),
+            '.' => {
+                if self.peek_next() == '.' && self.peek_two_next() == '.' {
+                    self.advance();
+                    self.advance();
+
+                    self.make_token(TokenKind::Ellipsis)
+                } else {
+                    self.make_token(TokenKind::Dot)
+                }
+            }
             _ if Self::is_digit(char) => self.make_number(),
             _ if Self::is_alphabetic(char) => self.make_ident_or_keyword(),
             EOF_CHAR => self.make_token(TokenKind::Eof),
@@ -196,8 +220,18 @@ impl<'a> Lexer<'a> {
         self.chars.clone().next().unwrap_or(EOF_CHAR)
     }
 
+    pub fn peek_two_next(&self) -> char {
+        let mut chars = self.chars.clone();
+        chars.next();
+        chars.next().unwrap_or(EOF_CHAR)
+    }
+
     pub fn is_eof(&self) -> bool {
         self.chars.as_str().is_empty()
+    }
+
+    pub fn is_tokenizing_string(&self) -> bool {
+        self.str_layer > 0
     }
 
     fn span(&self) -> Span {

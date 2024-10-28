@@ -2,6 +2,7 @@ declare fn.C realloc(prevItems *Int, bytesize Int) [*]Int
 declare fn.C malloc(bytesize Int) [*]Int
 declare fn.C socket(domain Int, type Int, protocol Int) Int
 declare fn.C exit(status Int)
+declare fn.C printf(fmt Str, rest ...) Int
 
 typedef Data (Int, Int, (Bool, Bool, Int))
 
@@ -48,13 +49,16 @@ fn fib(n Int) Int {
     ret fib(n - 2) + fib(n - 1)
 }
 
+fn.C printInt(integer Int) {
+    printf("Value is: %i\n\0", integer)
+}
+
 
 fn main() {
-    runTest()
+    printInt(2)
 
-    fmtStr := "%d"
-
-
+    runTests()
+    
     mut vec := newVec()
     push(vec, 0)
     last := getLastMut(vec)
@@ -64,21 +68,47 @@ fn main() {
     push(vec, 0)
     last := getLast(vec)
 
-    runTests()
-
     exit(last)
 }
 
-fn runTests() {
-    {
-        mut vec := newVec()
-        push(vec, 0)
-        pushedItem := vec.items[0]
-        if pushedItem != 0 {
-            exit(1)
-        }
-    }
-    {
+fn.C printStr(s Str) {
+    printf("%s\n\0", s)
+}
 
+fn assertInt(x Int, y Int) {
+    if x != y {
+        printf("Assert failed. Info:\n%d != %d\n\0", x, y)
+        exit(1)
+    }
+}
+
+fn runTests() {
+    assertInt(1, 2)
+    mut vec := newVec()
+    push(vec, 2)
+    pushedItem := vec.items[0]
+    if pushedItem != 2 {
+        printf("%d != %d\n\0", pushedItem + 0, 0)
+        exit(1)
+    }
+
+    printVec(vec)
+
+    push(vec, 4)
+    
+    printVec(vec)
+
+    pop(vec)
+
+    printVec(vec)
+}
+
+fn.C printVec(vec *Vec) {
+    printf("Items in vec:\n\0")
+    mut i := 0
+    loop {
+        printf("vec[%d] = %d\n\0", i, vec.items[i] + 0)
+        if i + 1 == vec.len { break }
+        i = i + 1
     }
 }

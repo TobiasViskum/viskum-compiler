@@ -40,6 +40,7 @@ use crate::{
     PlaceExpr,
     ReturnExpr,
     Stmt,
+    StringExpr,
     StructExpr,
     StructItem,
     TupleExpr,
@@ -71,6 +72,10 @@ pub trait Visitor<'ast>: Sized {
     }
     #[allow(unused_variables)]
     fn visit_bool_expr(&mut self, bool_expr: &'ast BoolExpr) -> Self::Result {
+        Self::default_result()
+    }
+    #[allow(unused_variables)]
+    fn visit_string_expr(&mut self, string_expr: &'ast StringExpr) -> Self::Result {
         Self::default_result()
     }
     #[allow(unused_variables)]
@@ -510,6 +515,7 @@ pub fn walk_const_expr<'a, V>(visitor: &mut V, const_expr: ConstExpr<'a>) -> V::
         ConstExpr::IntegerExpr(expr) => visitor.visit_interger_expr(expr),
         ConstExpr::BoolExpr(expr) => visitor.visit_bool_expr(expr),
         ConstExpr::NullExpr(expr) => visitor.visit_null_expr(expr),
+        ConstExpr::StringExpr(string_expr) => visitor.visit_string_expr(string_expr),
     }
 }
 

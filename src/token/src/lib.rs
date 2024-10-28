@@ -83,6 +83,10 @@ pub enum TokenKind {
     Decrement,
     /// `"`
     DoubleQuote,
+    /// Any character inside a string
+    StringChar,
+    /// `...`
+    Ellipsis,
 
     /* Literals */
     /// Integer e.g. `69`

@@ -57,6 +57,7 @@ impl<'ast, T> AstPrettifier<'ast, T> where T: AstState {
 
 fn write_typing<'ast>(buffer: &mut String, src: &str, typing: &Typing<'ast>) {
     match typing {
+        Typing::VariadicArgs => write!(buffer, "...").expect("Unexpected write error"),
         Typing::Ident(span) =>
             write!(buffer, "{}", Symbol::new(&src[span.get_byte_range()]).get()).expect(
                 "Unexpected write error"

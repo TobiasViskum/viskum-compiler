@@ -16,6 +16,7 @@ use crate::{
 
 pub const VOID_TY: Ty = Ty::PrimTy(PrimTy::Void);
 pub const INT_TY: Ty = Ty::PrimTy(PrimTy::Int);
+pub const STR_TY: Ty = Ty::PrimTy(PrimTy::Str);
 pub const BOOL_TY: Ty = Ty::PrimTy(PrimTy::Bool);
 pub const NEVER_TY: Ty = Ty::Never;
 pub const UNKOWN_TY: Ty = Ty::Unkown;
@@ -89,6 +90,8 @@ pub enum Ty {
     Never,
     /// Zero sized type
     ZeroSized,
+    /// `...` Only used when declaring C-functions
+    VariadicArgs,
     /// If the resulting type of an operation is unkown (error)
     Unkown,
 }
@@ -113,6 +116,10 @@ impl Ty {
             Self::StackPtr(inner_ty, _) => *inner_ty,
             _ => *self,
         }
+    }
+
+    pub fn is_variadic_args(&self) -> bool {
+        *self == Self::VariadicArgs
     }
 
     pub fn is_unkown(&self) -> bool {
@@ -338,6 +345,7 @@ impl GetTyAttr for Ty {
     fn get_ty_attr(&self, resolved_information: &ResolvedInformation) -> TyAttr {
         match self {
             Self::AtdConstructer(_) => todo!("Constructer function"),
+            Self::VariadicArgs => panic!("`...` should not be used in this context"),
             Self::ZeroSized => TyAttr::new(0, 0),
             Self::FnDef(_) => TyAttr::new(8, 8),
             Self::FnSig(_) => TyAttr::new(8, 8),
@@ -448,6 +456,7 @@ impl Display for Ty {
             Self::Null => write!(f, "null"),
             Self::AtdConstructer(def_id) => write!(f, "{}", def_id.symbol.get()),
             Self::ZeroSized => write!(f, "ZeroSized"),
+            Self::VariadicArgs => write!(f, "..."),
             Self::FnDef(def_id) => write!(f, "FnDef({})", def_id.symbol.get()),
             Self::FnSig(_) => write!(f, "FnSig"),
             Self::Ptr(inner, mutability) => { write!(f, "*{}{}", mutability, inner) }
@@ -488,9 +497,15 @@ impl Display for Ty {
 
 #[derive(Debug, Hash, Eq, PartialEq, Clone, Copy)]
 pub enum PrimTy {
+    /// 32-bit signed integer `Int`
     Int,
+    /// 64-bit signed integer `Int64`
     Int64,
+    /// Constant string `Str` (actually a pointer to a constant string)
+    Str,
+    /// 8-bit boolean `Bool`
     Bool,
+    /// Type `Void`
     Void,
 }
 
@@ -501,6 +516,7 @@ impl GetTyAttr for PrimTy {
             Self::Int64 => TyAttr::new(8, 8),
             Self::Bool => TyAttr::new(1, 1),
             Self::Void => TyAttr::new(0, 0),
+            Self::Str => TyAttr::new(8, 8),
         }
     }
 }
@@ -512,6 +528,7 @@ impl Display for PrimTy {
             Self::Int64 => write!(f, "Int64"),
             Self::Bool => write!(f, "Bool"),
             Self::Void => write!(f, "Void"),
+            Self::Str => write!(f, "Str"),
         }
     }
 }

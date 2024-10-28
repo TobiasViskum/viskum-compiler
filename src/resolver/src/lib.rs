@@ -12,11 +12,13 @@ use ast::{
     AstVisitEmitter,
     CompFnDeclItem,
     FnItem,
+    StringExpr,
 };
 use bumpalo::Bump;
 use error::{ Error, ErrorKind, Severity };
 use fxhash::{ FxBuildHasher, FxHashMap };
 use ir::{
+    ConstStrLen,
     ContextId,
     DefId,
     DefIdToNameBinding,
@@ -25,6 +27,7 @@ use ir::{
     LexicalBinding,
     LexicalContext,
     NameBinding,
+    NameBindingKind,
     NodeId,
     ResKind,
     ResolvedInformation,
@@ -54,7 +57,8 @@ pub struct Resolver<'ctx, 'ast> {
 
     found_main_fn: Option<&'ast FnItem<'ast>>,
     pending_functions: Vec<&'ast FnItem<'ast>>,
-    comp_decl_items: Vec<&'ast CompFnDeclItem<'ast>>,
+    /// This is all const strings
+    str_symbol_to_def_id: FxHashMap<Symbol, (DefId, ConstStrLen)>,
 
     /* Arena */
     arena: &'ctx Bump,
@@ -85,6 +89,7 @@ impl<'ctx, 'ast> Resolver<'ctx, 'ast> where 'ctx: 'ast {
                 node_id_to_ty: self.node_id_to_ty,
                 def_id_to_name_binding: self.def_id_to_name_binding,
                 def_id_to_global_mem_id: self.def_id_to_global_mem_id,
+                const_strs: self.str_symbol_to_def_id.values().copied().collect(),
             },
         )
     }
@@ -127,6 +132,7 @@ impl<'ctx, 'ast> Resolver<'ctx, 'ast> where 'ctx: 'ast {
             def_id_to_global_mem_id: Default::default(),
             def_id_to_name_binding: Default::default(),
             lexical_binding_to_def_id: Default::default(),
+            str_symbol_to_def_id: Default::default(),
             node_id_to_def_id: hashmap_with_capacity!(ast.expected_node_count()),
             node_id_to_ty: hashmap_with_capacity!(ast.expected_node_count()),
             arena,
@@ -135,7 +141,6 @@ impl<'ctx, 'ast> Resolver<'ctx, 'ast> where 'ctx: 'ast {
             next_context_id: ContextId(1),
             found_main_fn: None,
             pending_functions: Vec::with_capacity(ast.fn_count),
-            comp_decl_items: Default::default(),
             src,
             errors: Default::default(),
         };
@@ -245,15 +250,31 @@ impl<'ctx, 'ast> Resolver<'ctx, 'ast> where 'ctx: 'ast {
 impl<'ctx, 'ast, T> AstVisitEmitter<'ctx, 'ast, T> for Resolver<'ctx, 'ast> where T: AstState {
     /* Methods used during all passes */
     fn set_def_id_to_global_mem(&mut self, def_id: DefId) {
-        let ty = <Resolver<'_, '_> as AstVisitEmitter<'_, '_, T>>::get_ty_from_def_id(self, def_id);
         let global_mem_id = GlobalMemId(self.global_mems.borrow().len() as u32);
-        let global_mem = GlobalMem::new(global_mem_id, def_id, Span::dummy(), ty);
+        let global_mem = GlobalMem::new(global_mem_id, def_id, Span::dummy());
         self.global_mems.borrow_mut().push(global_mem);
         self.def_id_to_global_mem_id.insert(def_id, global_mem_id);
     }
     fn get_ty_from_node_id(&self, node_id: NodeId) -> Ty {
         let ty = self.node_id_to_ty.get(&node_id).expect("Expected type to node id");
         *ty
+    }
+    fn make_const_str(&mut self, str_expr: &'ast StringExpr) -> DefId {
+        if let Some(def_id) = self.str_symbol_to_def_id.get(&str_expr.val) {
+            return def_id.0;
+        }
+
+        let def_id = <Resolver<'ctx, 'ast> as AstVisitEmitter<'_, '_, T>>::make_def_id(
+            self,
+            str_expr.ast_node_id,
+            str_expr.val
+        );
+        self.def_id_to_name_binding.insert(
+            def_id,
+            NameBinding::new(NameBindingKind::ConstStr(ConstStrLen(str_expr.len as u32)))
+        );
+        self.str_symbol_to_def_id.insert(str_expr.val, (def_id, ConstStrLen(str_expr.len as u32)));
+        def_id
     }
     fn report_error(&mut self, error: Error) {
         self.errors.push(error);
@@ -350,6 +371,11 @@ impl<'ctx, 'ast, T> AstVisitEmitter<'ctx, 'ast, T> for Resolver<'ctx, 'ast> wher
         let symbol = Symbol::new(&self.src[span.get_byte_range()]);
 
         match res_kind {
+            ResKind::ConstStr => {
+                if let Some(def_id) = self.str_symbol_to_def_id.get(&symbol) {
+                    return Some(def_id.0);
+                }
+            }
             ResKind::Variable => {
                 let start_context = self.get_current_context_id();
                 // In the future, when allowing constants, the following should be true for a constant:
