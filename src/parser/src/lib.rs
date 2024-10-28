@@ -741,6 +741,16 @@ impl<'a> Parser<'a> {
         expr_builder.emit_grouping_or_tuple_expr(self, exprs)
     }
 
+    /// Parse rule method: `string`
+    pub(crate) fn string(&mut self, expr_builder: &mut ExprBuilder<'a>) {
+        let mut string_builder = String::with_capacity(16);
+        while !self.is_eof() && !self.is_curr_kind(TokenKind::DoubleQuote) {
+            let char = &self.src[self.current.get_span().get_byte_range()];
+            string_builder.push_str(lexeme);
+            self.advance();
+        }
+    }
+
     /// Parse rule method: `call`
     pub(crate) fn call(&mut self, expr_builder: &mut ExprBuilder<'a>) {
         let mut args = Vec::with_capacity(8);
@@ -918,6 +928,7 @@ impl<'a> Parser<'a> {
     }
 
     pub(crate) fn post_inc(&mut self, expr_builder: &mut ExprBuilder<'a>) {
+        todo!("Post inc not implemented yet");
         self.advance();
         expr_builder.emit_post_inc_expr(self)
     }
@@ -1247,6 +1258,7 @@ impl<'a> Parser<'a> {
         Bang        = { (None       None),      (None       None            ),      (None       None) },
         Increment   = { (pre_inc    None),      (None       None            ),      (post_inc   None) },
         Decrement   = { (pre_dec    None),      (None       None            ),      (post_dec   None) },
+        DoubleQuote = { (string     None),      (None       None            ),      (None       None) },
         
             
         // Numbers

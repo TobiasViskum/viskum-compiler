@@ -74,6 +74,9 @@ pub enum Ty {
     AtdConstructer(DefId),
     /// Reference to an algebraic data type definition
     Adt(DefId),
+    /// Reference to a variable on the stack (meaning to use the value, it should be dereferenced)
+    /// Only used internally by the compiler
+    StackPtr(&'static Ty, Mutability),
     /// Used internally by the compiler `*Ty` or in C-mode
     Ptr(&'static Ty, Mutability),
     /// Used internally by the compiler `[*]Ty` or in C-mode
@@ -105,6 +108,13 @@ impl Ty {
         }
     }
 
+    pub fn deref_if_stack_ptr(&self) -> Ty {
+        match *self {
+            Self::StackPtr(inner_ty, _) => *inner_ty,
+            _ => *self,
+        }
+    }
+
     pub fn is_unkown(&self) -> bool {
         self.auto_deref() == Ty::Unkown
     }
@@ -118,12 +128,26 @@ impl Ty {
     }
 
     pub fn is_ptr(&self) -> bool {
-        if let Self::Ptr(_, _) | Self::ManyPtr(_, _) = self { true } else { false }
+        if let Self::Ptr(_, _) | Self::ManyPtr(_, _) | Self::StackPtr(_, _) = self {
+            true
+        } else {
+            false
+        }
     }
 
     pub fn is_mut_ptr(&self) -> bool {
-        if let Self::Ptr(_, Mutability::Mutable) | Self::ManyPtr(_, Mutability::Mutable) = self {
+        if
+            let
+            | Self::Ptr(_, Mutability::Mutable)
+            | Self::ManyPtr(_, Mutability::Mutable)
+            | Self::StackPtr(_, Mutability::Mutable) = self
+        {
             true
+        } else if let Self::StackPtr(inner_ty, _) = self {
+            match *inner_ty {
+                Self::Ptr(_, Mutability::Mutable) | Self::ManyPtr(_, Mutability::Mutable) => true,
+                _ => false,
+            }
         } else {
             false
         }
@@ -138,7 +162,25 @@ impl Ty {
         other: Ty,
         def_id_to_name_binding: &DefIdToNameBinding<'a>
     ) -> bool {
-        *self == other
+        match (*self, other) {
+            (Self::StackPtr(inner_ty1, mutability1), Self::Ptr(inner_ty2, mutability2)) => {
+                inner_ty1.test_eq_strict(*inner_ty2, def_id_to_name_binding) &&
+                    (mutability1 as u8) >= (mutability2 as u8)
+            }
+            (Self::Ptr(inner_ty1, mutability1), Self::StackPtr(inner_ty2, mutability2)) => {
+                inner_ty1.test_eq_strict(*inner_ty2, def_id_to_name_binding) &&
+                    (mutability1 as u8) >= (mutability2 as u8)
+            }
+            (Self::StackPtr(inner_ty1, mutability1), Self::ManyPtr(inner_ty2, mutability2)) => {
+                inner_ty1.test_eq_strict(*inner_ty2, def_id_to_name_binding) &&
+                    (mutability1 as u8) >= (mutability2 as u8)
+            }
+            (Self::ManyPtr(inner_ty1, mutability1), Self::StackPtr(inner_ty2, mutability2)) => {
+                inner_ty1.test_eq_strict(*inner_ty2, def_id_to_name_binding) &&
+                    (mutability1 as u8) >= (mutability2 as u8)
+            }
+            _ => *self == other,
+        }
     }
 
     pub fn get_expanded_dereffed_ty<'a>(
@@ -148,22 +190,27 @@ impl Ty {
         self.auto_deref().get_expanded_ty(def_id_to_name_binding)
     }
 
-    pub fn deref_until_single_ptr(&self) -> Ty {
+    pub fn deref_until_stack_ptr_and_one_more_if_ptr(&self) -> Ty {
+        let ty = self.deref_until_stack_ptr();
+        if let Ty::StackPtr(inner_ty, _) = ty {
+            if let Ty::Ptr(_, _) | Ty::ManyPtr(_, _) = *inner_ty { *inner_ty } else { ty }
+        } else {
+            ty
+        }
+    }
+
+    pub fn deref_until_stack_ptr(&self) -> Ty {
         let mut ty = *self;
 
-        let final_ty = loop {
-            if let Ty::Ptr(inner_ty, _) | Ty::ManyPtr(inner_ty, _) = ty {
-                if let Ty::Ptr(_, _) | Ty::ManyPtr(_, _) = *inner_ty {
-                    ty = *inner_ty;
-                } else {
-                    break ty;
-                }
+        loop {
+            if let Ty::StackPtr(_, _) = ty {
+                break ty;
+            } else if let Ty::Ptr(inner_ty, _) | Ty::ManyPtr(inner_ty, _) = ty {
+                ty = *inner_ty;
             } else {
                 break ty;
             }
-        };
-
-        final_ty
+        }
     }
 
     fn get_expanded_ty<'a>(&self, def_id_to_name_binding: &DefIdToNameBinding<'a>) -> Ty {
@@ -270,7 +317,7 @@ impl Ty {
     pub fn auto_deref(&self) -> Ty {
         let mut ty = *self;
         loop {
-            if let Ty::Ptr(inner_ty, _) | Ty::ManyPtr(inner_ty, _) = ty {
+            if let Ty::Ptr(inner_ty, _) | Ty::ManyPtr(inner_ty, _) | Ty::StackPtr(inner_ty, _) = ty {
                 ty = *inner_ty;
             } else {
                 break ty;
@@ -279,7 +326,7 @@ impl Ty {
     }
 
     pub fn try_deref_once(&self) -> Option<Ty> {
-        if let Ty::Ptr(inner_ty, _) | Ty::ManyPtr(inner_ty, _) = *self {
+        if let Ty::Ptr(inner_ty, _) | Ty::ManyPtr(inner_ty, _) | Ty::StackPtr(inner_ty, _) = *self {
             Some(*inner_ty)
         } else {
             None
@@ -388,6 +435,7 @@ impl GetTyAttr for Ty {
             }
             Self::Ptr(_, _) => TyAttr::new(8, 8),
             Self::ManyPtr(_, _) => TyAttr::new(8, 8),
+            Self::StackPtr(_, _) => TyAttr::new(8, 8),
             Self::PrimTy(prim_ty) => prim_ty.get_ty_attr(resolved_information),
             t @ (Self::Unkown | Self::Never) => panic!("{} has no size and alignment", t),
         }
@@ -404,6 +452,7 @@ impl Display for Ty {
             Self::FnSig(_) => write!(f, "FnSig"),
             Self::Ptr(inner, mutability) => { write!(f, "*{}{}", mutability, inner) }
             Self::ManyPtr(inner, mutability) => { write!(f, "[*{}]{}", mutability, inner) }
+            Self::StackPtr(inner, mutability) => { write!(f, "stack_ptr<{}{}>", mutability, inner) }
             Self::Unkown => write!(f, "{{unkown}}"),
             Self::Never => write!(f, "!"),
             Self::PrimTy(prim_ty) => prim_ty.fmt(f),

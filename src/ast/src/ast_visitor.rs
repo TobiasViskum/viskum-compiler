@@ -608,7 +608,7 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
             };
 
             self.ast_visit_emitter.set_def_id_to_node_id(ident_node.ast_node_id, def_id);
-            let ident_ty = Ty::Ptr(
+            let ident_ty = Ty::StackPtr(
                 TyCtx::intern_type(self.ast_visit_emitter.get_ty_from_def_id(def_id)),
                 mutability
             );
@@ -935,6 +935,7 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
         };
 
         if let Some(fn_ret_ty) = self.fn_ret_ty {
+            self.ast_visit_emitter.set_type_to_node_id(return_expr.ast_node_id, fn_ret_ty);
             if
                 let Err(errors) = TypeChecker::test_eq_loose(
                     ret_ty,
@@ -956,7 +957,6 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
             );
         }
 
-        self.ast_visit_emitter.set_type_to_node_id(return_expr.ast_node_id, NEVER_TY);
         NEVER_TY
     }
 
@@ -1207,13 +1207,13 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
 
             for (field_symbol, field_ty) in struct_fields {
                 if field_symbol.symbol.get() == field_access_symbol.get() {
-                    let mutability = if lhs_ty.deref_until_single_ptr().is_mut_ptr() {
+                    let mutability = if lhs_ty.deref_until_stack_ptr().is_mut_ptr() {
                         Mutability::Mutable
                     } else {
                         Mutability::Immutable
                     };
 
-                    let field_ty = Ty::Ptr(TyCtx::intern_type(*field_ty), mutability);
+                    let field_ty = Ty::StackPtr(TyCtx::intern_type(*field_ty), mutability);
 
                     self.ast_visit_emitter.set_type_to_node_id(field_expr.ast_node_id, field_ty);
                     self.ast_visit_emitter.set_type_to_node_id(
@@ -1380,13 +1380,13 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
             self.ast_visit_emitter.set_type_to_node_id(tuple_field_expr.ast_node_id, Ty::Unkown);
             return Ty::Unkown;
         } else {
-            let mutability = if lhs_ty.deref_until_single_ptr().is_mut_ptr() {
+            let mutability = if lhs_ty.deref_until_stack_ptr().is_mut_ptr() {
                 Mutability::Mutable
             } else {
                 Mutability::Immutable
             };
 
-            let access_ty = Ty::Ptr(
+            let access_ty = Ty::StackPtr(
                 TyCtx::intern_type(tuple_ty[tuple_field_expr.rhs.val as usize]),
                 mutability
             );
@@ -1400,7 +1400,6 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
     fn visit_index_expr(&mut self, index_expr: &'ast IndexExpr<'ast>) -> Self::Result {
         let lhs_ty = self.visit_expr(index_expr.lhs);
 
-        println!("Need a way to know if it should deref or not");
         let is_mutable = lhs_ty.is_mut_ptr();
 
         match
@@ -1414,20 +1413,21 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
             }
         }
 
-        let result_ty = match lhs_ty.deref_until_single_ptr() {
-            Ty::ManyPtr(inner_ty, _) => {
+        let result_ty = match lhs_ty.deref_until_stack_ptr().try_deref_once() {
+            Some(Ty::ManyPtr(inner_ty, _)) => {
                 let mutability = if is_mutable {
                     Mutability::Mutable
                 } else {
                     Mutability::Immutable
                 };
-                Ty::Ptr(inner_ty, mutability)
+
+                Ty::StackPtr(inner_ty, mutability)
             }
-            ty => {
+            _ => {
                 let full_lhs_ty = lhs_ty.get_expanded_dereffed_ty(
                     self.ast_visit_emitter.borrow_def_id_to_name_binding()
                 );
-                todo!("Expected many-item-pointer, got {}", ty);
+                todo!("Expected many-item-pointer, got {}", full_lhs_ty);
             }
         };
 
@@ -1440,11 +1440,11 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
         let setter_ty = self.visit_place_expr(assign_stmt.setter_expr);
         let value_ty = self.visit_expr(assign_stmt.value_expr);
 
-        if !setter_ty.is_mut_ptr() {
+        if !setter_ty.deref_until_stack_ptr().is_mut_ptr() {
             // self.ast_visit_emitter.report_error(
             //     Error::new(ErrorKind::AssignmentToImmutable(symbol), assign_stmt.span)
             // );
-            todo!("Assignment to immutable, expected mutable: {}", setter_ty);
+            // todo!("Assignment to immutable, expected mutable: {}", setter_ty);
         }
 
         if
@@ -1494,7 +1494,7 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
                 );
                 self.ast_visit_emitter.bind_def_id_to_lexical_binding(def_id, ResKind::Variable);
 
-                let value_type = self.visit_expr(def_stmt.value_expr);
+                let value_type = self.visit_expr(def_stmt.value_expr).deref_if_stack_ptr();
 
                 self.ast_visit_emitter.set_type_to_node_id(ident_pat.ast_node_id, value_type);
             }

@@ -38,6 +38,7 @@ impl<'a> Lexer<'a> {
             '}' => self.make_token(TokenKind::RightCurly),
             '[' => self.make_token(TokenKind::LeftSquare),
             ']' => self.make_token(TokenKind::RightSquare),
+            '"' => self.make_token(TokenKind::DoubleQuote),
             '!' => self.make_token_or_other_if(TokenKind::Bang, '=', TokenKind::Ne),
             '>' => self.make_token_or_other_if(TokenKind::Gt, '=', TokenKind::Ge),
             '<' => self.make_token_or_other_if(TokenKind::Lt, '=', TokenKind::Le),

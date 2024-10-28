@@ -242,6 +242,7 @@ fn get_llvm_ty<'a>(ty: Ty, resolved_information: &ResolvedInformation<'a>) -> St
         }
         Ty::Ptr(_, _) => "ptr".to_string(),
         Ty::ManyPtr(_, _) => "ptr".to_string(),
+        Ty::StackPtr(_, _) => "ptr".to_string(),
         Ty::Null => "ptr".to_string(),
         ty @ Ty::Tuple(_) => {
             let ty_attr = ty.get_ty_attr(resolved_information);
@@ -570,12 +571,14 @@ impl<'icfg> CodeGen<'icfg> {
         let file_name_with_extension = format!("{}.ll", file_name);
         let mut file = File::create(&file_name_with_extension).expect("Error creating file");
         file.write_all(buffer.as_bytes()).expect("Error writing to file");
-        Command::new("clang")
-            .arg("-O4")
+        let result = Command::new("clang")
+            .arg("-O3")
             .arg(&file_name_with_extension)
             .arg("-o")
             .arg(&file_name)
             .output()
-            .expect("Error compiling file");
+            .expect("Failed to execute clang");
+
+        println!("{}", String::from_utf8(result.stderr).expect("Error converting to string"));
     }
 }

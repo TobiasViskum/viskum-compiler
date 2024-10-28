@@ -8,8 +8,8 @@ use crate::{ Symbol, Ty };
 
 #[derive(Hash, Eq, PartialEq, Debug, Clone, Copy)]
 pub enum Mutability {
-    Mutable,
-    Immutable,
+    Immutable = 0,
+    Mutable = 1,
 }
 
 impl Display for Mutability {

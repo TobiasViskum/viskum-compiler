@@ -81,6 +81,8 @@ pub enum TokenKind {
     Increment,
     /// `--`
     Decrement,
+    /// `"`
+    DoubleQuote,
 
     /* Literals */
     /// Integer e.g. `69`
