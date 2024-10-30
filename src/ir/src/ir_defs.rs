@@ -108,17 +108,23 @@ impl<'res> NameBinding<'res> {
         match self.kind {
             NameBindingKind::Variable(_) => ResKind::Variable,
             NameBindingKind::Adt(_) => ResKind::Adt,
-            NameBindingKind::Fn(_, _) => ResKind::Fn,
+            NameBindingKind::Fn(_, _, _) => ResKind::Fn,
             NameBindingKind::ConstStr(_) => ResKind::ConstStr,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HasSelfArg {
+    Yes,
+    No,
 }
 
 #[derive(Debug, Clone, Copy)]
 pub enum NameBindingKind<'res> {
     Variable(Mutability),
     Adt(Adt<'res>),
-    Fn(FnSig, Externism),
+    Fn(FnSig, HasSelfArg, Externism),
     ConstStr(ConstStrLen),
     // Module
     // Import
@@ -152,10 +158,10 @@ impl FnSig {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum HasVariadicArgs {
-    Yes,
-    No,
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, new)]
+pub struct ImplId {
+    pub def_id: DefId,
+    pub impl_symbol: Symbol,
 }
 
 #[derive(Eq, Hash, PartialEq, Debug, Clone, Copy)]
@@ -191,6 +197,10 @@ impl<'res> ResolvedInformation<'res> {
         *self.node_id_to_def_id.get(node_id).expect("Expected DefId to node id")
     }
 
+    pub fn try_get_def_id_from_node_id(&self, node_id: &NodeId) -> Option<DefId> {
+        self.node_id_to_def_id.get(node_id).copied()
+    }
+
     pub fn get_name_binding_from_def_id(&self, def_id: &DefId) -> NameBinding<'res> {
         *self.def_id_to_name_binding.get(def_id).expect("Expected name to be binded to def id")
     }
@@ -203,7 +213,7 @@ impl<'res> ResolvedInformation<'res> {
 
     pub fn is_clib_fn(&self, def_id: &DefId) -> bool {
         match self.get_name_binding_from_def_id(def_id).kind {
-            NameBindingKind::Fn(_, Externism::Clib) => true,
+            NameBindingKind::Fn(_, _, Externism::Clib) => true,
             _ => false,
         }
     }

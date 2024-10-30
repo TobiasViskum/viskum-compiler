@@ -174,7 +174,7 @@ impl<'ast> ExprBuilder<'ast> {
         let value_expr = self.exprs.pop().expect("TODO: Error handling");
         let setter_expr = self.exprs.pop().expect("TODO: Error handling");
         let place_expr = parser_handle
-            .try_as_place_expr(setter_expr)
+            .try_as_asignee_expr(setter_expr)
             .expect("TODO: Error handling (invalid pattern expr)");
 
         let assign_stmt = self.ast_arena.alloc_expr_or_stmt(
@@ -313,84 +313,86 @@ impl<'ast> ExprBuilder<'ast> {
     }
 
     pub fn emit_post_inc_expr(&mut self, parser_handle: &mut impl ParserHandle<'ast>) {
-        let expr = self.exprs.pop().expect("TODO: Error handling");
+        todo!()
 
-        let assign_stmt = Stmt::AssignStmt(
-            self.ast_arena.alloc_expr_or_stmt(
-                AssignStmt::new(
-                    parser_handle.try_as_place_expr(expr).expect("TODO: Error handling"),
-                    Expr::ExprWithoutBlock(
-                        ExprWithoutBlock::ValueExpr(
-                            ValueExpr::BinaryExpr(
-                                self.ast_arena.alloc_expr_or_stmt(
-                                    BinaryExpr::new(
-                                        expr,
-                                        BinaryOp::ArithmeticOp(ArithmeticOp::Add),
-                                        Expr::ExprWithoutBlock(
-                                            ExprWithoutBlock::ValueExpr(
-                                                ValueExpr::ConstExpr(
-                                                    ConstExpr::IntegerExpr(
-                                                        self.ast_arena.alloc_expr_or_stmt(
-                                                            IntegerExpr::new(
-                                                                1,
-                                                                parser_handle.get_ast_node_id()
-                                                            )
-                                                        )
-                                                    )
-                                                )
-                                            )
-                                        ),
-                                        parser_handle.get_ast_node_id()
-                                    )
-                                )
-                            )
-                        )
-                    ),
-                    parser_handle.get_ast_node_id(),
-                    Span::dummy()
-                )
-            )
-        );
+        // let expr = self.exprs.pop().expect("TODO: Error handling");
 
-        let minus_one_stmt = Stmt::ExprStmt(
-            Expr::ExprWithoutBlock(
-                ExprWithoutBlock::ValueExpr(
-                    ValueExpr::BinaryExpr(
-                        self.ast_arena.alloc_expr_or_stmt(
-                            BinaryExpr::new(
-                                expr,
-                                BinaryOp::ArithmeticOp(ArithmeticOp::Sub),
-                                Expr::ExprWithoutBlock(
-                                    ExprWithoutBlock::ValueExpr(
-                                        ValueExpr::ConstExpr(
-                                            ConstExpr::IntegerExpr(
-                                                self.ast_arena.alloc_expr_or_stmt(
-                                                    IntegerExpr::new(
-                                                        1,
-                                                        parser_handle.get_ast_node_id()
-                                                    )
-                                                )
-                                            )
-                                        )
-                                    )
-                                ),
-                                parser_handle.get_ast_node_id()
-                            )
-                        )
-                    )
-                )
-            )
-        );
+        // let assign_stmt = Stmt::AssignStmt(
+        //     self.ast_arena.alloc_expr_or_stmt(
+        //         AssignStmt::new(
+        //             parser_handle.try_as_place_expr(expr).expect("TODO: Error handling"),
+        //             Expr::ExprWithoutBlock(
+        //                 ExprWithoutBlock::ValueExpr(
+        //                     ValueExpr::BinaryExpr(
+        //                         self.ast_arena.alloc_expr_or_stmt(
+        //                             BinaryExpr::new(
+        //                                 expr,
+        //                                 BinaryOp::ArithmeticOp(ArithmeticOp::Add),
+        //                                 Expr::ExprWithoutBlock(
+        //                                     ExprWithoutBlock::ValueExpr(
+        //                                         ValueExpr::ConstExpr(
+        //                                             ConstExpr::IntegerExpr(
+        //                                                 self.ast_arena.alloc_expr_or_stmt(
+        //                                                     IntegerExpr::new(
+        //                                                         1,
+        //                                                         parser_handle.get_ast_node_id()
+        //                                                     )
+        //                                                 )
+        //                                             )
+        //                                         )
+        //                                     )
+        //                                 ),
+        //                                 parser_handle.get_ast_node_id()
+        //                             )
+        //                         )
+        //                     )
+        //                 )
+        //             ),
+        //             parser_handle.get_ast_node_id(),
+        //             Span::dummy()
+        //         )
+        //     )
+        // );
 
-        let stmts = vec![assign_stmt, minus_one_stmt];
+        // let minus_one_stmt = Stmt::ExprStmt(
+        //     Expr::ExprWithoutBlock(
+        //         ExprWithoutBlock::ValueExpr(
+        //             ValueExpr::BinaryExpr(
+        //                 self.ast_arena.alloc_expr_or_stmt(
+        //                     BinaryExpr::new(
+        //                         expr,
+        //                         BinaryOp::ArithmeticOp(ArithmeticOp::Sub),
+        //                         Expr::ExprWithoutBlock(
+        //                             ExprWithoutBlock::ValueExpr(
+        //                                 ValueExpr::ConstExpr(
+        //                                     ConstExpr::IntegerExpr(
+        //                                         self.ast_arena.alloc_expr_or_stmt(
+        //                                             IntegerExpr::new(
+        //                                                 1,
+        //                                                 parser_handle.get_ast_node_id()
+        //                                             )
+        //                                         )
+        //                                     )
+        //                                 )
+        //                             )
+        //                         ),
+        //                         parser_handle.get_ast_node_id()
+        //                     )
+        //                 )
+        //             )
+        //         )
+        //     )
+        // );
 
-        let block_expr = self.ast_arena.alloc_expr_or_stmt(
-            BlockExpr::new(self.ast_arena.alloc_vec(stmts), parser_handle.get_ast_node_id())
-        );
+        // let stmts = vec![assign_stmt, minus_one_stmt];
 
-        let expr = Expr::ExprWithBlock(ExprWithBlock::BlockExpr(block_expr));
+        // let block_expr = self.ast_arena.alloc_expr_or_stmt(
+        //     BlockExpr::new(self.ast_arena.alloc_vec(stmts), parser_handle.get_ast_node_id())
+        // );
 
-        self.exprs.push(expr);
+        // let expr = Expr::ExprWithBlock(ExprWithBlock::BlockExpr(block_expr));
+
+        // self.exprs.push(expr);
     }
 
     pub fn get_base_prec(&self) -> Precedence {

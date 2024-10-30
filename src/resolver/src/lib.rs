@@ -24,6 +24,7 @@ use ir::{
     DefIdToNameBinding,
     GlobalMem,
     GlobalMemId,
+    ImplId,
     LexicalBinding,
     LexicalContext,
     NameBinding,
@@ -38,7 +39,7 @@ use ir::{
 };
 use span::Span;
 
-/// Main resolver struct. This is responsible for validating the Ast and creating the Cfg from it
+/// Main resolver struct. This is responsible for validating the Ast
 pub struct Resolver<'ctx, 'ast> {
     lexical_context_stack: Vec<LexicalContext>,
     next_scope_id: ScopeId,
@@ -54,6 +55,7 @@ pub struct Resolver<'ctx, 'ast> {
 
     def_id_to_global_mem_id: FxHashMap<DefId, GlobalMemId>,
     global_mems: &'ctx RefCell<Vec<GlobalMem>>,
+    impl_id_to_impl_def_id: FxHashMap<ImplId, DefId>,
 
     found_main_fn: Option<&'ast FnItem<'ast>>,
     pending_functions: Vec<&'ast FnItem<'ast>>,
@@ -133,6 +135,7 @@ impl<'ctx, 'ast> Resolver<'ctx, 'ast> where 'ctx: 'ast {
             def_id_to_name_binding: Default::default(),
             lexical_binding_to_def_id: Default::default(),
             str_symbol_to_def_id: Default::default(),
+            impl_id_to_impl_def_id: Default::default(),
             node_id_to_def_id: hashmap_with_capacity!(ast.expected_node_count()),
             node_id_to_ty: hashmap_with_capacity!(ast.expected_node_count()),
             arena,
@@ -249,6 +252,15 @@ impl<'ctx, 'ast> Resolver<'ctx, 'ast> where 'ctx: 'ast {
 
 impl<'ctx, 'ast, T> AstVisitEmitter<'ctx, 'ast, T> for Resolver<'ctx, 'ast> where T: AstState {
     /* Methods used during all passes */
+    fn set_impl_id_to_def_id(&mut self, impl_id: ImplId, def_id: DefId) {
+        self.impl_id_to_impl_def_id.insert(impl_id, def_id);
+    }
+    fn get_def_id_from_impl_id(&self, impl_id: ImplId) -> DefId {
+        *self.impl_id_to_impl_def_id.get(&impl_id).expect("Expected ImplId to DefId")
+    }
+    fn try_get_def_id_from_impl_id(&self, impl_id: ImplId) -> Option<DefId> {
+        self.impl_id_to_impl_def_id.get(&impl_id).copied()
+    }
     fn set_def_id_to_global_mem(&mut self, def_id: DefId) {
         let global_mem_id = GlobalMemId(self.global_mems.borrow().len() as u32);
         let global_mem = GlobalMem::new(global_mem_id, def_id, Span::dummy());
@@ -442,7 +454,7 @@ impl<'ctx, 'ast, T> AstVisitEmitter<'ctx, 'ast, T> for Resolver<'ctx, 'ast> wher
     fn get_namebinding_from_def_id(&self, def_id: DefId) -> NameBinding<'ctx> {
         let name_binding = self.def_id_to_name_binding
             .get(&def_id)
-            .expect("Expected name to be binded");
+            .expect(format!("Expected name to be binded: {}", def_id.symbol.get()).as_str());
         *name_binding
     }
     fn borrow_def_id_to_name_binding(&self) -> &DefIdToNameBinding<'ctx> {

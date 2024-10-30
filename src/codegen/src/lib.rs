@@ -3,7 +3,6 @@ use icfg::{
     walk_args,
     walk_basic_block,
     walk_basic_blocks,
-    walk_cfg,
     walk_local_mems,
     walk_result_mems,
     BasicBlockId,
@@ -22,7 +21,6 @@ use ir::{
     DefId,
     Externism,
     GetTyAttr,
-    HasVariadicArgs,
     LocalMem,
     NameBindingKind,
     PrimTy,
@@ -560,7 +558,7 @@ impl<'icfg> CodeGen<'icfg> {
         for (symbol, fn_sig) in self.icfg.clib_fns.iter().map(|def_id| {
             let name_binding = self.icfg.resolved_information.get_name_binding_from_def_id(def_id);
             match name_binding.kind {
-                NameBindingKind::Fn(fn_sig, Externism::Clib) => (def_id.symbol, fn_sig),
+                NameBindingKind::Fn(fn_sig, _, Externism::Clib) => (def_id.symbol, fn_sig),
                 _ => panic!("Expected extern function"),
             }
         }) {

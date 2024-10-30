@@ -225,7 +225,7 @@ impl Ty {
             Self::FnDef(def_id) => {
                 let name_binding = def_id_to_name_binding.get(&def_id).unwrap();
                 match name_binding.kind {
-                    NameBindingKind::Fn(fn_sig, _) => Ty::FnSig(fn_sig),
+                    NameBindingKind::Fn(fn_sig, _, _) => Ty::FnSig(fn_sig),
                     _ => panic!("Expected fn"),
                 }
             }
@@ -343,7 +343,7 @@ impl Ty {
 
 impl GetTyAttr for Ty {
     fn get_ty_attr(&self, resolved_information: &ResolvedInformation) -> TyAttr {
-        match self {
+        let mut ty_attr = match self {
             Self::AtdConstructer(_) => todo!("Constructer function"),
             Self::VariadicArgs => panic!("`...` should not be used in this context"),
             Self::ZeroSized => TyAttr::new(0, 0),
@@ -446,7 +446,12 @@ impl GetTyAttr for Ty {
             Self::StackPtr(_, _) => TyAttr::new(8, 8),
             Self::PrimTy(prim_ty) => prim_ty.get_ty_attr(resolved_information),
             t @ (Self::Unkown | Self::Never) => panic!("{} has no size and alignment", t),
+        };
+
+        if ty_attr.alignment_bytes == 0 {
+            ty_attr.alignment_bytes = 1;
         }
+        ty_attr
     }
 }
 

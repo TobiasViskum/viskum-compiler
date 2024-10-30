@@ -17,6 +17,7 @@ use crate::{
     GroupExpr,
     IdentNode,
     IfExpr,
+    ImplItem,
     IndexExpr,
     IntegerExpr,
     LoopExpr,
@@ -75,6 +76,7 @@ impl<'ast> AstQuerySystem<'ast> {
 #[derive(Debug, Clone, Copy)]
 pub enum AstQueryEntry<'ast> {
     TupleExpr(&'ast TupleExpr<'ast>),
+    ImplItem(&'ast ImplItem<'ast>),
     TypedefItem(&'ast TypedefItem<'ast>),
     CompFnDeclItem(&'ast CompFnDeclItem<'ast>),
     LoopExpr(&'ast LoopExpr<'ast>),

@@ -5,6 +5,7 @@ use crate::{
     ast_state::AstState,
     get_node_id_from_expr,
     visitor::{ walk_stmt, Visitor },
+    ArgKind,
     Ast,
     IdentNode,
     IfFalseBranchExpr,
@@ -57,6 +58,7 @@ impl<'ast, T> AstPrettifier<'ast, T> where T: AstState {
 
 fn write_typing<'ast>(buffer: &mut String, src: &str, typing: &Typing<'ast>) {
     match typing {
+        Typing::SelfType => write!(buffer, "Self").expect("Unexpected write error"),
         Typing::VariadicArgs => write!(buffer, "...").expect("Unexpected write error"),
         Typing::Ident(span) =>
             write!(buffer, "{}", Symbol::new(&src[span.get_byte_range()]).get()).expect(
@@ -218,14 +220,26 @@ impl<'ast, T> Visitor<'ast> for AstPrettifier<'ast, T> where T: AstState {
             Symbol::new(&self.src[fn_item.ident_node.span.get_byte_range()]).get()
         )?;
 
-        for (i, arg) in fn_item.args.iter().enumerate() {
-            write!(
-                self.buffer,
-                "{} ",
-                Symbol::new(&self.src[arg.ident.span.get_byte_range()]).get()
-            )?;
+        for (i, arg_kind) in fn_item.args.iter().enumerate() {
+            match arg_kind {
+                ArgKind::MutPtrSelf(_) =>
+                    write!(self.buffer, "*mut self").expect("Unexpected write error"),
+                ArgKind::PtrSelf(_) =>
+                    write!(self.buffer, "*self").expect("Unexpected write error"),
+                ArgKind::MutSelf(_) =>
+                    write!(self.buffer, "mut self").expect("Unexpected write error"),
+                ArgKind::NormalSelf(_) =>
+                    write!(self.buffer, "self").expect("Unexpected write error"),
+                ArgKind::Arg(field) => {
+                    write!(
+                        self.buffer,
+                        "{} ",
+                        Symbol::new(&self.src[field.ident.span.get_byte_range()]).get()
+                    )?;
 
-            write_typing(&mut self.buffer, self.src, &arg.type_expr);
+                    write_typing(&mut self.buffer, self.src, &field.type_expr);
+                }
+            }
 
             if i < fn_item.args.len() - 1 {
                 write!(self.buffer, ", ")?;
@@ -342,7 +356,7 @@ impl<'ast, T> Visitor<'ast> for AstPrettifier<'ast, T> where T: AstState {
 
     fn visit_assign_stmt(&mut self, assign_stmt: &'ast crate::AssignStmt<'ast>) -> Self::Result {
         write!(self.buffer, "{}", self.get_indentation())?;
-        self.visit_place_expr(assign_stmt.setter_expr)?;
+        self.visit_asignee_expr(assign_stmt.setter_expr)?;
         write!(self.buffer, " = ")?;
         self.visit_expr(assign_stmt.value_expr)?;
 

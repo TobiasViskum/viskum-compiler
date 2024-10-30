@@ -7,6 +7,7 @@ https://github.com/rust-lang/rust/blob/master/compiler/rustc_ast/src/visit.rs
 */
 
 use crate::{
+    AsigneeExpr,
     AssignStmt,
     BinaryExpr,
     BlockExpr,
@@ -29,6 +30,7 @@ use crate::{
     IdentNode,
     IfExpr,
     IfFalseBranchExpr,
+    ImplItem,
     IndexExpr,
     IntegerExpr,
     ItemStmt,
@@ -148,6 +150,10 @@ pub trait Visitor<'ast>: Sized {
         walk_place_expr(self, place_expr)
     }
 
+    fn visit_asignee_expr(&mut self, assignee_expr: AsigneeExpr<'ast>) -> Self::Result {
+        walk_asignee_expr(self, assignee_expr)
+    }
+
     fn visit_value_expr(&mut self, value_expr: ValueExpr<'ast>) -> Self::Result {
         walk_value_expr(self, value_expr)
     }
@@ -167,11 +173,16 @@ pub trait Visitor<'ast>: Sized {
             ItemStmt::TypedefItem(typedef_item) => self.visit_typedef_item(typedef_item),
             ItemStmt::EnumItem(enum_item) => self.visit_enum_item(enum_item),
             ItemStmt::CompDeclItem(comp_decl_item) => self.visit_comp_decl_item(comp_decl_item),
+            ItemStmt::ImplItem(impl_item) => self.visit_impl_item(impl_item),
         }
     }
 
     fn visit_comp_decl_item(&mut self, comp_decl_item: CompDeclItem<'ast>) -> Self::Result {
         walk_comp_decl_item(self, comp_decl_item)
+    }
+
+    fn visit_impl_item(&mut self, impl_item: &'ast ImplItem<'ast>) -> Self::Result {
+        walk_impl_item(self, impl_item)
     }
 
     fn visit_comp_fn_decl_item(
@@ -272,7 +283,7 @@ pub fn walk_def_stmt<'a, V>(visitor: &mut V, def_stmt: &'a DefineStmt<'a>) -> V:
 pub fn walk_assign_stmt<'a, V>(visitor: &mut V, assign_stmt: &'a AssignStmt<'a>) -> V::Result
     where V: Visitor<'a>
 {
-    visitor.visit_place_expr(assign_stmt.setter_expr);
+    visitor.visit_asignee_expr(assign_stmt.setter_expr);
     visitor.visit_expr(assign_stmt.value_expr)
 }
 
@@ -348,6 +359,15 @@ pub fn walk_if_expr<'a, V>(visitor: &mut V, if_expr: &'a IfExpr<'a>) -> V::Resul
     }
 }
 
+pub fn walk_asignee_expr<'a, V>(visitor: &mut V, asignee_expr: AsigneeExpr<'a>) -> V::Result
+    where V: Visitor<'a>
+{
+    match asignee_expr {
+        AsigneeExpr::PlaceExpr(place_expr) => visitor.visit_place_expr(place_expr),
+        AsigneeExpr::CallExpr(call_expr) => visitor.visit_call_expr(call_expr),
+    }
+}
+
 pub fn walk_place_expr<'a, V>(visitor: &mut V, place_expr: PlaceExpr<'a>) -> V::Result
     where V: Visitor<'a>
 {
@@ -395,6 +415,16 @@ pub fn walk_value_expr<'a, V>(visitor: &mut V, value_expr: ValueExpr<'a>) -> V::
         ValueExpr::StructExpr(struct_expr) => visitor.visit_struct_expr(struct_expr),
         ValueExpr::CallExpr(call_expr) => visitor.visit_call_expr(call_expr),
     }
+}
+
+pub fn walk_impl_item<'a, V>(visitor: &mut V, impl_item: &'a ImplItem<'a>) -> V::Result
+    where V: Visitor<'a>
+{
+    impl_item.impl_fns.iter().for_each(|item| {
+        visitor.visit_fn_item(*item);
+    });
+
+    V::default_result()
 }
 
 pub fn walk_comp_decl_item<'a, V>(visitor: &mut V, comp_decl_item: CompDeclItem<'a>) -> V::Result
@@ -492,9 +522,13 @@ pub fn walk_stmts_none_items_but_fns<'a, V>(visitor: &mut V, stmts: &'a [Stmt<'a
                     ItemStmt::FnItem(fn_item) => {
                         result = Some(visitor.visit_fn_item(fn_item));
                     }
+                    ItemStmt::ImplItem(impl_item) => {
+                        visitor.visit_impl_item(impl_item);
+                    }
                     _ => {}
                 }
             }
+
             stmt => {
                 result = Some(visitor.visit_stmt(*stmt));
             }

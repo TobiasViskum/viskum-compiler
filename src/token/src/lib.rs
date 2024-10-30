@@ -109,6 +109,12 @@ pub enum TokenKind {
     Null,
 
     /* Keywords */
+    /// Keyword `impl`
+    Impl,
+    /// Keyword `self`
+    SmallSelf,
+    /// Keyword `Self`
+    BigSelf,
     /// Keyword `declare`
     Declare,
     /// Keyword `def`

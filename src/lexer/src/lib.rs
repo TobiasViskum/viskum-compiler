@@ -134,8 +134,11 @@ impl<'a> Lexer<'a> {
         match ident {
             "fn" => TokenKind::Fn,
             "declare" => TokenKind::Declare,
+            "self" => TokenKind::SmallSelf,
+            "Self" => TokenKind::BigSelf,
             "def" => TokenKind::Def,
             "mut" => TokenKind::Mut,
+            "impl" => TokenKind::Impl,
             "class" => TokenKind::Class,
             "struct" => TokenKind::Struct,
             "enum" => TokenKind::Enum,

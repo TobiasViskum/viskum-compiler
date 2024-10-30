@@ -67,7 +67,7 @@ pub use ast_visitor::{ AstVisitEmitter, AstVisitor };
 pub use visitor::*;
 
 use std::{ cell::Cell, marker::PhantomData };
-use ir::{ HasVariadicArgs, Mutability, NodeId, Symbol };
+use ir::{ Mutability, NodeId, Symbol };
 use op::BinaryOp;
 use span::Span;
 use derive_new::new;
@@ -163,6 +163,7 @@ pub enum Typing<'ast> {
     Ptr(&'ast Typing<'ast>, Mutability),
     ManyPtr(&'ast Typing<'ast>),
     VariadicArgs,
+    SelfType,
     Fn(&'ast [Typing<'ast>], Option<&'ast Typing<'ast>>),
 }
 
@@ -180,7 +181,15 @@ pub enum ItemStmt<'ast> {
     StructItem(&'ast StructItem<'ast>),
     TypedefItem(&'ast TypedefItem<'ast>),
     EnumItem(&'ast EnumItem<'ast>),
+    ImplItem(&'ast ImplItem<'ast>),
     CompDeclItem(CompDeclItem<'ast>),
+}
+
+#[derive(Debug, new)]
+pub struct ImplItem<'ast> {
+    pub ident_node: &'ast IdentNode,
+    pub impl_fns: &'ast [&'ast FnItem<'ast>],
+    pub ast_node_id: NodeId,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -208,7 +217,7 @@ pub struct TypedefItem<'ast> {
 pub struct FnItem<'ast> {
     pub ident_node: &'ast IdentNode,
     pub body: Stmts<'ast>,
-    pub args: &'ast [&'ast Field<'ast>],
+    pub args: &'ast [ArgKind<'ast>],
     pub return_ty: Option<Typing<'ast>>,
     pub item_type: ItemType,
     pub ast_node_id: NodeId,
@@ -241,6 +250,22 @@ pub struct Field<'ast> {
     pub type_expr: Typing<'ast>,
 }
 
+type Arg<'ast> = &'ast Field<'ast>;
+
+#[derive(Debug, Clone, Copy)]
+pub enum ArgKind<'ast> {
+    /// `self`
+    NormalSelf(&'ast IdentNode),
+    /// `mut self`
+    MutSelf(&'ast IdentNode),
+    /// `*self`
+    PtrSelf(&'ast IdentNode),
+    /// `*mut self`
+    MutPtrSelf(&'ast IdentNode),
+    /// Any other argument
+    Arg(Arg<'ast>),
+}
+
 #[derive(Debug, new)]
 pub struct StructExpr<'ast> {
     pub ident_node: &'ast IdentNode,
@@ -263,9 +288,15 @@ pub struct DefineStmt<'ast> {
     pub ast_node_id: NodeId,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum AsigneeExpr<'ast> {
+    PlaceExpr(PlaceExpr<'ast>),
+    CallExpr(&'ast CallExpr<'ast>),
+}
+
 #[derive(Debug, new)]
 pub struct AssignStmt<'ast> {
-    pub setter_expr: PlaceExpr<'ast>,
+    pub setter_expr: AsigneeExpr<'ast>,
     pub value_expr: Expr<'ast>,
     pub ast_node_id: NodeId,
     pub span: Span,
@@ -488,6 +519,16 @@ pub struct FloatExpr {
     pub ast_node_id: NodeId,
 }
 
+pub fn get_ident_node_from_arg_kind<'ast>(arg_kind: ArgKind<'ast>) -> &'ast IdentNode {
+    match arg_kind {
+        | ArgKind::NormalSelf(ident_node)
+        | ArgKind::MutSelf(ident_node)
+        | ArgKind::PtrSelf(ident_node)
+        | ArgKind::MutPtrSelf(ident_node) => ident_node,
+        ArgKind::Arg(field) => field.ident,
+    }
+}
+
 pub fn get_node_id_from_expr(expr: Expr) -> NodeId {
     match expr {
         Expr::ExprWithBlock(expr_with_block) => {
@@ -540,5 +581,14 @@ pub fn get_node_id_from_pattern(pat: Pat) -> NodeId {
     match pat {
         Pat::IdentPat(ident_pat) => ident_pat.ast_node_id,
         Pat::TupleStructPat(tuple_pat) => tuple_pat.ast_node_id,
+    }
+}
+
+pub fn is_stmt_adt(stmt: &Stmt) -> bool {
+    match stmt {
+        Stmt::ItemStmt(
+            ItemStmt::StructItem(_) | ItemStmt::EnumItem(_) | ItemStmt::TypedefItem(_),
+        ) => true,
+        _ => false,
     }
 }
