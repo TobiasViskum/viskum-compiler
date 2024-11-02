@@ -14,6 +14,7 @@ use icfg::{
     Operand,
     PlaceKind,
     ReturnNode,
+    TyCastNode,
 };
 use op::{ ArithmeticOp, BinaryOp, ComparisonOp };
 use ir::{
@@ -21,6 +22,7 @@ use ir::{
     DefId,
     Externism,
     GetTyAttr,
+    IntTy,
     LocalMem,
     NameBindingKind,
     PrimTy,
@@ -28,6 +30,7 @@ use ir::{
     ResultMem,
     TempId,
     Ty,
+    UintTy,
     VOID_TY,
 };
 use std::{ fmt::{ Display, Write }, fs::File, process::Command };
@@ -140,6 +143,11 @@ impl<'a> CfgVisitor for CodeGenUnitHelper<'a> {
     fn visit_return_node(&mut self, return_node: &ReturnNode, cfg: &Cfg) -> Self::Result {
         self.next_ssa_id += 1;
     }
+
+    fn visit_ty_cast_node(&mut self, ty_cast_node: &TyCastNode, cfg: &Cfg) -> Self::Result {
+        let next_ssa_id = self.get_next_ssa_id();
+        self.place_to_ssa_id.insert(PlaceKind::TempId(ty_cast_node.result_place), next_ssa_id);
+    }
 }
 
 pub enum LLVMSSA {
@@ -147,7 +155,7 @@ pub enum LLVMSSA {
     Global(GlobalSSA),
 }
 
-enum GlobalSSA {
+pub enum GlobalSSA {
     Fn(DefId),
     Str(DefId),
 }
@@ -228,7 +236,7 @@ impl<'a> CodeGenUnit<'a> {
                             }
                         ).to_string(),
                     Const::Null => "null".to_string(),
-                    Const::Int(int) => int.to_string(),
+                    Const::Int(int, _) => int.to_string(),
                     Const::Void => panic!("Void cannot be used as an operand"),
                 }
             }
@@ -242,8 +250,23 @@ fn get_llvm_ty<'a>(ty: Ty, resolved_information: &ResolvedInformation<'a>) -> St
         Ty::PrimTy(prim_ty) => {
             match prim_ty {
                 PrimTy::Bool => "i8".to_string(),
-                PrimTy::Int => "i32".to_string(),
-                PrimTy::Int64 => "i64".to_string(),
+                PrimTy::Int(int_ty) => {
+                    match int_ty {
+                        IntTy::Int8 => "i8".to_string(),
+                        IntTy::Int16 => "i16".to_string(),
+                        IntTy::Int32 => "i32".to_string(),
+                        IntTy::Int64 => "i64".to_string(),
+                    }
+                }
+                PrimTy::Uint(uint_ty) => {
+                    match uint_ty {
+                        UintTy::Uint8 => "i8".to_string(),
+                        UintTy::Uint16 => "i16".to_string(),
+                        UintTy::Uint32 => "i32".to_string(),
+                        UintTy::Uint64 => "i64".to_string(),
+                    }
+                }
+                PrimTy::Float(float_ty) => todo!(),
                 PrimTy::Void => "void".to_string(),
                 PrimTy::Str => "ptr".to_string(),
             }
@@ -356,6 +379,7 @@ impl<'a> CfgVisitor for CodeGenUnit<'a> {
     fn visit_basic_block(&mut self, basic_block: &icfg::BasicBlock, cfg: &Cfg) -> Self::Result {
         let bb_id = self.get_bb_id(&basic_block.basic_block_id);
         writeln!(self.buffer, "{}:", bb_id)?;
+
         walk_basic_block(self, basic_block, cfg)
     }
 
@@ -384,7 +408,7 @@ impl<'a> CfgVisitor for CodeGenUnit<'a> {
 
         writeln!(
             self.buffer,
-            "{}{} = getelementptr inbounds {}, ptr {}, i32 {}",
+            "{}{} = getelementptr inbounds {}, ptr {}, i64 {}",
             " ".repeat(INDENTATION),
             temp_id,
             get_llvm_ty(index_node.place_ty, self.resolved_information),
@@ -453,7 +477,7 @@ impl<'a> CfgVisitor for CodeGenUnit<'a> {
             BinaryOp::ArithmeticOp(ArithmeticOp::Add) => "add nsw",
             BinaryOp::ArithmeticOp(ArithmeticOp::Sub) => "sub nsw",
             BinaryOp::ArithmeticOp(ArithmeticOp::Mul) => "mul nsw",
-            BinaryOp::ArithmeticOp(ArithmeticOp::Div) => "div nsw",
+            BinaryOp::ArithmeticOp(ArithmeticOp::Div) => "sdiv",
             BinaryOp::ComparisonOp(ComparisonOp::Eq) => "icmp eq",
             BinaryOp::ComparisonOp(ComparisonOp::Ne) => "icmp ne",
             BinaryOp::ComparisonOp(ComparisonOp::Ge) => "icmp sge",
@@ -540,6 +564,19 @@ impl<'a> CfgVisitor for CodeGenUnit<'a> {
 
         writeln!(self.buffer, ")")
     }
+
+    fn visit_ty_cast_node(&mut self, ty_cast_node: &TyCastNode, cfg: &Cfg) -> Self::Result {
+        writeln!(
+            self.buffer,
+            "{}{} = {} {} {} to {}",
+            " ".repeat(INDENTATION),
+            self.get_ssa_id_from_place(&PlaceKind::TempId(ty_cast_node.result_place)),
+            ty_cast_node.cast_kind,
+            get_llvm_ty(ty_cast_node.from_ty, self.resolved_information),
+            self.get_llvm_operand(&ty_cast_node.operand),
+            get_llvm_ty(ty_cast_node.to_ty, self.resolved_information)
+        )
+    }
 }
 
 pub struct CodeGen<'icfg> {
@@ -553,7 +590,9 @@ impl<'icfg> CodeGen<'icfg> {
 
     pub fn gen_code(self, file_name: &str) {
         use std::io::Write;
-        let mut buffer = String::with_capacity(4096);
+        let now = std::time::Instant::now();
+
+        let mut buffer = String::with_capacity(65536);
 
         for (symbol, fn_sig) in self.icfg.clib_fns.iter().map(|def_id| {
             let name_binding = self.icfg.resolved_information.get_name_binding_from_def_id(def_id);
@@ -605,6 +644,9 @@ impl<'icfg> CodeGen<'icfg> {
         let file_name_with_extension = format!("{}.ll", file_name);
         let mut file = File::create(&file_name_with_extension).expect("Error creating file");
         file.write_all(buffer.as_bytes()).expect("Error writing to file");
+
+        println!("Code generation took: {:?}", now.elapsed());
+
         let result = Command::new("clang")
             .arg("-O3")
             .arg(&file_name_with_extension)

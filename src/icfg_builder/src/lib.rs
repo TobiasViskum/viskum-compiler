@@ -49,6 +49,8 @@ use icfg::{
     ReturnNode,
     StoreKind,
     StoreNode,
+    TyCastKind,
+    TyCastNode,
 };
 
 use ir::{
@@ -58,6 +60,7 @@ use ir::{
     GetTyAttr,
     GlobalMem,
     HasSelfArg,
+    IntTy,
     LocalMem,
     LocalMemId,
     Mutability,
@@ -72,7 +75,15 @@ use ir::{
     Ty,
     TyCtx,
     BOOL_TY,
+    INT_16_TY,
+    INT_32_TY,
+    INT_64_TY,
+    INT_8_TY,
     NEVER_TY,
+    UINT_16_TY,
+    UINT_32_TY,
+    UINT_64_TY,
+    UINT_8_TY,
     VOID_TY,
 };
 use op::{ BinaryOp, ComparisonOp };
@@ -366,6 +377,76 @@ impl<'icfg, 'ast, 'c> CfgBuilder<'icfg, 'ast, 'c> {
         visit_result: VisitResult,
         ty_to_match: Ty
     ) -> (Operand, Option<Operand>, Ty) {
+        // Number coercion
+        fn number_coerceion(
+            builder: &mut CfgBuilder<'_, '_, '_>,
+            ty: Ty,
+            ty_to_match: Ty,
+            operand: Operand
+        ) -> Option<(Ty, TempId)> {
+            fn push_ty_cast_node(
+                cfg_builder: &mut CfgBuilder<'_, '_, '_>,
+                cast_kind: TyCastKind,
+                ty: Ty,
+                ty_to_match: Ty,
+                operand: Operand
+            ) -> Option<(Ty, TempId)> {
+                let result_temp_id = cfg_builder.get_temp_id();
+                cfg_builder.push_node(
+                    Node::new(
+                        NodeKind::TyCastNode(
+                            TyCastNode::new(result_temp_id, cast_kind, ty, ty_to_match, operand)
+                        )
+                    )
+                );
+                Some((ty_to_match, result_temp_id))
+            }
+
+            match (ty, ty_to_match) {
+                | (INT_8_TY, UINT_8_TY)
+                | (UINT_8_TY, INT_8_TY)
+                | (INT_16_TY, UINT_16_TY)
+                | (UINT_16_TY, INT_16_TY)
+                | (INT_32_TY, UINT_32_TY)
+                | (UINT_32_TY, INT_32_TY)
+                | (INT_64_TY, UINT_64_TY)
+                | (UINT_64_TY, INT_64_TY) => {
+                    let temp_id = match operand {
+                        Operand::PlaceKind(PlaceKind::TempId(temp_id)) => temp_id,
+                        _ => panic!("Expected TempId"),
+                    };
+
+                    Some((ty_to_match, temp_id))
+                }
+                (
+                    INT_8_TY | UINT_8_TY,
+                    INT_16_TY | INT_32_TY | INT_64_TY | UINT_16_TY | UINT_32_TY | UINT_64_TY,
+                ) => {
+                    push_ty_cast_node(builder, TyCastKind::Sext, ty, ty_to_match, operand)
+                }
+                (INT_16_TY | UINT_16_TY, INT_32_TY | INT_64_TY | UINT_32_TY | UINT_64_TY) => {
+                    push_ty_cast_node(builder, TyCastKind::Sext, ty, ty_to_match, operand)
+                }
+                (INT_32_TY | UINT_32_TY, INT_64_TY | UINT_64_TY) => {
+                    push_ty_cast_node(builder, TyCastKind::Sext, ty, ty_to_match, operand)
+                }
+                (
+                    INT_64_TY | UINT_64_TY,
+                    INT_8_TY | INT_16_TY | INT_32_TY | UINT_8_TY | UINT_16_TY | UINT_32_TY,
+                ) => {
+                    push_ty_cast_node(builder, TyCastKind::Trunc, ty, ty_to_match, operand)
+                }
+                (INT_32_TY | UINT_32_TY, INT_8_TY | INT_16_TY | UINT_8_TY | UINT_16_TY) => {
+                    push_ty_cast_node(builder, TyCastKind::Trunc, ty, ty_to_match, operand)
+                }
+                (INT_16_TY | UINT_16_TY, INT_8_TY | UINT_8_TY) => {
+                    push_ty_cast_node(builder, TyCastKind::Trunc, ty, ty_to_match, operand)
+                }
+
+                _ => None,
+            }
+        }
+
         match visit_result {
             VisitResult::PlaceKind(place_kind, place_ty) => {
                 if
@@ -431,10 +512,43 @@ impl<'icfg, 'ast, 'c> CfgBuilder<'icfg, 'ast, 'c> {
                     break;
                 }
 
-                (Operand::from(temp_id), None, ty)
+                if
+                    let Some((new_ty, new_temp_id)) = number_coerceion(
+                        self,
+                        ty,
+                        ty_to_match,
+                        Operand::from(temp_id)
+                    )
+                {
+                    (ty, temp_id) = (new_ty, new_temp_id);
+                }
+
+                if
+                    ty.test_eq_strict(
+                        ty_to_match,
+                        &self.icfg_builder.resolved_information.def_id_to_name_binding
+                    )
+                {
+                    (Operand::from(temp_id), None, ty_to_match)
+                } else {
+                    println!("visit_result: {:?}", visit_result);
+                    panic!("Expected to match ty: {:?}, got: {:?}", ty_to_match, ty);
+                }
             }
-            VisitResult::Const(const_val, self_operand) =>
-                (Operand::Const(const_val), self_operand, const_val.get_ty()),
+            VisitResult::Const(const_val, self_operand) => {
+                if
+                    let Some((new_ty, new_temp_id)) = number_coerceion(
+                        self,
+                        const_val.get_ty(),
+                        ty_to_match,
+                        Operand::Const(const_val)
+                    )
+                {
+                    (Operand::from(new_temp_id), None, new_ty)
+                } else {
+                    (Operand::Const(const_val), self_operand, const_val.get_ty())
+                }
+            }
         }
     }
 }
@@ -487,7 +601,13 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
     }
 
     fn visit_interger_expr(&mut self, integer_expr: &'ast ast::IntegerExpr) -> Self::Result {
-        VisitResult::Const(Const::Int(integer_expr.val), None)
+        let ty = self.icfg_builder.get_ty_from_node_id(integer_expr.ast_node_id);
+        let int_ty = match ty {
+            Ty::PrimTy(PrimTy::Int(int_ty)) => int_ty,
+            _ => panic!("Expected integer type"),
+        };
+
+        VisitResult::Const(Const::Int(integer_expr.val, int_ty), None)
     }
 
     fn visit_bool_expr(&mut self, bool_expr: &'ast ast::BoolExpr) -> Self::Result {
@@ -586,9 +706,7 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
 
                     cfg_builder.push_node(
                         Node::new(
-                            NodeKind::LoadNode(
-                                LoadNode::new(load_temp_id, access_place, Ty::PrimTy(PrimTy::Int64))
-                            )
+                            NodeKind::LoadNode(LoadNode::new(load_temp_id, access_place, INT_64_TY))
                         )
                     );
 
@@ -598,10 +716,12 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
                             NodeKind::BinaryNode(
                                 BinaryNode::new(
                                     cmp_tmp_id,
-                                    Ty::PrimTy(PrimTy::Int64),
+                                    INT_64_TY,
                                     BinaryOp::ComparisonOp(ComparisonOp::Eq),
                                     Operand::from(load_temp_id),
-                                    Operand::Const(Const::Int(enum_variant_id.0 as i64))
+                                    Operand::Const(
+                                        Const::Int(enum_variant_id.0 as i64, IntTy::Int64)
+                                    )
                                 )
                             )
                         )
@@ -1093,8 +1213,8 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
                     NodeKind::StoreNode(
                         StoreNode::new(
                             PlaceKind::ResultMemId(result_mem_id),
-                            Ty::PrimTy(ir::PrimTy::Int64),
-                            Operand::Const(Const::Int(enum_variant_id.0 as i64)),
+                            INT_64_TY,
+                            Operand::Const(Const::Int(enum_variant_id.0 as i64, IntTy::Int64)),
                             StoreKind::Init
                         )
                     )
@@ -1279,19 +1399,65 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
         }
     }
 
-    /// Assumes read for now
     fn visit_field_expr(&mut self, field_expr: &'ast FieldExpr<'ast>) -> Self::Result {
         let ty = self.icfg_builder.get_ty_from_node_id(get_node_id_from_expr(field_expr.lhs));
         let visit_result = self.visit_expr(field_expr.lhs);
 
         if let Ty::AtdConstructer(def_id) = ty {
             if
-                let Some(fn_def_id) =
+                let Some(rhs_def_id) =
                     self.icfg_builder.resolved_information.try_get_def_id_from_node_id(
                         &field_expr.rhs.ast_node_id
                     )
             {
-                return VisitResult::Const(Const::FnPtr(fn_def_id), None);
+                let name_binding =
+                    self.icfg_builder.resolved_information.get_name_binding_from_def_id(
+                        &rhs_def_id
+                    );
+
+                match name_binding.kind {
+                    NameBindingKind::Adt(Adt::EnumVariant(_, variant_id, _)) => {
+                        // Zerosized enum variant
+                        let result_mem_id = self.new_result_mem(Ty::Adt(def_id));
+
+                        let temp_id = self.get_temp_id();
+                        self.push_node(
+                            Node::new(
+                                NodeKind::ByteAccessNode(
+                                    ByteAccessNode::new(
+                                        PlaceKind::TempId(temp_id),
+                                        PlaceKind::ResultMemId(result_mem_id),
+                                        8
+                                    )
+                                )
+                            )
+                        );
+                        self.push_node(
+                            Node::new(
+                                NodeKind::StoreNode(
+                                    StoreNode::new(
+                                        PlaceKind::TempId(temp_id),
+                                        INT_64_TY,
+                                        Operand::Const(
+                                            Const::Int(variant_id.0 as i64, IntTy::Int64)
+                                        ),
+                                        StoreKind::Init
+                                    )
+                                )
+                            )
+                        );
+
+                        return VisitResult::PlaceKind(
+                            PlaceKind::ResultMemId(result_mem_id),
+                            Ty::Adt(def_id).to_ptr_ty()
+                        );
+                    }
+                    NameBindingKind::Fn(_, _, _) => {
+                        // Constructor method e.g. `Adt.new()`
+                        return VisitResult::Const(Const::FnPtr(rhs_def_id), None);
+                    }
+                    name_binding => unreachable!("Expected fn or enum: {:?}", name_binding),
+                }
             }
 
             unreachable!("Hopefully this is unreachable");
@@ -1313,6 +1479,7 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
 
             if has_self_arg == HasSelfArg::Yes {
                 let ty_to_match = *tys_iter.next().expect("Expected at least one arg");
+
                 let lhs_place = match self.get_operand_from_visit_result(visit_result, ty_to_match) {
                     (Operand::PlaceKind(place), _, _) => place,
                     _ => unreachable!("This should be unreachable if type checking was successful"),
@@ -1404,7 +1571,7 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
 
         let value_operand = {
             let value_visit_result = self.visit_expr(index_expr.value_expr);
-            self.get_operand_from_visit_result(value_visit_result, Ty::PrimTy(PrimTy::Int64)).0
+            self.get_operand_from_visit_result(value_visit_result, INT_64_TY).0
         };
 
         let elem_ty = self.icfg_builder.get_ty_from_node_id(index_expr.ast_node_id);
@@ -1455,14 +1622,25 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
         }
 
         let (setter_place, value_ty) = match assign_stmt.setter_expr {
-            AsigneeExpr::CallExpr(call_expr) => visit_expr!(visit_call_expr, call_expr),
+            AsigneeExpr::CallExpr(call_expr) => {
+                let (place, ty) = visit_expr!(visit_call_expr, call_expr);
+                (place, ty)
+            }
 
             AsigneeExpr::PlaceExpr(place_expr) => {
                 match place_expr {
-                    PlaceExpr::TupleFieldExpr(tuple_field_expr) =>
-                        visit_expr!(visit_tuple_field_expr, tuple_field_expr),
-                    PlaceExpr::FieldExpr(field_expr) => visit_expr!(visit_field_expr, field_expr),
-                    PlaceExpr::IndexExpr(index_expr) => visit_expr!(visit_index_expr, index_expr),
+                    PlaceExpr::TupleFieldExpr(tuple_field_expr) => {
+                        let (place, ty) = visit_expr!(visit_tuple_field_expr, tuple_field_expr);
+                        (place, ty)
+                    }
+                    PlaceExpr::FieldExpr(field_expr) => {
+                        let (place, ty) = visit_expr!(visit_field_expr, field_expr);
+                        (place, ty)
+                    }
+                    PlaceExpr::IndexExpr(index_expr) => {
+                        let (place, ty) = visit_expr!(visit_index_expr, index_expr);
+                        (place, ty)
+                    }
                     PlaceExpr::IdentExpr(ident_expr) => {
                         let (place, ty) = {
                             let assingment_ty = self.icfg_builder
@@ -1480,15 +1658,16 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
                             }
                         };
 
-                        (place, ty.try_deref_once().expect("Expected ptr"))
+                        (place, ty)
                     }
                 }
             }
         };
 
-        let ty_to_match = value_ty;
+        let ty_to_match = value_ty.try_deref_once().expect("Expected ptr");
 
         let value_visit_result = self.visit_expr(assign_stmt.value_expr);
+
         let (operand, _, op_ty) = self.get_operand_from_visit_result(
             value_visit_result,
             ty_to_match
@@ -1581,7 +1760,7 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
             .try_deref_as_struct(&self.icfg_builder.resolved_information.def_id_to_name_binding)
             .expect("Expected ty to be struct");
 
-        'outer: for (field_symbol, _) in struct_fields {
+        'outer: for (field_symbol, ty_to_match) in struct_fields {
             for field in struct_expr.field_initializations.iter() {
                 let access_field_symbol = Symbol::new(
                     &self.icfg_builder.src[field.ident.span.get_byte_range()]
@@ -1590,6 +1769,7 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
                     byte_offset = self.init_tuple_or_struct_field(
                         field.value,
                         result_mem_id,
+                        *ty_to_match,
                         byte_offset
                     );
                     continue 'outer;
@@ -1609,7 +1789,13 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
         let mut byte_offset: usize = 0;
 
         for expr in tuple_expr.fields.iter() {
-            byte_offset = self.init_tuple_or_struct_field(*expr, result_mem_id, byte_offset);
+            let ty_to_match = self.icfg_builder.get_ty_from_node_id(get_node_id_from_expr(*expr));
+            byte_offset = self.init_tuple_or_struct_field(
+                *expr,
+                result_mem_id,
+                ty_to_match,
+                byte_offset
+            );
         }
 
         VisitResult::PlaceKind(PlaceKind::ResultMemId(result_mem_id), tuple_ty.to_ptr_ty())
@@ -1618,19 +1804,29 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
     fn visit_binary_expr(&mut self, binary_expr: &'ast ast::BinaryExpr<'ast>) -> Self::Result {
         let result_ty = self.icfg_builder.get_ty_from_node_id(binary_expr.ast_node_id);
 
-        let (lhs_operand, _, lhs_ty) = {
-            let ty_to_match = self.icfg_builder.get_ty_from_node_id(
+        let (lhs_ty, rhs_ty) = {
+            let lhs_ty = self.icfg_builder.get_ty_from_node_id(
                 get_node_id_from_expr(binary_expr.lhs)
             );
-            let lhs_visit_result = self.visit_expr(binary_expr.lhs);
-            self.get_operand_from_visit_result(lhs_visit_result, result_ty)
-        };
-        let (rhs_operand, _, rhs_ty) = {
-            let ty_to_match = self.icfg_builder.get_ty_from_node_id(
+            let rhs_ty = self.icfg_builder.get_ty_from_node_id(
                 get_node_id_from_expr(binary_expr.rhs)
             );
+            (lhs_ty, rhs_ty)
+        };
+
+        let op_ty = if let Some(biggest_num_ty) = Ty::get_biggest_num_ty(lhs_ty, rhs_ty) {
+            biggest_num_ty
+        } else {
+            lhs_ty.auto_deref()
+        };
+
+        let (lhs_operand, _, _) = {
+            let lhs_visit_result = self.visit_expr(binary_expr.lhs);
+            self.get_operand_from_visit_result(lhs_visit_result, op_ty)
+        };
+        let (rhs_operand, _, _) = {
             let rhs_visit_result = self.visit_expr(binary_expr.rhs);
-            self.get_operand_from_visit_result(rhs_visit_result, result_ty)
+            self.get_operand_from_visit_result(rhs_visit_result, op_ty)
         };
 
         let result_place = self.get_temp_id();
@@ -1638,7 +1834,7 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
         self.push_node(
             Node::new(
                 NodeKind::BinaryNode(
-                    BinaryNode::new(result_place, lhs_ty, binary_expr.op, lhs_operand, rhs_operand)
+                    BinaryNode::new(result_place, op_ty, binary_expr.op, lhs_operand, rhs_operand)
                 )
             )
         );
@@ -1652,9 +1848,9 @@ impl<'icfg, 'ast, 'c> CfgBuilder<'icfg, 'ast, 'c> {
         &mut self,
         expr: Expr<'ast>,
         result_mem_id: ResultMemId,
+        ty_to_match: Ty,
         byte_offset: usize
     ) -> usize {
-        let ty_to_match = self.icfg_builder.get_ty_from_node_id(get_node_id_from_expr(expr));
         let visit_result = self.visit_expr(expr);
 
         let (operand, _, operand_ty) = self.get_operand_from_visit_result(
@@ -1668,7 +1864,7 @@ impl<'icfg, 'ast, 'c> CfgBuilder<'icfg, 'ast, 'c> {
                     NodeKind::StoreNode(
                         StoreNode::new(
                             PlaceKind::ResultMemId(result_mem_id),
-                            operand_ty,
+                            ty_to_match,
                             operand,
                             StoreKind::Init
                         )
@@ -1693,7 +1889,7 @@ impl<'icfg, 'ast, 'c> CfgBuilder<'icfg, 'ast, 'c> {
                     NodeKind::StoreNode(
                         StoreNode::new(
                             PlaceKind::TempId(temp_id),
-                            operand_ty,
+                            ty_to_match,
                             operand,
                             StoreKind::Init
                         )

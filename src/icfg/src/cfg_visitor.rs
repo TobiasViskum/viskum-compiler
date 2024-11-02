@@ -17,6 +17,7 @@ use crate::{
     ReturnNode,
     StoreNode,
     TempId,
+    TyCastNode,
 };
 
 struct Linear;
@@ -117,6 +118,11 @@ pub trait CfgVisitor: Sized {
     fn visit_call_node(&mut self, call_node: &CallNode, cfg: &Cfg) -> Self::Result {
         Self::default_result()
     }
+
+    #[allow(unused_variables)]
+    fn visit_ty_cast_node(&mut self, ty_cast_node: &TyCastNode, cfg: &Cfg) -> Self::Result {
+        Self::default_result()
+    }
 }
 
 pub fn walk_cfg<'ctx, V>(visitor: &mut V, cfg: &Cfg) -> V::Result where V: CfgVisitor {
@@ -182,5 +188,6 @@ pub fn walk_node<'ctx, V>(visitor: &mut V, node: &Node, cfg: &Cfg) -> V::Result 
             visitor.visit_byte_access_node(byte_access_node, cfg),
         NodeKind::ReturnNode(return_node) => visitor.visit_return_node(return_node, cfg),
         NodeKind::CallNode(call_node) => visitor.visit_call_node(call_node, cfg),
+        NodeKind::TyCastNode(ty_cast_node) => visitor.visit_ty_cast_node(ty_cast_node, cfg),
     }
 }

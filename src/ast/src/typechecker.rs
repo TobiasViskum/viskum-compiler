@@ -1,6 +1,6 @@
 use std::array::IntoIter;
 
-use ir::{ DefIdToNameBinding, Ty };
+use ir::{ DefIdToNameBinding, PrimTy, Ty };
 
 pub struct TypeChecker;
 
@@ -10,14 +10,48 @@ pub enum TypeCheckError {
     MismatchedTypes,
 }
 
+fn match_num_ty_loose(ty1: Ty, ty2: Ty) -> bool {
+    match (ty1, ty2) {
+        (Ty::PrimTy(PrimTy::Int(_)), Ty::PrimTy(PrimTy::Int(_))) => true,
+        (Ty::PrimTy(PrimTy::Int(_)), Ty::PrimTy(PrimTy::Uint(_))) => true,
+        (Ty::PrimTy(PrimTy::Int(_)), Ty::PrimTy(PrimTy::Float(_))) => true,
+
+        (Ty::PrimTy(PrimTy::Uint(_)), Ty::PrimTy(PrimTy::Uint(_))) => true,
+        (Ty::PrimTy(PrimTy::Uint(_)), Ty::PrimTy(PrimTy::Int(_))) => true,
+        (Ty::PrimTy(PrimTy::Uint(_)), Ty::PrimTy(PrimTy::Float(_))) => true,
+
+        (Ty::PrimTy(PrimTy::Float(_)), Ty::PrimTy(PrimTy::Float(_))) => true,
+        (Ty::PrimTy(PrimTy::Float(_)), Ty::PrimTy(PrimTy::Int(_))) => true,
+        (Ty::PrimTy(PrimTy::Float(_)), Ty::PrimTy(PrimTy::Uint(_))) => true,
+        _ => false,
+    }
+}
+
 impl TypeChecker {
+    pub fn test_binary(
+        ty1: Ty,
+        ty2: Ty,
+        def_id_to_name_binding: &DefIdToNameBinding
+    ) -> Result<(), IntoIter<Option<TypeCheckError>, 4>> {
+        let mut error_len = 0;
+        let mut errors: [Option<TypeCheckError>; 4] = [const { None }; 4];
+
+        todo!()
+    }
+
     // Requires pointer mutability to be the same
-    pub fn test_valid_arg<'a>(
+    pub fn test_valid_arg(
         arg_cmp: ArgCmp,
         def_id_to_name_binding: &DefIdToNameBinding
     ) -> Result<(), IntoIter<Option<TypeCheckError>, 4>> {
         let mut error_len = 0;
         let mut errors: [Option<TypeCheckError>; 4] = [const { None }; 4];
+
+        if arg_cmp.arg_ty.is_ptr() && arg_cmp.provided_ty.is_null() {
+            return Ok(());
+        } else if arg_cmp.arg_ty.is_null() && arg_cmp.provided_ty.is_ptr() {
+            return Ok(());
+        }
 
         if arg_cmp.arg_ty.is_mut_ptr() && !arg_cmp.provided_ty.is_mut_ptr() {
             errors[error_len] = Some(TypeCheckError::RequiresMutability);
@@ -27,7 +61,11 @@ impl TypeChecker {
         let full_arg_ty = arg_cmp.arg_ty.get_expanded_dereffed_ty(def_id_to_name_binding);
         let full_provided_ty = arg_cmp.provided_ty.get_expanded_dereffed_ty(def_id_to_name_binding);
 
-        if full_arg_ty != full_provided_ty {
+        if
+            !match_num_ty_loose(full_arg_ty, full_provided_ty) &&
+            !match_num_ty_loose(full_provided_ty, full_arg_ty) &&
+            full_arg_ty != full_provided_ty
+        {
             errors[error_len] = Some(TypeCheckError::MismatchedTypes);
             error_len += 1;
         }
@@ -56,7 +94,11 @@ impl TypeChecker {
         let full_ty1 = ty1.get_expanded_dereffed_ty(def_id_to_name_binding);
         let full_ty2 = ty2.get_expanded_dereffed_ty(def_id_to_name_binding);
 
-        if full_ty1 != full_ty2 {
+        if
+            !match_num_ty_loose(full_ty1, full_ty2) &&
+            !match_num_ty_loose(full_ty2, full_ty1) &&
+            full_ty1 != full_ty2
+        {
             errors[error_len] = Some(TypeCheckError::MismatchedTypes);
             error_len += 1;
         }

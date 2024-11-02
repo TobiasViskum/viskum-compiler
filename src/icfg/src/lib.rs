@@ -17,9 +17,11 @@ use ir::{
     DefId,
     GlobalMem,
     GlobalMemId,
+    IntTy,
     LocalMem,
     LocalMemId,
     Mutability,
+    PrimTy,
     ResolvedInformation,
     ResultMem,
     ResultMemId,
@@ -28,7 +30,7 @@ use ir::{
     Ty,
     TyCtx,
     BOOL_TY,
-    INT_TY,
+    INT_32_TY,
     STR_TY,
     VOID_TY,
 };
@@ -122,9 +124,16 @@ impl<'a> Cfg<'a> {
 }
 
 #[derive(Debug)]
+pub struct Edge {
+    pub from: BasicBlockId,
+    pub to: BasicBlockId,
+}
+
+#[derive(Debug)]
 pub struct BasicBlock<'a> {
     pub basic_block_id: BasicBlockId,
     pub nodes: Vec<Node<'a>>,
+    pub edges: Vec<Edge>,
 }
 
 impl<'a> BasicBlock<'a> {
@@ -132,11 +141,16 @@ impl<'a> BasicBlock<'a> {
         Self {
             basic_block_id,
             nodes: Vec::with_capacity(8),
+            edges: Vec::with_capacity(16),
         }
     }
 
     pub fn push_node(&mut self, node: Node<'a>) {
         self.nodes.push(node);
+    }
+
+    pub fn push_edge(&mut self, edge: Edge) {
+        self.edges.push(edge);
     }
 }
 #[derive(Hash, Eq, PartialEq, Debug, Clone, Copy)]
@@ -168,6 +182,7 @@ pub enum NodeKind<'a> {
     ByteAccessNode(ByteAccessNode),
     ReturnNode(ReturnNode),
     CallNode(CallNode<'a>),
+    TyCastNode(TyCastNode),
 }
 
 /// A hint to the optimizer whether or not the store is used for initializing a complicated data structure
@@ -219,6 +234,35 @@ pub struct ByteAccessNode {
 pub struct ReturnNode {
     pub ret_val: Operand,
     pub ret_ty: Ty,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum TyCastKind {
+    /// llvm `trunc`
+    Trunc,
+    /// llvm `zext`
+    Zext,
+    /// llvm `sext`
+    Sext,
+}
+
+impl Display for TyCastKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TyCastKind::Trunc => write!(f, "trunc"),
+            TyCastKind::Zext => write!(f, "zext"),
+            TyCastKind::Sext => write!(f, "sext"),
+        }
+    }
+}
+
+#[derive(Debug, new, Clone, Copy)]
+pub struct TyCastNode {
+    pub result_place: TempId,
+    pub cast_kind: TyCastKind,
+    pub from_ty: Ty,
+    pub to_ty: Ty,
+    pub operand: Operand,
 }
 
 /// Used to call a function
@@ -327,12 +371,6 @@ impl From<TempId> for Operand {
     }
 }
 
-impl From<i64> for Operand {
-    fn from(value: i64) -> Self {
-        Self::Const(Const::Int(value))
-    }
-}
-
 impl From<bool> for Operand {
     fn from(value: bool) -> Self {
         Self::Const(Const::Bool(value))
@@ -373,7 +411,7 @@ impl PlaceKind {
 
 #[derive(Debug, Clone, Copy)]
 pub enum Const {
-    Int(i64),
+    Int(i64, IntTy),
     Bool(bool),
     FnPtr(DefId),
     Str(DefId),
@@ -385,7 +423,7 @@ impl Const {
     pub fn get_ty(&self) -> Ty {
         match self {
             Self::Void => VOID_TY,
-            Self::Int(_) => INT_TY,
+            Self::Int(_, int_ty) => Ty::PrimTy(PrimTy::Int(*int_ty)),
             Self::Bool(_) => BOOL_TY,
             Self::Null => Ty::Null,
             Self::FnPtr(def_id) => Ty::FnDef(*def_id),
@@ -398,7 +436,7 @@ impl Display for Const {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Bool(bool) => write!(f, "{}", bool),
-            Self::Int(int) => write!(f, "{}", int),
+            Self::Int(int, _) => write!(f, "{}", int),
             Self::Void => write!(f, "()"),
             Self::Null => write!(f, "null"),
             Self::FnPtr(def_id) => write!(f, "{}", def_id.display_as_fn()),

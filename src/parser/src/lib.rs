@@ -884,7 +884,7 @@ impl<'a> Parser<'a> {
             } else {
                 string_builder += char;
                 self.advance();
-                str_len += 1;
+                str_len += char.len();
             }
         }
         self.consume(TokenKind::DoubleQuote, "Expected `\"` after string");

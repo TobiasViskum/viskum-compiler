@@ -14,13 +14,31 @@ use crate::{
     Symbol,
 };
 
+pub const INT_8_TY: Ty = Ty::PrimTy(PrimTy::Int(IntTy::Int8));
+pub const INT_16_TY: Ty = Ty::PrimTy(PrimTy::Int(IntTy::Int16));
+pub const INT_32_TY: Ty = Ty::PrimTy(PrimTy::Int(IntTy::Int32));
+pub const INT_64_TY: Ty = Ty::PrimTy(PrimTy::Int(IntTy::Int64));
+
+pub const UINT_8_TY: Ty = Ty::PrimTy(PrimTy::Uint(UintTy::Uint8));
+pub const UINT_16_TY: Ty = Ty::PrimTy(PrimTy::Uint(UintTy::Uint16));
+pub const UINT_32_TY: Ty = Ty::PrimTy(PrimTy::Uint(UintTy::Uint32));
+pub const UINT_64_TY: Ty = Ty::PrimTy(PrimTy::Uint(UintTy::Uint64));
+
+pub const FLOAT_32_TY: Ty = Ty::PrimTy(PrimTy::Float(FloatTy::Float32));
+pub const FLOAT_64_TY: Ty = Ty::PrimTy(PrimTy::Float(FloatTy::Float64));
+
 pub const VOID_TY: Ty = Ty::PrimTy(PrimTy::Void);
-pub const INT_TY: Ty = Ty::PrimTy(PrimTy::Int);
 pub const STR_TY: Ty = Ty::PrimTy(PrimTy::Str);
 pub const BOOL_TY: Ty = Ty::PrimTy(PrimTy::Bool);
 pub const NEVER_TY: Ty = Ty::Never;
 pub const UNKOWN_TY: Ty = Ty::Unkown;
 pub const NULL_TY: Ty = Ty::Null;
+
+enum NumTyPrecedence {
+    Int = 0,
+    Uint = 1,
+    Float = 2,
+}
 
 /// For now, this is just used as a way to intern types
 pub struct TyCtx;
@@ -118,6 +136,118 @@ impl Ty {
         }
     }
 
+    pub fn is_num_ty(&self) -> bool {
+        match self.auto_deref() {
+            | Self::PrimTy(PrimTy::Int(_))
+            | Self::PrimTy(PrimTy::Uint(_))
+            | Self::PrimTy(PrimTy::Float(_)) => true,
+            _ => false,
+        }
+    }
+
+    pub fn get_biggest_num_ty(lhs: Ty, rhs: Ty) -> Option<Ty> {
+        let original_lhs = lhs.auto_deref();
+        let original_rhs = rhs.auto_deref();
+
+        let (lhs, rhs) = match (original_lhs, original_rhs) {
+            (Ty::PrimTy(lhs), Ty::PrimTy(rhs)) => (lhs, rhs),
+            _ => {
+                return None;
+            }
+        };
+
+        let get_biggest = |lhs: PrimTy, rhs: PrimTy| -> Option<Ty> {
+            match (lhs, rhs) {
+                (PrimTy::Int(lhs), PrimTy::Int(rhs)) => {
+                    if lhs.get_ty_attr().size_bytes > rhs.get_ty_attr().size_bytes {
+                        Some(original_lhs)
+                    } else {
+                        Some(original_rhs)
+                    }
+                }
+                (PrimTy::Int(lhs), PrimTy::Uint(rhs)) => {
+                    if lhs.get_ty_attr().size_bytes > rhs.get_ty_attr().size_bytes {
+                        Some(original_lhs)
+                    } else {
+                        Some(original_rhs)
+                    }
+                }
+                (PrimTy::Int(lhs), PrimTy::Float(rhs)) => {
+                    if lhs.get_ty_attr().size_bytes > rhs.get_ty_attr().size_bytes {
+                        Some(original_lhs)
+                    } else {
+                        Some(original_rhs)
+                    }
+                }
+
+                (PrimTy::Uint(lhs), PrimTy::Uint(rhs)) => {
+                    if lhs.get_ty_attr().size_bytes > rhs.get_ty_attr().size_bytes {
+                        Some(original_lhs)
+                    } else {
+                        Some(original_rhs)
+                    }
+                }
+                (PrimTy::Uint(lhs), PrimTy::Int(rhs)) => {
+                    if lhs.get_ty_attr().size_bytes > rhs.get_ty_attr().size_bytes {
+                        Some(original_lhs)
+                    } else {
+                        Some(original_rhs)
+                    }
+                }
+                (PrimTy::Uint(lhs), PrimTy::Float(rhs)) => {
+                    if lhs.get_ty_attr().size_bytes > rhs.get_ty_attr().size_bytes {
+                        Some(original_lhs)
+                    } else {
+                        Some(original_rhs)
+                    }
+                }
+
+                (PrimTy::Float(lhs), PrimTy::Float(rhs)) => {
+                    if lhs.get_ty_attr().size_bytes > rhs.get_ty_attr().size_bytes {
+                        Some(original_lhs)
+                    } else {
+                        Some(original_rhs)
+                    }
+                }
+                (PrimTy::Float(lhs), PrimTy::Int(rhs)) => {
+                    if lhs.get_ty_attr().size_bytes > rhs.get_ty_attr().size_bytes {
+                        Some(original_lhs)
+                    } else {
+                        Some(original_rhs)
+                    }
+                }
+                (PrimTy::Float(lhs), PrimTy::Uint(rhs)) => {
+                    if lhs.get_ty_attr().size_bytes > rhs.get_ty_attr().size_bytes {
+                        Some(original_lhs)
+                    } else {
+                        Some(original_rhs)
+                    }
+                }
+                _ => None,
+            }
+        };
+
+        if let Some(ty) = get_biggest(lhs, rhs) {
+            Some(ty)
+        } else if let Some(ty) = get_biggest(rhs, lhs) {
+            Some(ty)
+        } else {
+            None
+        }
+    }
+
+    pub fn from_int(int: i64) -> Self {
+        if int >= i8::MIN.into() && int <= i8::MAX.into() {
+            INT_8_TY
+        } else if int >= i16::MIN.into() && int <= i16::MAX.into() {
+            INT_16_TY
+        } else if int >= i32::MIN.into() && int <= i32::MAX.into() {
+            INT_32_TY
+        } else {
+            INT_64_TY
+        }
+    }
+
     pub fn is_variadic_args(&self) -> bool {
         *self == Self::VariadicArgs
     }
@@ -169,7 +299,13 @@ impl Ty {
         other: Ty,
         def_id_to_name_binding: &DefIdToNameBinding<'a>
     ) -> bool {
-        match (*self, other) {
+        if self.is_ptr() && other.is_null() {
+            return true;
+        } else if self.is_null() && other.is_ptr() {
+            return true;
+        }
+
+        let is_eq = match (*self, other) {
             (Self::StackPtr(inner_ty1, mutability1), Self::Ptr(inner_ty2, mutability2)) => {
                 inner_ty1.test_eq_strict(*inner_ty2, def_id_to_name_binding) &&
                     (mutability1 as u8) >= (mutability2 as u8)
@@ -186,8 +322,30 @@ impl Ty {
                 inner_ty1.test_eq_strict(*inner_ty2, def_id_to_name_binding) &&
                     (mutability1 as u8) >= (mutability2 as u8)
             }
+            (Self::ManyPtr(inner_ty1, mutability1), Self::Ptr(inner_ty2, mutability2)) => {
+                inner_ty1.test_eq_strict(*inner_ty2, def_id_to_name_binding) &&
+                    (mutability1 as u8) >= (mutability2 as u8)
+            }
+            (Self::Ptr(inner_ty1, mutability1), Self::ManyPtr(inner_ty2, mutability2)) => {
+                inner_ty1.test_eq_strict(*inner_ty2, def_id_to_name_binding) &&
+                    (mutability1 as u8) >= (mutability2 as u8)
+            }
+            (Self::Ptr(inner_ty1, mutability1), Self::Ptr(inner_ty2, mutability2)) => {
+                inner_ty1.test_eq_strict(*inner_ty2, def_id_to_name_binding) &&
+                    (mutability1 as u8) >= (mutability2 as u8)
+            }
+            (Self::ManyPtr(inner_ty1, mutability1), Self::ManyPtr(inner_ty2, mutability2)) => {
+                inner_ty1.test_eq_strict(*inner_ty2, def_id_to_name_binding) &&
+                    (mutability1 as u8) >= (mutability2 as u8)
+            }
+            (Self::StackPtr(inner_ty1, mutability1), Self::StackPtr(inner_ty2, mutability2)) => {
+                inner_ty1.test_eq_strict(*inner_ty2, def_id_to_name_binding) &&
+                    (mutability1 as u8) >= (mutability2 as u8)
+            }
             _ => *self == other,
-        }
+        };
+
+        is_eq
     }
 
     pub fn get_expanded_dereffed_ty<'a>(
@@ -255,15 +413,20 @@ impl Ty {
             BinaryOp::ArithmeticOp(arithmetic_op) => {
                 use ArithmeticOp::*;
 
-                match (lhs, arithmetic_op, rhs) {
-                    (INT_TY, Add | Sub | Mul | Div, INT_TY) => Some(INT_TY),
-                    _ => None,
+                if lhs.is_num_ty() && rhs.is_num_ty() {
+                    return Self::get_biggest_num_ty(lhs, rhs).map(|x| x.auto_deref());
                 }
+
+                None
             }
             BinaryOp::ComparisonOp(comparison_op) => {
                 use ComparisonOp::*;
+
+                if lhs.is_num_ty() && rhs.is_num_ty() {
+                    return Some(BOOL_TY);
+                }
+
                 match (lhs, comparison_op, rhs) {
-                    (INT_TY, Eq | Ne | Ge | Gt | Le | Lt, INT_TY) => Some(BOOL_TY),
                     (BOOL_TY, Eq | Ne | Ge | Gt | Le | Lt, BOOL_TY) => Some(BOOL_TY),
                     _ => None,
                 }
@@ -324,7 +487,7 @@ impl Ty {
     pub fn auto_deref(&self) -> Ty {
         let mut ty = *self;
         loop {
-            if let Ty::Ptr(inner_ty, _) | Ty::ManyPtr(inner_ty, _) | Ty::StackPtr(inner_ty, _) = ty {
+            if let Ty::Ptr(inner_ty, _) | Ty::StackPtr(inner_ty, _) = ty {
                 ty = *inner_ty;
             } else {
                 break ty;
@@ -333,7 +496,7 @@ impl Ty {
     }
 
     pub fn try_deref_once(&self) -> Option<Ty> {
-        if let Ty::Ptr(inner_ty, _) | Ty::ManyPtr(inner_ty, _) | Ty::StackPtr(inner_ty, _) = *self {
+        if let Ty::Ptr(inner_ty, _) | Ty::StackPtr(inner_ty, _) = *self {
             Some(*inner_ty)
         } else {
             None
@@ -500,13 +663,15 @@ impl Display for Ty {
     }
 }
 
+/// Primitive types is defined by the compiler
 #[derive(Debug, Hash, Eq, PartialEq, Clone, Copy)]
 pub enum PrimTy {
-    /// 32-bit signed integer `Int`
-    Int,
-    /// 64-bit signed integer `Int64`
-    Int64,
-    /// Constant string `Str` (actually a pointer to a constant string)
+    /// Integer type `Int`
+    Int(IntTy),
+    /// Unsigned integer type `Uint`
+    Uint(UintTy),
+    // Float type `Float`
+    Float(FloatTy),
     Str,
     /// 8-bit boolean `Bool`
     Bool,
@@ -517,8 +682,9 @@ pub enum PrimTy {
 impl GetTyAttr for PrimTy {
     fn get_ty_attr(&self, _: &ResolvedInformation) -> TyAttr {
         match self {
-            Self::Int => TyAttr::new(4, 4),
-            Self::Int64 => TyAttr::new(8, 8),
+            Self::Int(int_ty) => int_ty.get_ty_attr(),
+            Self::Uint(uint_ty) => uint_ty.get_ty_attr(),
+            Self::Float(float_ty) => float_ty.get_ty_attr(),
             Self::Bool => TyAttr::new(1, 1),
             Self::Void => TyAttr::new(0, 0),
             Self::Str => TyAttr::new(8, 8),
@@ -529,11 +695,96 @@ impl GetTyAttr for PrimTy {
 impl Display for PrimTy {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Int => write!(f, "Int"),
-            Self::Int64 => write!(f, "Int64"),
+            Self::Int(int_ty) => int_ty.fmt(f),
+            Self::Uint(uint_ty) => uint_ty.fmt(f),
+            Self::Float(float_ty) => float_ty.fmt(f),
             Self::Bool => write!(f, "Bool"),
             Self::Void => write!(f, "Void"),
             Self::Str => write!(f, "Str"),
+        }
+    }
+}
+
+#[derive(Debug, Hash, Eq, PartialEq, Clone, Copy)]
+pub enum IntTy {
+    Int8,
+    Int16,
+    Int32,
+    Int64,
+}
+
+impl IntTy {
+    fn get_ty_attr(&self) -> TyAttr {
+        match self {
+            Self::Int8 => TyAttr::new(1, 1),
+            Self::Int16 => TyAttr::new(2, 2),
+            Self::Int32 => TyAttr::new(4, 4),
+            Self::Int64 => TyAttr::new(8, 8),
+        }
+    }
+}
+
+impl Display for IntTy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Int8 => write!(f, "int8"),
+            Self::Int16 => write!(f, "int16"),
+            Self::Int32 => write!(f, "int32"),
+            Self::Int64 => write!(f, "int64"),
+        }
+    }
+}
+
+#[derive(Debug, Hash, Eq, PartialEq, Clone, Copy)]
+pub enum UintTy {
+    Uint8,
+    Uint16,
+    Uint32,
+    Uint64,
+}
+
+impl UintTy {
+    fn get_ty_attr(&self) -> TyAttr {
+        match self {
+            Self::Uint8 => TyAttr::new(1, 1),
+            Self::Uint16 => TyAttr::new(2, 2),
+            Self::Uint32 => TyAttr::new(4, 4),
+            Self::Uint64 => TyAttr::new(8, 8),
+        }
+    }
+}
+
+impl Display for UintTy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Uint8 => write!(f, "uint8"),
+            Self::Uint16 => write!(f, "uint16"),
+            Self::Uint32 => write!(f, "uint32"),
+            Self::Uint64 => write!(f, "uint64"),
+        }
+    }
+}
+
+#[derive(Debug, Hash, Eq, PartialEq, Clone, Copy)]
+pub enum FloatTy {
+    Float32,
+    Float64,
+}
+
+impl FloatTy {
+    fn get_ty_attr(&self) -> TyAttr {
+        match self {
+            Self::Float32 => TyAttr::new(4, 4),
+            Self::Float64 => TyAttr::new(8, 8),
+        }
+    }
+}
+
+impl Display for FloatTy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Float32 => write!(f, "float32"),
+            Self::Float64 => write!(f, "float64"),
         }
     }
 }

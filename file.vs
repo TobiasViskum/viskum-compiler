@@ -1,16 +1,45 @@
-declare fn.C realloc(prevItems *mut Int, bytesize Int) [*]Int
-declare fn.C malloc(bytesize Int) [*]Int
-declare fn.C socket(domain Int, type Int, protocol Int) Int
-declare fn.C exit(status Int)
-declare fn.C printf(fmt Str, rest ...) Int
-declare fn.C asprintf(buffer *Str, fmt Str, rest ...) Int
+declare fn.C realloc(prevItems [*]int, bytesize int) [*]int
+declare fn.C malloc(bytesize int) [*]int
+declare fn.C socket(domain int, type int, protocol int) int
+declare fn.C exit(status int)
+declare fn.C printf(fmt str, rest ...) int
+declare fn.C asprintf(buffer *str, fmt str, rest ...) int
+declare fn.C time(time *int64) int
+declare fn.C sleep(time int) int
+declare fn.C clock_gettime(realtime int, timespec *mut TimeSpec) int
 
-typedef Data (Int, Int, (Bool, Bool, Int))
+struct TimeSpec {
+    tv_sec int64,
+    tv_nsec int64
+}
+
+impl TimeSpec {
+    fn new() Self {
+        ret Self {
+            tv_sec: 0,
+            tv_nsec: 0
+        }
+    }
+
+    fn getSec(self) int64 {
+        ret self.tv_sec
+    }
+
+    fn getNsec(self) int64 {
+        ret self.tv_nsec
+    }
+
+    fn print(*self) {
+        printf("TimeSpec { tv_sec: %d, tv_nsec: %d }\n", self.tv_sec, self.tv_nsec)
+    }
+}
+
+typedef Data (int, int, (bool, bool, int))
 
 struct.C Vec {
-    len Int,
-    cap Int,
-    items [*]Int,
+    len uint,
+    cap uint,
+    items [*]int,
 }
 
 impl Vec {
@@ -22,7 +51,7 @@ impl Vec {
         }
     }
 
-    fn.C push(*mut self, item Int) {
+    fn.C push(*mut self, item int) {
         if self.len == self.cap {
             self.cap = if self.cap == 0 { 2 } else { self.cap * 2 }
             size := self.cap * 4
@@ -32,15 +61,15 @@ impl Vec {
         self.len = self.len + 1
     }
 
-    fn.C last(*self) *Int {
+    fn.C last(*self) *int {
         ret self.items[self.len - 1]
     }
 
-    fn.C lastMut(*mut self) *mut Int {
+    fn.C lastMut(*mut self) *mut int {
         ret self.items[self.len - 1]
     }
 
-    fn.C pop(*mut self) Int {
+    fn.C pop(*mut self) int {
         self.len = self.len - 1
         ret self.items[self.len]
     }
@@ -68,21 +97,70 @@ fn.C newVec() Vec {
     }
 }
 
-fn main() {
+enum Option {
+    Some(int),
+    None
+}
+
+struct Instant {
+    start TimeSpec
+}
+
+impl Instant {
+    fn new() Self {
+        mut start := TimeSpec.new()
+        clock_gettime(0, start)
+
+        ret Self {
+            start: start
+        }
+    }
+
+    fn elapsed(self) int64 {
+        mut end := TimeSpec.new()
+        clock_gettime(0, end)
+
+        mut elapsedNs := (end.getSec() - self.start.getSec()) * 1000000000 + (end.getNsec() - self.start.getNsec())
+
+        suffix := if elapsedNs < 1000 {
+            elapsedNs = elapsedNs
+            "ns"
+        } elif elapsedNs < 10000000 {
+            elapsedNs = elapsedNs / 1000
+            "µs"
+        } elif elapsedNs < 10000000000 {
+            elapsedNs = elapsedNs / 1000000
+            "ms"
+        } else {
+            elapsedNs = elapsedNs / 1000000000
+            "s"
+        }
+
+        printf("Elapsed: %ld %s\n", elapsedNs, suffix)
+        ret 0
+    }
+}
+
+struct.C StrVec {
+    len uint,
+    cap uint,
+
+}
+
+fn.C main(argc int, args [*]str) {
+
+    
+    maybe := Option.Some(2)
+
+    if Option.Some(x) := maybe {
+        printf("Hello, value is: %d\n", x)
+    }
+
     runTests()
-    mut vec := Vec.new()
-    vec.push(0)
-    vec.push(1)
-    vec.push(2)
-    vec.debug()
-    vec.pop()
-    vec.debug()
-    vec.push(10)
-    vec.push(20)
-    vec.push(30)
-    vec.debug()
-    vec.lastMut() = 2
-    vec.debug()
+
+    mut now := Instant.new()
+    sleep(1)
+    now.elapsed()
 }
 
 struct TestUtils
@@ -95,7 +173,7 @@ impl TestUtils {
         printf("\1B[0m")
     }
 
-    fn assertInt(self, x Int, y Int, err Str) {
+    fn assertInt(self, x int, y int, err str) {
         if x != y {
             printf("\1B[31mAssert: %d != %d, Err: '%s'\n", x, y, err)
             self.printReset()
@@ -103,7 +181,7 @@ impl TestUtils {
         }
     }
 
-    fn printTestSucces(self, num Int) {
+    fn printTestSucces(self, num int) {
         printf("\1B[32mTest %d passed\n", num)
         self.printReset()
     }
@@ -112,7 +190,7 @@ impl TestUtils {
 struct VecTester {
     vec Vec,
     testUtils TestUtils,
-    testCount Int
+    testCount int
 }
 
 impl VecTester {
@@ -126,15 +204,22 @@ impl VecTester {
 
     fn runTests(mut self) {
         self.testPush()
+        self.testPop()
     }
 
     fn testPush(mut self) {
         self.vec.push(2)
-        self.testUtils.assertInt(self.vec.cap, 2, "")
+        self.testUtils.assertInt(self.vec.last(), 2, "")
         self.testUtils.printTestSucces(self.getTestCount())
     }
 
-    fn getTestCount(mut self) Int {
+    fn testPop(mut self) {
+        self.vec.push(94)
+        self.testUtils.assertInt(self.vec.pop(), 94, "")
+        self.testUtils.printTestSucces(self.getTestCount())
+    }
+
+    fn getTestCount(mut self) int {
         self.testCount = self.testCount + 1
         ret self.testCount - 1
     }
@@ -143,19 +228,4 @@ impl VecTester {
 fn runTests() {
     mut vecTester := VecTester.new()
     vecTester.runTests()
-
-    tester := TestUtils {}
-
-    vecTester := VecTester.new()
-
-    mut vec := newVec()
-    tester.assertInt(vec.len, vec.cap, "vec.len != vec.cap")
-    tester.printTestSucces(1)
-
-    vec.push(5)
-    tester.assertInt(vec.len, 1, "vec.len != 1")
-    tester.assertInt(vec.cap, 2, "vec.cap != 2")
-    tester.assertInt(vec.items[0], 5, "vec.items[0] != 2")
-    tester.printTestSucces(2)
-
 }

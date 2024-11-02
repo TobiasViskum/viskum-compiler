@@ -82,13 +82,23 @@ use ir::{
     NameBindingKind,
     NodeId,
     ResKind,
+    FLOAT_32_TY,
+    FLOAT_64_TY,
+    INT_16_TY,
+    INT_32_TY,
+    INT_64_TY,
+    INT_8_TY,
     NEVER_TY,
     NULL_TY,
     STR_TY,
+    UINT_16_TY,
+    UINT_32_TY,
+    UINT_64_TY,
+    UINT_8_TY,
 };
 
 use span::Span;
-use ir::{ Symbol, PrimTy, Ty, TyCtx, BOOL_TY, INT_TY, VOID_TY };
+use ir::{ Symbol, PrimTy, Ty, TyCtx, BOOL_TY, VOID_TY };
 
 /// Visits the entire Ast from left to right
 ///
@@ -436,10 +446,22 @@ fn type_from_typing<'ctx, 'ast, 'b, E, T: AstState>(
         Typing::Ident(span) => {
             let lexeme = &src[span.get_byte_range()];
             match lexeme {
-                "Int" => INT_TY,
-                "Bool" => BOOL_TY,
-                "Void" => VOID_TY,
-                "Str" => STR_TY,
+                "int8" => INT_8_TY,
+                "int16" => INT_16_TY,
+                "int32" => INT_32_TY,
+                "int64" => INT_64_TY,
+                "int" => INT_32_TY,
+                "uint8" => UINT_8_TY,
+                "uint16" => UINT_16_TY,
+                "uint32" => UINT_32_TY,
+                "uint64" => UINT_64_TY,
+                "uint" => UINT_32_TY,
+                "float32" => FLOAT_32_TY,
+                "float64" => FLOAT_64_TY,
+                "float" => FLOAT_64_TY,
+                "bool" => BOOL_TY,
+                "void" => VOID_TY,
+                "str" => STR_TY,
                 str => {
                     if let Some(def_id) = e.lookup_ident_declaration(*span, ResKind::Adt) {
                         Ty::Adt(def_id)
@@ -515,8 +537,9 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
     }
 
     fn visit_interger_expr(&mut self, interger_expr: &'ast IntegerExpr) -> Self::Result {
-        self.ast_visit_emitter.set_type_to_node_id(interger_expr.ast_node_id, INT_TY);
-        INT_TY
+        let ty = Ty::from_int(interger_expr.val);
+        self.ast_visit_emitter.set_type_to_node_id(interger_expr.ast_node_id, ty);
+        ty
     }
 
     fn visit_bool_expr(&mut self, bool_expr: &'ast BoolExpr) -> Self::Result {
@@ -537,7 +560,7 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
         STR_TY
     }
 
-    fn visit_block_expr(self: &mut Self, expr: &'ast BlockExpr<'ast>) -> Self::Result {
+    fn visit_block_expr(&mut self, expr: &'ast BlockExpr<'ast>) -> Self::Result {
         self.ast_visit_emitter.start_scope();
         let block_type = self.visit_stmts(expr.stmts);
         self.ast_visit_emitter.end_scope();
@@ -1154,6 +1177,8 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
             );
 
             if let Err(errors) = is_valid_arg {
+                println!("arg_ty: {:?}, given_arg_ty: {:?}", arg_ty, given_arg_ty);
+
                 for error in errors {
                     println!("{:?}", error);
                 }
@@ -1393,7 +1418,19 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
                     .find(|x| x.symbol.get() == rhs_symbol.get());
 
                 if let Some(variant_def_id) = variant_def_id {
-                    let field_ty = Ty::AtdConstructer(*variant_def_id);
+                    let variant_data = self.ast_visit_emitter.get_namebinding_from_def_id(
+                        *variant_def_id
+                    );
+                    let enum_fields = match variant_data.kind {
+                        NameBindingKind::Adt(Adt::EnumVariant(_, _, enum_fields)) => enum_fields,
+                        _ => panic!("Expected enum variant"),
+                    };
+                    let field_ty = if enum_fields[0] == Ty::ZeroSized {
+                        Ty::Adt(*variant_def_id)
+                    } else {
+                        Ty::AtdConstructer(*variant_def_id)
+                    };
+
                     self.ast_visit_emitter.set_def_id_to_node_id(
                         field_expr.rhs.ast_node_id,
                         *variant_def_id
@@ -1763,7 +1800,7 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
         }
 
         if
-            let Err(errors) = TypeChecker::test_eq_loose(
+            let Err(_errors) = TypeChecker::test_eq_loose(
                 setter_ty,
                 value_ty,
                 self.ast_visit_emitter.borrow_def_id_to_name_binding()
@@ -1915,9 +1952,18 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
                     self.ast_visit_emitter.borrow_def_id_to_name_binding()
                 )
             {
-                Ty::Unkown
+                for error in errors {
+                    println!("{:?}", error);
+                }
+                panic!("Expected equal types in if expr: {} != {}", true_type, false_type);
             } else {
-                true_type
+                if true_type.is_num_ty() && false_type.is_num_ty() {
+                    Ty::get_biggest_num_ty(true_type, false_type)
+                        .expect("Expected number")
+                        .auto_deref()
+                } else {
+                    true_type
+                }
             }
         } else {
             true_type
@@ -1932,6 +1978,8 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
     fn visit_binary_expr(&mut self, binary_expr: &'ast BinaryExpr<'ast>) -> Self::Result {
         let lhs_type = self.visit_expr(binary_expr.lhs);
         let rhs_type = self.visit_expr(binary_expr.rhs);
+
+        let biggest_num_ty = Ty::get_biggest_num_ty(lhs_type, rhs_type);
 
         let result_ty = lhs_type.test_binary(
             rhs_type,
