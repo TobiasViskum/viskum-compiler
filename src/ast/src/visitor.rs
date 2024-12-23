@@ -31,6 +31,7 @@ use crate::{
     IfExpr,
     IfFalseBranchExpr,
     ImplItem,
+    ImportItem,
     IndexExpr,
     IntegerExpr,
     ItemStmt,
@@ -168,6 +169,7 @@ pub trait Visitor<'ast>: Sized {
 
     fn visit_item(&mut self, item: ItemStmt<'ast>) -> Self::Result {
         match item {
+            ItemStmt::ImportItem(import_item) => self.visit_import_item(import_item),
             ItemStmt::FnItem(fn_item) => self.visit_fn_item(fn_item),
             ItemStmt::StructItem(struct_item) => self.visit_struct_item(struct_item),
             ItemStmt::TypedefItem(typedef_item) => self.visit_typedef_item(typedef_item),
@@ -175,6 +177,10 @@ pub trait Visitor<'ast>: Sized {
             ItemStmt::CompDeclItem(comp_decl_item) => self.visit_comp_decl_item(comp_decl_item),
             ItemStmt::ImplItem(impl_item) => self.visit_impl_item(impl_item),
         }
+    }
+
+    fn visit_import_item(&mut self, import_item: &'ast ImportItem<'ast>) -> Self::Result {
+        walk_import_item(self, import_item)
     }
 
     fn visit_comp_decl_item(&mut self, comp_decl_item: CompDeclItem<'ast>) -> Self::Result {
@@ -425,6 +431,20 @@ pub fn walk_impl_item<'a, V>(visitor: &mut V, impl_item: &'a ImplItem<'a>) -> V:
     });
 
     V::default_result()
+}
+
+pub fn walk_import_item<'a, V>(visitor: &mut V, import_item: &'a ImportItem<'a>) -> V::Result
+    where V: Visitor<'a>
+{
+    for import_item in import_item.import_items_path.iter() {
+        visitor.visit_path(*import_item);
+    }
+
+    if let Some(from_path) = import_item.from_path {
+        visitor.visit_path(from_path)
+    } else {
+        V::default_result()
+    }
 }
 
 pub fn walk_comp_decl_item<'a, V>(visitor: &mut V, comp_decl_item: CompDeclItem<'a>) -> V::Result

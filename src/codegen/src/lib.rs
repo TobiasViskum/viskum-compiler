@@ -33,7 +33,7 @@ use ir::{
     UintTy,
     VOID_TY,
 };
-use std::{ fmt::{ Display, Write }, fs::File, process::Command };
+use std::{ fmt::{ Display, Write }, fs::File, process::Command, sync::Arc };
 
 const INDENTATION: usize = 4;
 
@@ -588,11 +588,18 @@ impl<'icfg> CodeGen<'icfg> {
         Self { icfg }
     }
 
-    pub fn gen_code(self, file_name: &str) {
-        use std::io::Write;
+    pub fn gen_code(&self, file_name: &str) {
         let now = std::time::Instant::now();
 
         let mut buffer = String::with_capacity(65536);
+
+        let vec = vec![1, 2, 3, 4];
+
+        match &vec[..] {
+            [1, x @ .., 3, 4] => println!("{:?}", x),
+
+            _ => println!("No match"),
+        }
 
         for (symbol, fn_sig) in self.icfg.clib_fns.iter().map(|def_id| {
             let name_binding = self.icfg.resolved_information.get_name_binding_from_def_id(def_id);
@@ -637,13 +644,33 @@ impl<'icfg> CodeGen<'icfg> {
 
         writeln!(buffer).expect("Error writing to buffer");
 
-        for cfg in self.icfg.cfgs.iter() {
-            CodeGenUnit::new(cfg, &self.icfg.resolved_information).gen_code(&mut buffer);
-        }
+        std::thread::scope(|s| {
+            let mut join_handles = Vec::with_capacity(self.icfg.cfgs.len());
+            let resolved_information = &self.icfg.resolved_information;
 
-        let file_name_with_extension = format!("{}.ll", file_name);
-        let mut file = File::create(&file_name_with_extension).expect("Error creating file");
-        file.write_all(buffer.as_bytes()).expect("Error writing to file");
+            for cfg in self.icfg.cfgs.iter() {
+                let join_handle = s.spawn(|| {
+                    let mut buffer = String::with_capacity(1024);
+                    CodeGenUnit::new(cfg, resolved_information).gen_code(&mut buffer);
+                    buffer
+                });
+                join_handles.push(join_handle);
+            }
+
+            for join_handle in join_handles {
+                write!(buffer, "{}", join_handle.join().unwrap()).expect("Error writing to buffer");
+            }
+        });
+
+        let file_name_with_extension = format!("./viskum/dist/main.ll");
+        {
+            // Ensure directory exists
+            std::fs::create_dir_all("./viskum/dist").expect("Error creating directory");
+
+            let mut file = File::create(&file_name_with_extension).expect("Error creating file");
+            use std::io::Write;
+            file.write_all(buffer.as_bytes()).expect("Error writing to file");
+        }
 
         println!("Code generation took: {:?}", now.elapsed());
 
@@ -651,7 +678,7 @@ impl<'icfg> CodeGen<'icfg> {
             .arg("-O3")
             .arg(&file_name_with_extension)
             .arg("-o")
-            .arg(&file_name)
+            .arg("./viskum/dist/main")
             .output()
             .expect("Failed to execute clang");
 

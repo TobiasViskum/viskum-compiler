@@ -5,11 +5,22 @@ pub struct Span {
     byte_start: u32,
     byte_end: u32,
     line: u32,
+    /*
+    start_line: u16,
+    end_line: u16,
+    */
 }
 
 impl Span {
     pub fn new(byte_start: usize, byte_end: usize, line: usize) -> Self {
         Self { byte_start: byte_start as u32, byte_end: byte_end as u32, line: line as u32 }
+    }
+
+    pub fn merge(span1: Span, span2: Span) -> Span {
+        let byte_start = span1.byte_start.min(span2.byte_start);
+        let byte_end = span1.byte_end.max(span2.byte_end);
+        let line = span1.line.min(span2.line);
+        Self { byte_start, byte_end, line }
     }
 
     pub fn dummy() -> Self {

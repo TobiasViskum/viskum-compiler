@@ -60,8 +60,8 @@ fn write_typing<'ast>(buffer: &mut String, src: &str, typing: &Typing<'ast>) {
     match typing {
         Typing::SelfType => write!(buffer, "Self").expect("Unexpected write error"),
         Typing::VariadicArgs => write!(buffer, "...").expect("Unexpected write error"),
-        Typing::Ident(span) =>
-            write!(buffer, "{}", Symbol::new(&src[span.get_byte_range()]).get()).expect(
+        Typing::Ident(ident_node) =>
+            write!(buffer, "{}", Symbol::from_node_id(ident_node.ast_node_id).get()).expect(
                 "Unexpected write error"
             ),
         // Typing::NamedTuple(typings) => {
@@ -129,15 +129,11 @@ impl<'ast, T> Visitor<'ast> for AstPrettifier<'ast, T> where T: AstState {
         write!(
             self.buffer,
             "{} {{ ",
-            Symbol::new(&self.src[struct_expr.ident_node.span.get_byte_range()]).get()
+            Symbol::from_node_id(struct_expr.ident_node.ast_node_id).get()
         )?;
 
         for (i, field) in struct_expr.field_initializations.iter().enumerate() {
-            write!(
-                self.buffer,
-                "{}: ",
-                Symbol::new(&self.src[field.ident.span.get_byte_range()]).get()
-            )?;
+            write!(self.buffer, "{}: ", Symbol::from_node_id(field.ident.ast_node_id).get())?;
             self.visit_expr(field.value)?;
 
             if i < struct_expr.field_initializations.len() - 1 {
@@ -171,7 +167,7 @@ impl<'ast, T> Visitor<'ast> for AstPrettifier<'ast, T> where T: AstState {
             self.buffer,
             "{}typedef {} ",
             self.get_indentation(),
-            Symbol::new(&self.src[typedef_item.ident_node.span.get_byte_range()]).get()
+            Symbol::from_node_id(typedef_item.ident_node.ast_node_id).get()
         )?;
 
         write_typing(&mut self.buffer, self.src, &typedef_item.type_expr);
@@ -186,7 +182,7 @@ impl<'ast, T> Visitor<'ast> for AstPrettifier<'ast, T> where T: AstState {
             self.buffer,
             "{}struct {} {{\n",
             self.get_indentation(),
-            Symbol::new(&self.src[struct_item.ident_node.span.get_byte_range()]).get()
+            Symbol::from_node_id(struct_item.ident_node.ast_node_id).get()
         )?;
 
         self.increment_scope_depth();
@@ -194,11 +190,7 @@ impl<'ast, T> Visitor<'ast> for AstPrettifier<'ast, T> where T: AstState {
         for field in struct_item.field_declarations.iter() {
             write!(self.buffer, "{}", self.get_indentation())?;
 
-            write!(
-                self.buffer,
-                "{} ",
-                Symbol::new(&self.src[field.ident.span.get_byte_range()]).get()
-            )?;
+            write!(self.buffer, "{} ", Symbol::from_node_id(field.ident.ast_node_id).get())?;
 
             write_typing(&mut self.buffer, self.src, &field.type_expr);
 
@@ -217,7 +209,7 @@ impl<'ast, T> Visitor<'ast> for AstPrettifier<'ast, T> where T: AstState {
             self.buffer,
             "{}fn {}(",
             self.get_indentation(),
-            Symbol::new(&self.src[fn_item.ident_node.span.get_byte_range()]).get()
+            Symbol::from_node_id(fn_item.ident_node.ast_node_id).get()
         )?;
 
         for (i, arg_kind) in fn_item.args.iter().enumerate() {
@@ -234,7 +226,7 @@ impl<'ast, T> Visitor<'ast> for AstPrettifier<'ast, T> where T: AstState {
                     write!(
                         self.buffer,
                         "{} ",
-                        Symbol::new(&self.src[field.ident.span.get_byte_range()]).get()
+                        Symbol::from_node_id(field.ident.ast_node_id).get()
                     )?;
 
                     write_typing(&mut self.buffer, self.src, &field.type_expr);

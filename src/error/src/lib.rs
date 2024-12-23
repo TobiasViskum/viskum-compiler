@@ -31,8 +31,8 @@ impl Error {
         self.kind.get_severity()
     }
 
-    pub fn write_msg(&self, buffer: &mut String, src: &str) {
-        self.kind.write_msg(buffer, &self.span, src);
+    pub fn write_msg(&self, buffer: &mut String) {
+        self.kind.write_msg(buffer, &self.span);
         writeln!(buffer).expect("Unexpected write error")
     }
 }
@@ -79,7 +79,7 @@ impl ErrorKind {
         }
     }
 
-    pub fn write_msg(&self, buffer: &mut String, span: &Span, src: &str) {
+    pub fn write_msg(&self, buffer: &mut String, span: &Span) {
         let write_error = match self {
             Self::TupleAccessOutOfBounds(tuple_ty, accessed_len) => {
                 write!(
@@ -141,9 +141,9 @@ impl ErrorKind {
             Self::AssignmentToImmutable(symbol) => {
                 write!(buffer, "Cannot assign to immutable variable `{}`", symbol.get())
             }
-            Self::UndefinedLookup(symbol, kind) => {
+            Self::UndefinedLookup(symbol, kind /* , adt_kind, AdtKind */) => {
                 let kind_str = match kind {
-                    ResKind::Adt => "struct",
+                    ResKind::Adt => "type",
                     ResKind::Variable => "varable",
                     ResKind::Fn => "function",
                     ResKind::ConstStr => "constant string",
@@ -158,7 +158,7 @@ impl ErrorKind {
                 )
             }
             Self::InvalidPattern => {
-                write!(buffer, "Invalid pattern: {}", &src[span.get_byte_range()])
+                write!(buffer, "Invalid pattern at line {}", span.get_line())
             }
             Self::ExpectedBoolExpr(found_ty) => {
                 write!(

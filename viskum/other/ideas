@@ -1,0 +1,13 @@
+mut session := global (
+    internedTypes FxIndexSet<Ty>,
+    arena BumpArena,
+    internedStrings FxindexSet<str>,
+    nodeIdToSymbol FxHashMap<NodeId, Symbol>
+)
+
+session.getWriteAccess().nodeIdToSymbol.insert(
+    NodeId { id 2, modId 2 },
+    Symbol.new(1)
+)
+
+session.getReadAccess()....

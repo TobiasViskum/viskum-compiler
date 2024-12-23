@@ -1,11 +1,94 @@
 use std::collections::VecDeque;
 
+thread_local! {
+    static PARSE_RULES: [ParseRule; PARSE_RULE_COUNT] = {
+        let mut rules = [ParseRule::dummy(); PARSE_RULE_COUNT];
+        for (i, kind) in enum_iterator::all::<TokenKind>().enumerate() {
+            rules[
+                i
+            ] = make_parse_rule!(kind,
+
+                /*  TOKENKIND        PREFIX                 INFIX                               POSTFIX             */
+                /*                   method     prec        method      prec                    method      prec    */
+                    LeftParen   = { (grouping   None),      (call       PrecCall        ),      (None       None) },
+                    RightParen  = { (None       None),      (None       None            ),      (None       None) },
+                    LeftCurly   = { (block_expr None),      (None       None            ),      (None       None) },
+                    RightCurly  = { (None       None),      (None       None            ),      (None       None) },
+                    LeftSquare  = { (None       None),      (index_expr PrecIndex       ),      (None       None) },
+                    RightSquare = { (None       None),      (None       None            ),      (None       None) },
+                    Eq          = { (None       None),      (eq         PrecEquality    ),      (None       None) },
+                    Ne          = { (None       None),      (ne         PrecEquality    ),      (None       None) },
+                    Ge          = { (None       None),      (ge         PrecComparison  ),      (None       None) },
+                    Gt          = { (None       None),      (gt         PrecComparison  ),      (None       None) },
+                    Le          = { (None       None),      (le         PrecComparison  ),      (None       None) },
+                    Lt          = { (None       None),      (lt         PrecComparison  ),      (None       None) },
+                    Plus        = { (None       None),      (add        PrecTerm        ),      (None       None) },
+                    Minus       = { (None       None),      (sub        PrecTerm        ),      (None       None) },
+                    Star        = { (None       None),      (mul        PrecFactor      ),      (None       None) },
+                    Slash       = { (None       None),      (div        PrecFactor      ),      (None       None) },
+                    Colon       = { (None       None),      (None       None            ),      (None       None) },
+                    Define      = { (None       None),      (define     PrecAssign      ),      (None       None) },
+                    Assign      = { (None       None),      (assign     PrecAssign      ),      (None       None) },
+                    Dot         = { (dot_float  None),      (field_expr PrecCall        ),      (None       None) },
+                    Comma       = { (None       None),      (None       None            ),      (None       None) },
+                    Bang        = { (None       None),      (None       None            ),      (None       None) },
+                    Increment   = { (pre_inc    None),      (None       None            ),      (post_inc   None) },
+                    Decrement   = { (pre_dec    None),      (None       None            ),      (post_dec   None) },
+                    DoubleQuote = { (string     None),      (None       None            ),      (None       None) },
+                    StringChar  = { (None       None),      (None       None            ),      (None       None) },
+                    Ellipsis    = { (None       None),      (None       None            ),      (None       None) },
+                    
+                        
+                    // Numbers
+                    Integer     = { (integer    None),      (None       None            ),      (None       None) },
+                    Float       = { (float      None),      (None       None            ),      (None       None) },
+            
+                    // Literal `null``
+                    Null        = { (null_lit   None),      (None       None            ),      (None       None) },
+            
+                    // Booleans
+                    True        = { (true_lit   None),      (None       None            ),      (None       None) },
+                    False       = { (false_lit  None),      (None       None            ),      (None       None) },
+                        
+                    // Identifier
+                    Ident       = { (ident      None),      (None       None            ),      (None       None) },
+            
+                    // Keywords
+                    Import      = { (None       None),      (None       None            ),      (None       None) },
+                    Export      = { (None       None),      (None       None            ),      (None       None) },
+                    From        = { (None       None),      (None       None            ),      (None       None) },
+                    Impl        = { (None       None),      (None       None            ),      (None       None) },
+                    SmallSelf   = { (ident      None),      (None       None            ),      (None       None) },
+                    BigSelf     = { (ident      None),      (None       None            ),      (None       None) },
+                    Fn          = { (None       None),      (None       None            ),      (None       None) },
+                    Declare     = { (None       None),      (None       None            ),      (None       None) },
+                    Typedef     = { (None       None),      (None       None            ),      (None       None) },
+                    Mut         = { (None       None),      (None       None            ),      (None       None) },
+                    Struct      = { (None       None),      (None       None            ),      (None       None) },
+                    Enum        = { (None       None),      (None       None            ),      (None       None) },
+                    While       = { (None       None),      (None       None            ),      (None       None) },
+                    If          = { (if_expr    None),      (None       None            ),      (None       None) },
+                    Loop        = { (loop_expr  None),      (None       None            ),      (None       None) },
+                    Break       = { (None       None),      (None       None            ),      (None       None) },
+                    Continue    = { (None       None),      (None       None            ),      (None       None) },
+                    Return      = { (None       None),      (None       None            ),      (None       None) },
+                    Else        = { (None       None),      (None       None            ),      (None       None) },
+                    Elif        = { (None       None),      (None       None            ),      (None       None) },
+                    Eof         = { (None       None),      (None       None            ),      (None       None) }
+                    
+                    );
+        }
+        rules
+    };
+}
+
 use ast::{
     is_stmt_adt,
     ArgKind,
     AsigneeExpr,
     Ast,
     AstArena,
+    AstMetadata,
     AstQuerySystem,
     AstState0,
     BlockExpr,
@@ -27,6 +110,7 @@ use ast::{
     IfExpr,
     IfFalseBranchExpr,
     ImplItem,
+    ImportItem,
     IntegerExpr,
     ItemStmt,
     ItemType,
@@ -47,7 +131,7 @@ use ast::{
 };
 use error::Error;
 use expr_builder::ExprBuilder;
-use ir::{ Mutability, NodeId, Symbol };
+use ir::{ ModId, Mutability, NodeId, Symbol };
 use lexer::Lexer;
 use make_parse_rule::make_parse_rule;
 use op::{ ArithmeticOp, BinaryOp, ComparisonOp };
@@ -286,49 +370,44 @@ impl<'a> ParserHandle<'a> for Parser<'a> {
 }
 
 pub struct Parser<'a> {
-    parse_rules: [ParseRule; PARSE_RULE_COUNT],
     lexer: Lexer<'a>,
     ast_arena: &'a AstArena,
     src: &'a str,
     current: Token,
     prev: Token,
-    next_ast_node_id: NodeId,
     forgotten_nodes: usize,
     parsed_fn_count: usize,
+    next_ast_node_id: u32,
+    mod_id: ModId,
 
     /// Used for error reporting
     errors: Vec<Error>,
 }
 
 impl<'a> Parser<'a> {
-    pub fn new(src: &'a str, ast_arena: &'a AstArena) -> Self {
+    pub fn new(src: &'a str, ast_arena: &'a AstArena, mod_id: ModId) -> Self {
         let mut lexer = Lexer::new(src);
 
         Self {
             current: lexer.scan_token(),
             src,
-            parse_rules: Self::create_parse_rules(),
             ast_arena,
             lexer,
             parsed_fn_count: 0,
             prev: Token::dummy(),
-            next_ast_node_id: NodeId(0),
-
+            next_ast_node_id: 0,
+            mod_id,
             forgotten_nodes: 0,
             errors: Vec::new(),
         }
     }
 
-    pub fn parse_into_ast(mut self) -> Ast<'a, AstState0> {
-        let global_scope = self.parse_global_scope();
+    pub fn parse_ast(&mut self) -> Ast<'a, AstState0> {
+        let global_scope = GlobalScope::new(self.parse_block_as_stmts(None));
 
-        let nodes_count = (self.next_ast_node_id.0 as usize) - self.forgotten_nodes;
+        let nodes_count = (self.next_ast_node_id as usize) - self.forgotten_nodes;
 
-        Ast::new(global_scope, self.parsed_fn_count, AstQuerySystem::new(nodes_count))
-    }
-
-    fn get_symbol_from_ident_node(&self, ident_node: &IdentNode) -> Symbol {
-        Symbol::new(&self.src[ident_node.span.get_byte_range()])
+        Ast::new(global_scope, AstMetadata::new(self.parsed_fn_count, nodes_count))
     }
 
     pub(crate) fn statement(&mut self) -> Stmt<'a> {
@@ -343,8 +422,79 @@ impl<'a> Parser<'a> {
             TokenKind::Fn => Stmt::ItemStmt(ItemStmt::FnItem(self.function_statement())),
             TokenKind::Declare => self.declare_statement(),
             TokenKind::Return => self.return_expr(),
+            TokenKind::Import => self.import_statement(),
             _ => self.expression_statement(),
         }
+    }
+
+    pub(crate) fn parse_path(&mut self) -> Path<'a> {
+        let first_ident = self.consume_ident("Expected ident in path");
+        let mut path = Path::PathSegment(self.ast_arena.alloc_expr_or_stmt(first_ident));
+
+        while !self.is_eof() {
+            if self.is_curr_kind(TokenKind::Dot) {
+                self.advance();
+                let ident = self.consume_ident("Expected ident in path");
+                path = Path::PathField(
+                    self.ast_arena.alloc_expr_or_stmt(
+                        PathField::new(
+                            path,
+                            self.ast_arena.alloc_expr_or_stmt(ident),
+                            self.get_ast_node_id()
+                        )
+                    )
+                );
+            } else {
+                break;
+            }
+        }
+
+        path
+    }
+
+    pub(crate) fn import_statement(&mut self) -> Stmt<'a> {
+        self.advance();
+        let mut import_items = vec![self.parse_path()];
+
+        while !self.is_eof() && !self.is_curr_kind(TokenKind::From) {
+            if self.is_curr_kind(TokenKind::Comma) {
+                self.advance();
+                import_items.push(self.parse_path());
+                continue;
+            } else {
+                break;
+            }
+        }
+
+        if !(self.current.get_kind() == TokenKind::From) {
+            let import_stmt = ItemStmt::ImportItem(
+                self.ast_arena.alloc_expr_or_stmt(
+                    ImportItem::new(
+                        None,
+                        self.ast_arena.alloc_vec(import_items),
+                        self.get_ast_node_id()
+                    )
+                )
+            );
+
+            return Stmt::ItemStmt(import_stmt);
+        }
+
+        self.consume(TokenKind::From, "Expected `from` after `import`");
+
+        let from_path = self.parse_path();
+
+        let import_stmt = ItemStmt::ImportItem(
+            self.ast_arena.alloc_expr_or_stmt(
+                ImportItem::new(
+                    Some(from_path),
+                    self.ast_arena.alloc_vec(import_items),
+                    self.get_ast_node_id()
+                )
+            )
+        );
+
+        Stmt::ItemStmt(import_stmt)
     }
 
     pub(crate) fn impl_statement(&mut self) -> Stmt<'a> {
@@ -581,8 +731,8 @@ impl<'a> Parser<'a> {
                 Some(Typing::SelfType)
             }
             TokenKind::Ident => {
-                let ident = self.consume_ident_span("Expected ident");
-                Some(Typing::Ident(ident))
+                let ident = self.consume_ident("Expected ident");
+                Some(Typing::Ident(self.ast_arena.alloc_expr_or_stmt(ident)))
             }
             TokenKind::Star => {
                 self.advance();
@@ -757,7 +907,7 @@ impl<'a> Parser<'a> {
 
         self.consume(TokenKind::LeftCurly, "Expected `{` before function body");
 
-        let body = self.parse_block_as_stmts();
+        let body = self.parse_block_as_stmts(Some(TokenKind::RightCurly));
 
         self.consume(TokenKind::RightCurly, "Expected `}` after function body");
 
@@ -859,6 +1009,8 @@ impl<'a> Parser<'a> {
         let mut string_builder = String::with_capacity(16);
         let mut str_len = 1;
 
+        let start_span = self.prev.get_span();
+
         while !self.is_eof() && !self.is_curr_kind(TokenKind::DoubleQuote) {
             let char = &self.src[self.current.get_span().get_byte_range()];
             if char == "\\" {
@@ -889,13 +1041,15 @@ impl<'a> Parser<'a> {
         }
         self.consume(TokenKind::DoubleQuote, "Expected `\"` after string");
 
+        let end_span = self.prev.get_span();
+
         string_builder += "\\00";
 
-        let string_expr = StringExpr::new(
-            Symbol::new(string_builder.as_str()),
-            str_len,
-            self.get_ast_node_id()
-        );
+        let node_id = self.get_ast_node_id();
+        // Creates symbol (to save it to the node id)
+        Symbol::new_with_node_id(string_builder.as_str(), node_id);
+
+        let string_expr = StringExpr::new(Span::merge(start_span, end_span), str_len, node_id);
 
         expr_builder.emit_string_expr(string_expr);
     }
@@ -923,6 +1077,10 @@ impl<'a> Parser<'a> {
     /// Parse rule method: `ident`
     pub(crate) fn ident(&mut self, expr_builder: &mut ExprBuilder<'a>) {
         let ident_expr = IdentNode::new(self.prev.get_span(), self.get_ast_node_id());
+        Symbol::new_with_node_id(
+            &self.src[ident_expr.span.get_byte_range()],
+            ident_expr.ast_node_id
+        );
         expr_builder.emit_ident_expr(ident_expr);
     }
 
@@ -1160,7 +1318,7 @@ impl<'a> Parser<'a> {
 
         self.consume(TokenKind::LeftCurly, "Expected `{` after if condition");
 
-        let true_block = self.parse_block_as_stmts();
+        let true_block = self.parse_block_as_stmts(Some(TokenKind::RightCurly));
 
         self.consume(TokenKind::RightCurly, "Expected `}` after if block");
 
@@ -1184,9 +1342,15 @@ impl<'a> Parser<'a> {
         if_expr
     }
 
-    fn parse_block_as_stmts(&mut self) -> &'a [Stmt<'a>] {
+    fn parse_block_as_stmts(&mut self, stop_token: Option<TokenKind>) -> &'a [Stmt<'a>] {
         let mut stmts = VecDeque::with_capacity(32);
-        while !self.is_curr_kind(TokenKind::RightCurly) && !self.is_eof() {
+        while !self.is_eof() {
+            if let Some(stop_token) = stop_token {
+                if self.is_curr_kind(stop_token) {
+                    break;
+                }
+            }
+
             let stmt = self.statement();
             if is_stmt_adt(&stmt) {
                 stmts.push_front(stmt);
@@ -1199,30 +1363,13 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_block(&mut self) -> &'a BlockExpr<'a> {
-        let stmts = self.parse_block_as_stmts();
+        let stmts = self.parse_block_as_stmts(Some(TokenKind::RightCurly));
 
         let block_expr = self.ast_arena.alloc_expr_or_stmt(
             BlockExpr::new(stmts, self.get_ast_node_id())
         );
 
         block_expr
-    }
-
-    fn parse_global_scope(&mut self) -> GlobalScope<'a> {
-        let mut stmts = VecDeque::with_capacity(32);
-
-        while !self.is_eof() {
-            let stmt = self.statement();
-            if is_stmt_adt(&stmt) {
-                stmts.push_front(stmt);
-            } else {
-                stmts.push_back(stmt);
-            }
-        }
-
-        let stmts = self.ast_arena.alloc_vec(stmts.into());
-
-        GlobalScope::new(stmts)
     }
 
     // fn push_stmt(vec_deque: &mut VecDeque<Stmt<'a>>, stmt: Stmt<'a>) {
@@ -1306,8 +1453,11 @@ impl<'a> Parser<'a> {
     /* Helper methods */
     pub(crate) fn get_ast_node_id(&mut self) -> NodeId {
         let prev = self.next_ast_node_id;
-        self.next_ast_node_id = NodeId(prev.0 + 1);
-        prev
+        self.next_ast_node_id = prev + 1;
+        NodeId {
+            node_id: prev,
+            mod_id: self.mod_id,
+        }
     }
 
     /// Converts e.g. `69` into `0.69` (this is a fast version by chat)
@@ -1362,9 +1512,9 @@ impl<'a> Parser<'a> {
     pub(crate) fn consume_self_as_ident_node(&mut self, err_msg: &str) -> IdentNode {
         match self.current.get_kind() {
             TokenKind::SmallSelf => {
-                let ident_expr = IdentNode::new(self.current.get_span(), self.get_ast_node_id());
+                let ident_node = self.make_ident_node_from_current();
                 self.advance();
-                ident_expr
+                ident_node
             }
             _ => panic!("{}", err_msg),
         }
@@ -1373,9 +1523,9 @@ impl<'a> Parser<'a> {
     pub(crate) fn consume_ident(&mut self, err_msg: &str) -> IdentNode {
         match self.current.get_kind() {
             TokenKind::Ident => {
-                let ident_expr = IdentNode::new(self.current.get_span(), self.get_ast_node_id());
+                let ident_node = self.make_ident_node_from_current();
                 self.advance();
-                ident_expr
+                ident_node
             }
             _ => panic!("{}", err_msg),
         }
@@ -1384,98 +1534,26 @@ impl<'a> Parser<'a> {
     pub(crate) fn consume_ident_span(&mut self, err_msg: &str) -> Span {
         match self.current.get_kind() {
             TokenKind::Ident => {
+                let span = self.current.get_span();
                 self.advance();
-                self.prev.get_span()
+                span
             }
             _ => panic!("{}", err_msg),
         }
     }
 
-    pub(crate) fn get_parse_rule_of_current(&self) -> &ParseRule {
-        &self.parse_rules[self.current.get_kind() as usize]
+    fn make_ident_node_from_current(&mut self) -> IdentNode {
+        let ident_node = IdentNode::new(self.current.get_span(), self.get_ast_node_id());
+        let lexeme = self.get_lexeme(ident_node.span);
+        Symbol::new_with_node_id(lexeme, ident_node.ast_node_id);
+        ident_node
     }
 
-    pub(crate) fn get_parse_rule_of_prev(&self) -> &ParseRule {
-        &self.parse_rules[self.prev.get_kind() as usize]
+    pub(crate) fn get_parse_rule_of_current(&self) -> ParseRule {
+        PARSE_RULES.with(|x| x[self.current.get_kind() as usize])
     }
 
-    pub(crate) fn create_parse_rules() -> [ParseRule; PARSE_RULE_COUNT] {
-        array_init::array_init(|i| {
-            let kind = enum_iterator::all::<TokenKind>().nth(i).unwrap();
-            Self::create_parse_rule(kind)
-        })
-    }
-
-    pub(crate) const fn create_parse_rule(kind: TokenKind) -> ParseRule {
-        make_parse_rule!(kind,
-
-    /*  TOKENKIND        PREFIX                 INFIX                               POSTFIX             */
-    /*                   method     prec        method      prec                    method      prec    */
-        LeftParen   = { (grouping   None),      (call       PrecCall        ),      (None       None) },
-        RightParen  = { (None       None),      (None       None            ),      (None       None) },
-        LeftCurly   = { (block_expr None),      (None       None            ),      (None       None) },
-        RightCurly  = { (None       None),      (None       None            ),      (None       None) },
-        LeftSquare  = { (None       None),      (index_expr PrecIndex       ),      (None       None) },
-        RightSquare = { (None       None),      (None       None            ),      (None       None) },
-        Eq          = { (None       None),      (eq         PrecEquality    ),      (None       None) },
-        Ne          = { (None       None),      (ne         PrecEquality    ),      (None       None) },
-        Ge          = { (None       None),      (ge         PrecComparison  ),      (None       None) },
-        Gt          = { (None       None),      (gt         PrecComparison  ),      (None       None) },
-        Le          = { (None       None),      (le         PrecComparison  ),      (None       None) },
-        Lt          = { (None       None),      (lt         PrecComparison  ),      (None       None) },
-        Plus        = { (None       None),      (add        PrecTerm        ),      (None       None) },
-        Minus       = { (None       None),      (sub        PrecTerm        ),      (None       None) },
-        Star        = { (None       None),      (mul        PrecFactor      ),      (None       None) },
-        Slash       = { (None       None),      (div        PrecFactor      ),      (None       None) },
-        Colon       = { (None       None),      (None       None            ),      (None       None) },
-        Define      = { (None       None),      (define     PrecAssign      ),      (None       None) },
-        Assign      = { (None       None),      (assign     PrecAssign      ),      (None       None) },
-        Dot         = { (dot_float  None),      (field_expr PrecCall        ),      (None       None) },
-        Comma       = { (None       None),      (None       None            ),      (None       None) },
-        Bang        = { (None       None),      (None       None            ),      (None       None) },
-        Increment   = { (pre_inc    None),      (None       None            ),      (post_inc   None) },
-        Decrement   = { (pre_dec    None),      (None       None            ),      (post_dec   None) },
-        DoubleQuote = { (string     None),      (None       None            ),      (None       None) },
-        StringChar  = { (None       None),      (None       None            ),      (None       None) },
-        Ellipsis    = { (None       None),      (None       None            ),      (None       None) },
-        
-            
-        // Numbers
-        Integer     = { (integer    None),      (None       None            ),      (None       None) },
-        Float       = { (float      None),      (None       None            ),      (None       None) },
-
-        // Literal `null``
-        Null        = { (null_lit   None),      (None       None            ),      (None       None) },
-
-        // Booleans
-        True        = { (true_lit   None),      (None       None            ),      (None       None) },
-        False       = { (false_lit  None),      (None       None            ),      (None       None) },
-            
-        // Identifier
-        Ident       = { (ident      None),      (None       None            ),      (None       None) },
-
-        // Keywords
-        Impl        = { (None       None),      (None       None            ),      (None       None) },
-        SmallSelf   = { (ident      None),      (None       None            ),      (None       None) },
-        BigSelf     = { (ident      None),      (None       None            ),      (None       None) },
-        Def         = { (None       None),      (None       None            ),      (None       None) },
-        Fn          = { (None       None),      (None       None            ),      (None       None) },
-        Declare     = { (None       None),      (None       None            ),      (None       None) },
-        Typedef     = { (None       None),      (None       None            ),      (None       None) },
-        Mut         = { (None       None),      (None       None            ),      (None       None) },
-        Class       = { (None       None),      (None       None            ),      (None       None) },
-        Struct      = { (None       None),      (None       None            ),      (None       None) },
-        Enum        = { (None       None),      (None       None            ),      (None       None) },
-        While       = { (None       None),      (None       None            ),      (None       None) },
-        If          = { (if_expr    None),      (None       None            ),      (None       None) },
-        Loop        = { (loop_expr  None),      (None       None            ),      (None       None) },
-        Break       = { (None       None),      (None       None            ),      (None       None) },
-        Continue    = { (None       None),      (None       None            ),      (None       None) },
-        Return      = { (None       None),      (None       None            ),      (None       None) },
-        Else        = { (None       None),      (None       None            ),      (None       None) },
-        Elif        = { (None       None),      (None       None            ),      (None       None) },
-        Eof         = { (None       None),      (None       None            ),      (None       None) }
-        
-        )
+    pub(crate) fn get_parse_rule_of_prev(&self) -> ParseRule {
+        PARSE_RULES.with(|x| x[self.prev.get_kind() as usize])
     }
 }

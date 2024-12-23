@@ -1,0 +1,198 @@
+/// Implements the visitor trait for the pre-first pass (building the Ast query system)
+impl<'ctx, 'ast, 'b, E> Visitor<'ast>
+    for AstVisitor<'ctx, 'ast, 'b, AstState0, E>
+    where E: ResolverHandle<'ctx, 'ast, AstState0>
+{
+    type Result = ();
+
+    fn default_result() -> Self::Result {
+        ()
+    }
+
+    fn visit_interger_expr(&mut self, interger_expr: &'ast IntegerExpr) -> Self::Result {
+        self.insert_query_entry(
+            interger_expr.ast_node_id,
+            AstQueryEntry::IntegerExpr(interger_expr)
+        )
+    }
+
+    fn visit_tuple_expr(&mut self, tuple_expr: &'ast TupleExpr<'ast>) -> Self::Result {
+        self.insert_query_entry(tuple_expr.ast_node_id, AstQueryEntry::TupleExpr(tuple_expr));
+        walk_tuple_expr(self, tuple_expr)
+    }
+
+    fn visit_import_item(&mut self, import_item: &'ast ImportItem<'ast>) -> Self::Result {
+        self.insert_query_entry(import_item.ast_node_id, AstQueryEntry::ImportItem(import_item));
+        walk_import_item(self, import_item)
+    }
+
+    fn visit_bool_expr(&mut self, bool_expr: &'ast BoolExpr) -> Self::Result {
+        self.insert_query_entry(bool_expr.ast_node_id, AstQueryEntry::BoolExpr(bool_expr));
+    }
+
+    fn visit_index_expr(&mut self, index_expr: &'ast crate::IndexExpr<'ast>) -> Self::Result {
+        self.insert_query_entry(index_expr.ast_node_id, AstQueryEntry::IndexExpr(index_expr));
+        walk_index_expr(self, index_expr)
+    }
+
+    fn visit_def_stmt(&mut self, def_stmt: &'ast DefineStmt<'ast>) -> Self::Result {
+        self.insert_query_entry(def_stmt.ast_node_id, AstQueryEntry::DefineStmt(def_stmt));
+        walk_def_stmt(self, def_stmt)
+    }
+
+    fn visit_loop_expr(&mut self, loop_expr: &'ast LoopExpr<'ast>) -> Self::Result {
+        self.insert_query_entry(loop_expr.ast_node_id, AstQueryEntry::LoopExpr(loop_expr));
+        walk_loop_expr(self, loop_expr)
+    }
+
+    fn visit_break_expr(&mut self, break_expr: &'ast BreakExpr<'ast>) -> Self::Result {
+        self.insert_query_entry(break_expr.ast_node_id, AstQueryEntry::BreakExpr(break_expr));
+        walk_break_expr(self, break_expr)
+    }
+
+    fn visit_null_expr(&mut self, null_expr: &'ast NullExpr) -> Self::Result {
+        self.insert_query_entry(null_expr.ast_node_id, AstQueryEntry::NullExpr(null_expr));
+    }
+
+    fn visit_tuple_field_expr(
+        &mut self,
+        tuple_field_expr: &'ast TupleFieldExpr<'ast>
+    ) -> Self::Result {
+        self.insert_query_entry(
+            tuple_field_expr.ast_node_id,
+            AstQueryEntry::TupleFieldExpr(tuple_field_expr)
+        );
+        walk_tuple_field_expr(self, tuple_field_expr)
+    }
+
+    fn visit_call_expr(&mut self, call_expr: &'ast CallExpr<'ast>) -> Self::Result {
+        self.insert_query_entry(call_expr.ast_node_id, AstQueryEntry::CallExpr(call_expr));
+        walk_call_expr(self, call_expr)
+    }
+
+    fn visit_impl_item(&mut self, impl_item: &'ast ImplItem<'ast>) -> Self::Result {
+        self.insert_query_entry(impl_item.ast_node_id, AstQueryEntry::ImplItem(impl_item));
+        self.visit_ident_expr(impl_item.ident_node);
+        walk_impl_item(self, impl_item)
+    }
+
+    fn visit_string_expr(&mut self, string_expr: &'ast StringExpr) -> Self::Result {
+        self.insert_query_entry(string_expr.ast_node_id, AstQueryEntry::StringExpr(string_expr));
+    }
+
+    fn visit_field_expr(&mut self, field_expr: &'ast FieldExpr<'ast>) -> Self::Result {
+        self.insert_query_entry(field_expr.ast_node_id, AstQueryEntry::FieldExpr(field_expr));
+        walk_field_expr(self, field_expr)
+    }
+
+    fn visit_struct_expr(&mut self, struct_expr: &'ast StructExpr<'ast>) -> Self::Result {
+        self.insert_query_entry(struct_expr.ast_node_id, AstQueryEntry::StructExpr(struct_expr));
+        walk_struct_expr(self, struct_expr)
+    }
+
+    fn visit_assign_stmt(&mut self, assign_stmt: &'ast AssignStmt<'ast>) -> Self::Result {
+        self.insert_query_entry(assign_stmt.ast_node_id, AstQueryEntry::AssignStmt(assign_stmt));
+        walk_assign_stmt(self, assign_stmt)
+    }
+
+    fn visit_block_expr(&mut self, expr: &'ast BlockExpr<'ast>) -> Self::Result {
+        self.insert_query_entry(expr.ast_node_id, AstQueryEntry::BlockExpr(expr));
+        walk_stmts(self, expr.stmts)
+    }
+
+    fn visit_continue_expr(&mut self, continue_expr: &'ast ContinueExpr) -> Self::Result {
+        self.insert_query_entry(
+            continue_expr.ast_node_id,
+            AstQueryEntry::ContinueExpr(continue_expr)
+        );
+    }
+
+    fn visit_if_expr(&mut self, if_expr: &'ast IfExpr<'ast>) -> Self::Result {
+        self.insert_query_entry(if_expr.ast_node_id, AstQueryEntry::IfExpr(if_expr));
+        walk_if_expr(self, if_expr)
+    }
+
+    fn visit_ident_expr(&mut self, ident_node: &'ast IdentNode) -> Self::Result {
+        self.insert_query_entry(ident_node.ast_node_id, AstQueryEntry::IdentNode(ident_node))
+    }
+
+    fn visit_path_field(&mut self, path_field: &'ast PathField<'ast>) -> Self::Result {
+        self.insert_query_entry(path_field.ast_node_id, AstQueryEntry::PathField(path_field));
+        walk_path_field(self, path_field)
+    }
+
+    fn visit_path_segment(&mut self, path_segment: &'ast IdentNode) -> Self::Result {
+        self.insert_query_entry(path_segment.ast_node_id, AstQueryEntry::IdentNode(path_segment))
+    }
+
+    fn visit_tuple_struct_pat(&mut self, tuple_pat: &'ast TupleStructPat<'ast>) -> Self::Result {
+        self.insert_query_entry(tuple_pat.ast_node_id, AstQueryEntry::TupleStructPat(tuple_pat));
+        walk_tuple_struct_pat(self, tuple_pat)
+    }
+
+    fn visit_ident_pat(&mut self, ident_node: &'ast IdentNode) -> Self::Result {
+        self.insert_query_entry(ident_node.ast_node_id, AstQueryEntry::IdentNode(ident_node))
+    }
+
+    fn visit_binary_expr(&mut self, binary_expr: &'ast BinaryExpr<'ast>) -> Self::Result {
+        self.insert_query_entry(binary_expr.ast_node_id, AstQueryEntry::BinaryExpr(binary_expr));
+        walk_binary_expr(self, binary_expr)
+    }
+
+    fn visit_group_expr(&mut self, group_expr: &'ast GroupExpr<'ast>) -> Self::Result {
+        self.insert_query_entry(group_expr.ast_node_id, AstQueryEntry::GroupExpr(group_expr));
+        walk_group_expr(self, group_expr)
+    }
+
+    fn visit_comp_fn_decl_item(
+        &mut self,
+        comp_fn_decl_item: &'ast CompFnDeclItem<'ast>
+    ) -> Self::Result {
+        self.insert_query_entry(
+            comp_fn_decl_item.ast_node_id,
+            AstQueryEntry::CompFnDeclItem(comp_fn_decl_item)
+        );
+        self.visit_ident_expr(comp_fn_decl_item.ident_node);
+        for arg in comp_fn_decl_item.args {
+            self.visit_ident_expr(arg.ident);
+        }
+    }
+
+    fn visit_struct_item(&mut self, struct_item: &'ast StructItem<'ast>) -> Self::Result {
+        self.insert_query_entry(struct_item.ast_node_id, AstQueryEntry::StructItem(struct_item));
+        self.visit_ident_expr(struct_item.ident_node);
+        for field_decl in struct_item.field_declarations {
+            self.visit_ident_expr(field_decl.ident);
+        }
+    }
+
+    fn visit_enum_item(&mut self, enum_item: &'ast EnumItem<'ast>) -> Self::Result {
+        self.insert_query_entry(enum_item.ast_node_id, AstQueryEntry::EnumItem(enum_item));
+        self.visit_ident_expr(enum_item.ident_node);
+        for variant in enum_item.variants {
+            self.visit_ident_expr(variant.ident_node);
+        }
+    }
+
+    fn visit_typedef_item(&mut self, typedef_item: &'ast TypedefItem<'ast>) -> Self::Result {
+        self.insert_query_entry(typedef_item.ast_node_id, AstQueryEntry::TypedefItem(typedef_item));
+        self.visit_ident_expr(typedef_item.ident_node);
+    }
+
+    fn visit_fn_item(&mut self, fn_item: &'ast FnItem<'ast>) -> Self::Result {
+        self.insert_query_entry(fn_item.ast_node_id, AstQueryEntry::FnItem(fn_item));
+        self.visit_ident_expr(fn_item.ident_node);
+        for arg_kind in fn_item.args {
+            let ident_node = get_ident_node_from_arg_kind(*arg_kind);
+            self.visit_ident_expr(ident_node);
+        }
+        self.visit_stmts(fn_item.body);
+    }
+
+    fn visit_return_expr(&mut self, return_expr: &'ast ReturnExpr) -> Self::Result {
+        self.insert_query_entry(return_expr.ast_node_id, AstQueryEntry::ReturnExpr(return_expr));
+        if let Some(expr) = return_expr.value {
+            self.visit_expr(expr);
+        }
+    }
+}

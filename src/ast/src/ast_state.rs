@@ -17,22 +17,19 @@ pub trait AstState: PrivateAstState {
 }
 
 make_ast_states! {
-    #[doc = "Ast state 0: The query system will be built in this pass"];
-    0: AstBuildingQuerySystem -> AstUnvalidated;
+    #[doc = "Ast state 1: Unvalidated. This pass will resolve all forward declarations"];
+    0: AstUnvalidated -> AstPartlyResolved;
 
+    #[doc = "Ast state 2: Partly Resolved. This pass will resolve all top level names"];
+    1: AstPartlyResolved -> AstResolved;
 
-    #[doc = "Ast state 1: Unvalidated. This pass will resolve the Ast"];
-    1: AstUnvalidated -> AstResolved;
-
-    #[doc = "Ast state 2: Name resolution is done. This pass will type check the Aast"];
+    #[doc = "Ast state 3: Resolved. This pass will type check the Ast"];
     2: AstResolved -> AstTypeChecked;
 
-
-    #[doc = "Ast state 3: Type checking is done"];
+    #[doc = "Ast state 4: Type checking is done"];
     3: AstTypeChecked -> AstValidated;
 
-
-    #[doc = "Ast state 4: Fully validated"];
+    #[doc = "Ast state 5: Fully validated"];
     4: AstValidated -> AstValidated;
 }
 

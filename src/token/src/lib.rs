@@ -117,12 +117,8 @@ pub enum TokenKind {
     BigSelf,
     /// Keyword `declare`
     Declare,
-    /// Keyword `def`
+    /// Keyword `fn`
     Fn,
-    /// Keyword `def`
-    Def,
-    /// Keyword `class`
-    Class,
     /// Keyword `struct`
     Struct,
     /// Keyword `enum`
@@ -147,6 +143,12 @@ pub enum TokenKind {
     Return,
     /// Keyword `typedef`
     Typedef,
+    /// Keyword `import`
+    Import,
+    /// Keyword `export`
+    Export,
+    /// Keyword `from`
+    From,
 
     /// End of ofile
     Eof,
@@ -159,6 +161,35 @@ impl TokenKind {
 
     pub fn can_end_scope(&self) -> bool {
         matches!(self, Self::RightCurly)
+    }
+
+    pub const fn to_keyword_str(&self) -> &str {
+        match self {
+            Self::Impl => "impl",
+            Self::SmallSelf => "self",
+            Self::BigSelf => "Self",
+            Self::Declare => "declare",
+            Self::Fn => "fn",
+            Self::Struct => "struct",
+            Self::Enum => "enum",
+            Self::If => "if",
+            Self::While => "while",
+            Self::Loop => "loop",
+            Self::Break => "break",
+            Self::Continue => "continue",
+            Self::Else => "else",
+            Self::Elif => "elif",
+            Self::Mut => "mut",
+            Self::Return => "ret",
+            Self::Typedef => "typedef",
+            Self::Import => "import",
+            Self::Export => "export",
+            Self::From => "from",
+            Self::True => "true",
+            Self::False => "false",
+            Self::Null => "null",
+            _ => "",
+        }
     }
 }
 

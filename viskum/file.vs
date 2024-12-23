@@ -1,12 +1,15 @@
+
+
 declare fn.C realloc(prevItems [*]int, bytesize int) [*]int
 declare fn.C malloc(bytesize int) [*]int
 declare fn.C socket(domain int, type int, protocol int) int
 declare fn.C exit(status int)
-declare fn.C printf(fmt str, rest ...) int
-declare fn.C asprintf(buffer *str, fmt str, rest ...) int
+declare fn.C printf(fmt str, args ...) int
+declare fn.C asprintf(buffer *mut str, fmt str, args ...) int
 declare fn.C time(time *int64) int
 declare fn.C sleep(time int) int
 declare fn.C clock_gettime(realtime int, timespec *mut TimeSpec) int
+
 
 struct TimeSpec {
     tv_sec int64,
@@ -15,6 +18,7 @@ struct TimeSpec {
 
 impl TimeSpec {
     fn new() Self {
+
         ret Self {
             tv_sec: 0,
             tv_nsec: 0
@@ -35,6 +39,10 @@ impl TimeSpec {
 }
 
 typedef Data (int, int, (bool, bool, int))
+
+struct Something {
+    data Data
+}
 
 struct.C Vec {
     len uint,
@@ -141,27 +149,39 @@ impl Instant {
     }
 }
 
+
 struct.C StrVec {
     len uint,
     cap uint,
 
 }
 
-fn.C main(argc int, args [*]str) {
-
+fn runTests() {
     
     maybe := Option.Some(2)
 
     if Option.Some(x) := maybe {
         printf("Hello, value is: %d\n", x)
+        
+        printf("Hello, value is: %d + 1 = %d\n", x, x + 1)
     }
 
+    mut vecTester := VecTester.new()
+    vecTester.runTests()
+}
+
+fn.C main(argc int, args *str) {
+
+    
+   
     runTests()
 
     mut now := Instant.new()
     sleep(1)
     now.elapsed()
 }
+
+
 
 struct TestUtils
 impl TestUtils {
@@ -192,6 +212,7 @@ struct VecTester {
     testUtils TestUtils,
     testCount int
 }
+
 
 impl VecTester {
     fn new() Self {
@@ -225,7 +246,3 @@ impl VecTester {
     }
 }
 
-fn runTests() {
-    mut vecTester := VecTester.new()
-    vecTester.runTests()
-}

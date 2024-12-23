@@ -6,6 +6,8 @@ Useful links:
 
 */
 
+mod icfg_v2;
+
 use std::{ cell::RefCell, fmt::Display, rc::Rc };
 
 use data_structures::Either;
@@ -74,7 +76,7 @@ impl<'a> Icfg<'a> {
 /// One Cfg is constructed for each function
 pub struct Cfg<'a> {
     /// All variables used or referenced in the function
-    pub global_mems: &'a RefCell<Vec<GlobalMem>>,
+    // pub global_mems: &'a RefCell<Vec<GlobalMem>>,
     pub args: Vec<(TempId, Ty)>,
     pub local_mems: Vec<LocalMem>,
     pub result_mems: Vec<ResultMem>,
@@ -87,7 +89,7 @@ pub struct Cfg<'a> {
 
 impl<'a> Cfg<'a> {
     pub fn new(
-        global_mems: &'a RefCell<Vec<GlobalMem>>,
+        // global_mems: &'a RefCell<Vec<GlobalMem>>,
         args: Vec<(TempId, Ty)>,
         local_mems: Vec<LocalMem>,
         result_mems: Vec<ResultMem>,
@@ -96,7 +98,7 @@ impl<'a> Cfg<'a> {
         ret_ty: Ty
     ) -> Self {
         Self {
-            global_mems,
+            // global_mems,
             args,
             local_mems,
             result_mems,
@@ -107,12 +109,12 @@ impl<'a> Cfg<'a> {
         }
     }
 
-    pub fn get_global_mem(&self, global_mem_id: GlobalMemId) -> GlobalMem {
-        *self.global_mems
-            .borrow()
-            .get(global_mem_id.0 as usize)
-            .expect("Expected GlobalMem")
-    }
+    // pub fn get_global_mem(&self, global_mem_id: GlobalMemId) -> GlobalMem {
+    //     *self.global_mems
+    //         .borrow()
+    //         .get(global_mem_id.0 as usize)
+    //         .expect("Expected GlobalMem")
+    // }
 
     pub fn get_local_mem(&self, local_mem_id: LocalMemId) -> &LocalMem {
         self.local_mems.get(local_mem_id.0 as usize).expect("Expected LocalMem")
@@ -123,17 +125,16 @@ impl<'a> Cfg<'a> {
     }
 }
 
-#[derive(Debug)]
-pub struct Edge {
-    pub from: BasicBlockId,
-    pub to: BasicBlockId,
-}
+#[derive(Hash, Eq, PartialEq, Debug, Clone, Copy)]
+pub struct NodeIndex(pub u32);
+
+#[derive(Hash, Eq, PartialEq, Debug, Clone, Copy)]
+pub struct EdgeIndex(pub u32);
 
 #[derive(Debug)]
 pub struct BasicBlock<'a> {
     pub basic_block_id: BasicBlockId,
     pub nodes: Vec<Node<'a>>,
-    pub edges: Vec<Edge>,
 }
 
 impl<'a> BasicBlock<'a> {
@@ -141,16 +142,11 @@ impl<'a> BasicBlock<'a> {
         Self {
             basic_block_id,
             nodes: Vec::with_capacity(8),
-            edges: Vec::with_capacity(16),
         }
     }
 
     pub fn push_node(&mut self, node: Node<'a>) {
         self.nodes.push(node);
-    }
-
-    pub fn push_edge(&mut self, edge: Edge) {
-        self.edges.push(edge);
     }
 }
 #[derive(Hash, Eq, PartialEq, Debug, Clone, Copy)]
@@ -171,6 +167,7 @@ pub struct Node<'a> {
     pub kind: NodeKind<'a>,
 }
 
+/// Based on llvms instructions but are higher level
 #[derive(Debug, Clone, Copy)]
 pub enum NodeKind<'a> {
     BranchNode(BranchNode),
@@ -269,7 +266,7 @@ pub struct TyCastNode {
 ///
 /// LLVM instruction:
 ///
-/// `%{result_place} = call {ret_ty} {fn_name}({args})`
+/// `%{result_place} = call {ret_ty} {args_ty} {fn_name}({args})`
 #[derive(Debug, new, Clone, Copy)]
 pub struct CallNode<'a> {
     pub result_place: TempId,

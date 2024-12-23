@@ -219,6 +219,7 @@ impl<'icfg, 'ast, 'c> CfgBuilder<'icfg, 'ast, 'c> {
         let def_id = self.icfg_builder.get_def_id_from_node_id(
             self.compiling_fn.ident_node.ast_node_id
         );
+
         let name_binding = self.icfg_builder.resolved_information.get_name_binding_from_def_id(
             &def_id
         );
@@ -232,7 +233,7 @@ impl<'icfg, 'ast, 'c> CfgBuilder<'icfg, 'ast, 'c> {
         if self.is_main_fn {
             self.visit_stmts(self.compiling_fn.body);
             Cfg::new(
-                self.icfg_builder.global_mems,
+                // self.icfg_builder.global_mems,
                 self.args,
                 self.local_mems,
                 self.result_mems,
@@ -254,13 +255,15 @@ impl<'icfg, 'ast, 'c> CfgBuilder<'icfg, 'ast, 'c> {
                     let local_mem_id = LocalMemId(self.local_mems.len() as u32);
                     let local_mem = LocalMem::new(
                         local_mem_id,
-                        Symbol::new(&self.icfg_builder.src[ident_node.span.get_byte_range()]),
+                        Symbol::from_node_id(ident_node.ast_node_id),
                         ident_node.span,
                         arg_ty,
                         Mutability::Immutable
                     );
                     self.local_mems.push(local_mem);
+
                     let def_id = self.icfg_builder.get_def_id_from_node_id(ident_node.ast_node_id);
+
                     self.def_id_to_local_mem_id.insert(def_id, local_mem_id);
                     local_mem_id
                 };
@@ -281,7 +284,7 @@ impl<'icfg, 'ast, 'c> CfgBuilder<'icfg, 'ast, 'c> {
             self.visit_stmts(self.compiling_fn.body);
 
             Cfg::new(
-                self.icfg_builder.global_mems,
+                // self.icfg_builder.global_mems,
                 self.args,
                 self.local_mems,
                 self.result_mems,
@@ -616,6 +619,7 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
 
     fn visit_string_expr(&mut self, string_expr: &'ast StringExpr) -> Self::Result {
         let def_id = self.icfg_builder.get_def_id_from_node_id(string_expr.ast_node_id);
+
         VisitResult::Const(Const::Str(def_id), None)
     }
 
@@ -625,6 +629,7 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
 
     fn visit_ident_expr(&mut self, ident_node: &'ast IdentNode) -> Self::Result {
         let def_id = self.icfg_builder.get_def_id_from_node_id(ident_node.ast_node_id);
+
         let ty = self.icfg_builder.get_ty_from_node_id(ident_node.ast_node_id);
 
         match ty {
@@ -686,6 +691,7 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
                         let def_id = cfg_builder.icfg_builder.get_def_id_from_node_id(
                             tuple_struct_pat.ast_node_id
                         );
+
                         let name_binding =
                             cfg_builder.icfg_builder.resolved_information.get_name_binding_from_def_id(
                                 &def_id
@@ -751,18 +757,17 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
                                 let local_mem_id = LocalMemId(cfg_builder.local_mems.len() as u32);
                                 let local_mem = LocalMem::new(
                                     local_mem_id,
-                                    Symbol::new(
-                                        &cfg_builder.icfg_builder.src
-                                            [ident_pat.span.get_byte_range()]
-                                    ),
+                                    Symbol::from_node_id(ident_pat.ast_node_id),
                                     ident_pat.span,
                                     *ty,
                                     Mutability::Immutable
                                 );
                                 cfg_builder.local_mems.push(local_mem);
+
                                 let def_id = cfg_builder.icfg_builder.get_def_id_from_node_id(
                                     ident_pat.ast_node_id
                                 );
+
                                 cfg_builder.set_def_id_to_local_mem_id(def_id, local_mem_id);
                                 local_mem_id
                             };
@@ -1420,23 +1425,11 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
                         // Zerosized enum variant
                         let result_mem_id = self.new_result_mem(Ty::Adt(def_id));
 
-                        let temp_id = self.get_temp_id();
-                        self.push_node(
-                            Node::new(
-                                NodeKind::ByteAccessNode(
-                                    ByteAccessNode::new(
-                                        PlaceKind::TempId(temp_id),
-                                        PlaceKind::ResultMemId(result_mem_id),
-                                        8
-                                    )
-                                )
-                            )
-                        );
                         self.push_node(
                             Node::new(
                                 NodeKind::StoreNode(
                                     StoreNode::new(
-                                        PlaceKind::TempId(temp_id),
+                                        PlaceKind::ResultMemId(result_mem_id),
                                         INT_64_TY,
                                         Operand::Const(
                                             Const::Int(variant_id.0 as i64, IntTy::Int64)
@@ -1504,9 +1497,7 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
             _ => unreachable!("This should be unreachable if type checking was successful"),
         };
 
-        let access_symbol = Symbol::new(
-            &self.icfg_builder.src[field_expr.rhs.span.get_byte_range()]
-        );
+        let access_symbol = Symbol::from_node_id(field_expr.rhs.ast_node_id);
 
         let (struct_name, struct_fields) = match
             self.icfg_builder
@@ -1711,13 +1702,15 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
                 let local_mem_id = LocalMemId(self.local_mems.len() as u32);
                 let local_mem = LocalMem::new(
                     local_mem_id,
-                    Symbol::new(&self.icfg_builder.src[ident_pat.span.get_byte_range()]),
+                    Symbol::from_node_id(ident_pat.ast_node_id),
                     ident_pat.span,
                     ty,
                     Mutability::Immutable
                 );
                 self.local_mems.push(local_mem);
+
                 let def_id = self.icfg_builder.get_def_id_from_node_id(ident_pat.ast_node_id);
+
                 self.set_def_id_to_local_mem_id(def_id, local_mem_id);
                 local_mem_id
             }
@@ -1762,9 +1755,7 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
 
         'outer: for (field_symbol, ty_to_match) in struct_fields {
             for field in struct_expr.field_initializations.iter() {
-                let access_field_symbol = Symbol::new(
-                    &self.icfg_builder.src[field.ident.span.get_byte_range()]
-                );
+                let access_field_symbol = Symbol::from_node_id(field.ident.ast_node_id);
                 if access_field_symbol.get() == field_symbol.symbol.get() {
                     byte_offset = self.init_tuple_or_struct_field(
                         field.value,

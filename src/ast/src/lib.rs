@@ -63,85 +63,73 @@ pub use ast_state::*;
 pub use ast_arena::AstArena;
 pub use ast_prettifier::AstPrettifier;
 pub use ast_query_system::{ AstQueryEntry, AstQuerySystem };
-pub use ast_visitor::{ AstVisitEmitter, AstVisitor };
+use ast_visitor::AstPreResolver;
+pub use ast_visitor::{ ResolverHandle, AstResolver, AstTypeChecker };
+use fxhash::FxHashMap;
 pub use visitor::*;
 
 use std::{ cell::Cell, marker::PhantomData };
-use ir::{ Mutability, NodeId, Symbol };
+use ir::{ LexicalContext, Mutability, NodeId, Symbol };
 use op::BinaryOp;
 use span::Span;
 use derive_new::new;
 
 type Stmts<'ast> = &'ast [Stmt<'ast>];
 
+/// The state is only used to get the correct visitor
 #[derive(Debug, new)]
 pub struct Ast<'ast, T> where T: AstState {
     pub main_scope: GlobalScope<'ast>,
-    pub fn_count: usize,
-    query_system: AstQuerySystem<'ast>,
+    pub metadata: AstMetadata,
     _state: PhantomData<T>,
 }
 
+#[derive(Debug, new)]
+pub struct AstMetadata {
+    pub fn_count: usize,
+    pub node_count: usize,
+}
+
 impl<'ast, T> Ast<'ast, T> where T: AstState {
+    // Should be pub(crate), but that will wait until the whole ast validation process is more stable
     pub fn next_state<N>(self) -> Ast<'ast, N> where T: AstState<NextState = N>, N: AstState {
         Ast {
             main_scope: self.main_scope,
-            query_system: self.query_system,
-            fn_count: self.fn_count,
+            metadata: self.metadata,
             _state: PhantomData,
         }
     }
-
-    pub fn expected_node_count(&self) -> usize {
-        self.query_system.expected_nodes_count
-    }
 }
 
-impl<'ast> Ast<'ast, AstState0> {
-    pub fn get_visitor<'ctx, 'c, E: AstVisitEmitter<'ctx, 'ast, AstState0>>(
-        self,
-        src: &'c str,
-        ast_visit_emitter: &'c mut E
-    )
-        -> AstVisitor<'ctx, 'ast, 'c, AstState0, E>
-        where 'ctx: 'ast, 'ast: 'c
+impl<'ast, 'ctx, 'c> Ast<'ast, AstUnvalidated> where 'ctx: 'ast, 'ast: 'c {
+    pub fn into_visitor<E>(self, resolver_handle: &'c mut E) -> AstPreResolver<'ctx, 'ast, 'c, E>
+        where E: ResolverHandle<'ctx, 'ast, AstUnvalidated>
     {
-        AstVisitor::new(self, src, ast_visit_emitter)
-    }
-
-    pub fn insert_query_entry(&mut self, node_id: NodeId, ast_query_entry: AstQueryEntry<'ast>) {
-        self.query_system.insert_entry(node_id, ast_query_entry)
+        AstPreResolver::new(self, resolver_handle)
     }
 }
-impl<'ast> Ast<'ast, AstState1> {
-    pub fn get_visitor<'ctx, 'c, E: AstVisitEmitter<'ctx, 'ast, AstState1>>(
+
+impl<'ast, 'ctx, 'c> Ast<'ast, AstPartlyResolved> where 'ctx: 'ast, 'ast: 'c {
+    pub fn into_visitor<E>(
         self,
-        src: &'c str,
-        ast_visit_emitter: &'c mut E
-    )
-        -> AstVisitor<'ctx, 'ast, 'c, AstState1, E>
-        where 'ctx: 'ast, 'ast: 'c
+        resolver_handle: &'c mut E,
+        lexical_context_to_parent_lexical_context: &'c FxHashMap<LexicalContext, LexicalContext>
+    ) -> AstResolver<'ctx, 'ast, 'c, E>
+        where E: ResolverHandle<'ctx, 'ast, AstPartlyResolved>
     {
-        AstVisitor::new(self, src, ast_visit_emitter)
+        AstResolver::new(self, resolver_handle, lexical_context_to_parent_lexical_context)
     }
 }
 
-impl<'ast> Ast<'ast, AstState2> {
-    pub fn get_visitor<'ctx, 'c, E: AstVisitEmitter<'ctx, 'ast, AstState2>>(
+impl<'ast, 'ctx, 'c> Ast<'ast, AstResolved> where 'ctx: 'ast, 'ast: 'c {
+    pub fn into_visitor<E>(
         self,
-        src: &'c str,
-        ast_visit_emitter: &'c mut E
-    )
-        -> AstVisitor<'ctx, 'ast, 'c, AstState2, E>
-        where 'ctx: 'ast, 'ast: 'c
+        resolver_handle: &'c mut E,
+        lexical_context_to_parent_lexical_context: &'c FxHashMap<LexicalContext, LexicalContext>
+    ) -> AstTypeChecker<'ctx, 'ast, 'c, E>
+        where E: ResolverHandle<'ctx, 'ast, AstResolved>
     {
-        AstVisitor::new(self, src, ast_visit_emitter)
-    }
-}
-
-impl<'ast> Ast<'ast, AstState3> {
-    pub fn query_all(&self, mut f: impl FnMut(&NodeId, &AstQueryEntry)) {
-        self.query_system.query_all(|node_id, query_entry| f(node_id, query_entry));
+        AstTypeChecker::new(self, resolver_handle, lexical_context_to_parent_lexical_context)
     }
 }
 
@@ -158,7 +146,7 @@ pub struct GlobalScope<'ast> {
 
 #[derive(Debug, Clone, Copy)]
 pub enum Typing<'ast> {
-    Ident(Span),
+    Ident(&'ast IdentNode),
     Tuple(&'ast [Typing<'ast>]),
     Ptr(&'ast Typing<'ast>, Mutability),
     ManyPtr(&'ast Typing<'ast>),
@@ -183,6 +171,14 @@ pub enum ItemStmt<'ast> {
     EnumItem(&'ast EnumItem<'ast>),
     ImplItem(&'ast ImplItem<'ast>),
     CompDeclItem(CompDeclItem<'ast>),
+    ImportItem(&'ast ImportItem<'ast>),
+}
+
+#[derive(Debug, new)]
+pub struct ImportItem<'ast> {
+    pub from_path: Option<Path<'ast>>,
+    pub import_items_path: &'ast [Path<'ast>],
+    pub ast_node_id: NodeId,
 }
 
 #[derive(Debug, new)]
@@ -323,6 +319,7 @@ pub enum Path<'ast> {
     PathField(&'ast PathField<'ast>),
 }
 
+/// Paths seperated by dots `.`
 #[derive(Debug, Clone, Copy, new)]
 pub struct PathField<'ast> {
     pub lhs: Path<'ast>,
@@ -508,7 +505,7 @@ pub struct IntegerExpr {
 
 #[derive(Debug, new)]
 pub struct StringExpr {
-    pub val: Symbol,
+    pub span: Span,
     pub len: usize,
     pub ast_node_id: NodeId,
 }

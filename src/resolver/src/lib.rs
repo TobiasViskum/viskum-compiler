@@ -1,21 +1,21 @@
-use std::cell::RefCell;
+use std::{ cell::RefCell, path::Path };
 
 use ast::{
     Ast,
+    AstMetadata,
+    AstPartlyResolved,
     AstQueryEntry,
+    AstResolved,
     AstState,
     AstState0,
-    AstState1,
-    AstState2,
-    AstState3,
     AstTypeChecked,
-    AstVisitEmitter,
-    CompFnDeclItem,
+    AstUnvalidated,
     FnItem,
+    ResolverHandle,
     StringExpr,
 };
 use bumpalo::Bump;
-use error::{ Error, ErrorKind, Severity };
+use error::{ Error, Severity };
 use fxhash::{ FxBuildHasher, FxHashMap };
 use ir::{
     ConstStrLen,
@@ -27,6 +27,7 @@ use ir::{
     ImplId,
     LexicalBinding,
     LexicalContext,
+    ModId,
     NameBinding,
     NameBindingKind,
     NodeId,
@@ -34,6 +35,7 @@ use ir::{
     ResolvedInformation,
     ScopeId,
     Symbol,
+    TraitImplId,
     Ty,
     TyCtx,
 };
@@ -41,11 +43,13 @@ use span::Span;
 
 /// Main resolver struct. This is responsible for validating the Ast
 pub struct Resolver<'ctx, 'ast> {
-    lexical_context_stack: Vec<LexicalContext>,
-    next_scope_id: ScopeId,
-    next_context_id: ContextId,
-    // next_mod_id: ModId,
     lexical_binding_to_def_id: FxHashMap<LexicalBinding, DefId>,
+    next_mod_id: ModId,
+    node_id_to_lexical_context: FxHashMap<NodeId, LexicalContext>,
+
+    mod_name_to_mod_id: FxHashMap<Symbol, ModId>,
+
+    def_id_to_impl_id: FxHashMap<TraitImplId, Vec<DefId>>,
 
     /// Built during the first pass (name resolution) and then used in the rest of the passes
     node_id_to_def_id: FxHashMap<NodeId, DefId>,
@@ -55,7 +59,6 @@ pub struct Resolver<'ctx, 'ast> {
 
     def_id_to_global_mem_id: FxHashMap<DefId, GlobalMemId>,
     global_mems: &'ctx RefCell<Vec<GlobalMem>>,
-    impl_id_to_impl_def_id: FxHashMap<ImplId, DefId>,
 
     found_main_fn: Option<&'ast FnItem<'ast>>,
     pending_functions: Vec<&'ast FnItem<'ast>>,
@@ -66,7 +69,6 @@ pub struct Resolver<'ctx, 'ast> {
     arena: &'ctx Bump,
 
     /* Used for error reporting */
-    src: &'ast str,
     errors: Vec<Error>,
 }
 pub struct ResolvedFunctions<'ast> {
@@ -91,95 +93,90 @@ impl<'ctx, 'ast> Resolver<'ctx, 'ast> where 'ctx: 'ast {
                 node_id_to_ty: self.node_id_to_ty,
                 def_id_to_name_binding: self.def_id_to_name_binding,
                 def_id_to_global_mem_id: self.def_id_to_global_mem_id,
-                const_strs: self.str_symbol_to_def_id.values().copied().collect(),
+                const_strs: self.str_symbol_to_def_id.into_values().collect(),
             },
         )
     }
 
-    /// Makes a Resolver and builds the query system in the Ast
-    pub fn from_ast(
-        src: &'ast str,
-        ast: Ast<'ast, AstState0>,
-        arena: &'ctx Bump,
-        global_mems: &'ctx RefCell<Vec<GlobalMem>>
-    ) -> (Self, Ast<'ast, AstState1>) {
-        /// Sets up query system
-        fn build_ast_query_system<'ctx, 'ast>(
-            resolver: &mut Resolver<'ctx, 'ast>,
-            ast: Ast<'ast, AstState0>
-        ) -> Ast<'ast, AstState1>
-            where 'ctx: 'ast
-        {
-            let ast_visitor = ast.get_visitor(resolver.src, resolver);
+    pub fn new(arena: &'ctx Bump, global_mems: &'ctx RefCell<Vec<GlobalMem>>) -> Self {
+        // macro_rules! hashmap_with_capacity {
+        //     ($capacity:expr) => {
+        //         FxHashMap::with_capacity_and_hasher(
+        //             $capacity,
+        //             FxBuildHasher::default()
+        //         )
+        //     };
+        // }
 
-            let unvalidated_ast = ast_visitor.visit();
-
-            unvalidated_ast
-        }
-
-        let mut lexical_context_stack = Vec::with_capacity(16);
-        lexical_context_stack.push(LexicalContext::new(ContextId(0), ScopeId(0)));
-
-        macro_rules! hashmap_with_capacity {
-            ($capacity:expr) => {
-                FxHashMap::with_capacity_and_hasher(
-                    $capacity,
-                    FxBuildHasher::default()
-                )
-            };
-        }
-
-        let mut resolver = Self {
+        Self {
             global_mems,
+            next_mod_id: ModId(0),
+            mod_name_to_mod_id: Default::default(),
             def_id_to_global_mem_id: Default::default(),
             def_id_to_name_binding: Default::default(),
             lexical_binding_to_def_id: Default::default(),
+            node_id_to_lexical_context: Default::default(),
             str_symbol_to_def_id: Default::default(),
-            impl_id_to_impl_def_id: Default::default(),
-            node_id_to_def_id: hashmap_with_capacity!(ast.expected_node_count()),
-            node_id_to_ty: hashmap_with_capacity!(ast.expected_node_count()),
+            def_id_to_impl_id: Default::default(),
+            node_id_to_def_id: FxHashMap::default(),
+            node_id_to_ty: FxHashMap::default(),
             arena,
-            lexical_context_stack,
-            next_scope_id: ScopeId(1),
-            next_context_id: ContextId(1),
             found_main_fn: None,
-            pending_functions: Vec::with_capacity(ast.fn_count),
-            src,
+            pending_functions: Vec::new(),
+
             errors: Default::default(),
-        };
+        }
+    }
 
-        let ast_next_state = build_ast_query_system(&mut resolver, ast);
+    pub fn resolve_all_modules(&mut self, entry_dir: &Path, entry_file: &Path) {
+        let mod_name = Symbol::new(entry_file.file_stem().unwrap().to_str().unwrap());
+        let mod_id = self.get_or_make_mod_id_from_mod_name(mod_name);
 
-        (resolver, ast_next_state)
+        let file_content = entry_dir.join(entry_file);
+
+        println!("Entry dir: {:?}", entry_dir);
+        println!("Entry file: {:?}, {}", entry_file, mod_name.get());
+    }
+
+    pub fn forward_declare_ast(
+        &mut self,
+        ast: Ast<'ast, AstUnvalidated>
+    ) -> (Ast<'ast, AstPartlyResolved>, FxHashMap<LexicalContext, LexicalContext>) {
+        let ast_visitor = ast.into_visitor(self);
+
+        let visit_result = ast_visitor.visit();
+
+        if self.has_errors() {
+            self.exit_if_has(Severity::Fatal);
+        }
+
+        return visit_result;
     }
 
     /// Performs name resolution
-    pub fn resolve_ast(&mut self, ast: Ast<'ast, AstState1>) -> Ast<'ast, AstState2> {
-        return ast.next_state();
+    pub fn resolve_ast(
+        &mut self,
+        ast: Ast<'ast, AstPartlyResolved>,
+        lexical_context_to_parent_lexical_context: &FxHashMap<LexicalContext, LexicalContext>
+    ) -> Ast<'ast, AstResolved> {
+        let ast_visitor = ast.into_visitor(self, lexical_context_to_parent_lexical_context);
 
-        // fn remove_temp_storage<'ctx, 'ast>(resolver: &mut Resolver<'ctx, 'ast>) {
-        //     // resolver.symbol_and_scope_to_def_id = Default::default();
-        //     // resolver.lexical_context_stack = vec![];
-        //     // resolver.next_scope_id = ScopeId(0);
-        //     // resolver.next_context_id = ContextId(0);
-        // }
+        let resolved_ast = ast_visitor.visit();
 
-        // let ast_visitor = ast.get_visitor(self.src, self);
+        if self.has_errors() {
+            self.exit_if_has(Severity::Fatal);
+        }
 
-        // let resolved_ast = ast_visitor.visit();
-
-        // if self.has_errors() {
-        //     self.exit_if_has(Severity::Fatal);
-        // }
-
-        // remove_temp_storage(self);
-
-        // resolved_ast
+        return resolved_ast;
     }
 
     /// Performs type checking
-    pub fn type_check_ast(&mut self, ast: Ast<'ast, AstState2>) -> Ast<'ast, AstState3> {
-        let ast_visitor = ast.get_visitor(self.src, self);
+    pub fn type_check_ast(
+        &mut self,
+        ast: Ast<'ast, AstResolved>,
+        lexical_context_to_parent_lexical_context: &FxHashMap<LexicalContext, LexicalContext>
+    ) -> Ast<'ast, AstTypeChecked> {
+        let ast_visitor = ast.into_visitor(self, lexical_context_to_parent_lexical_context);
 
         let type_checked_ast = ast_visitor.visit();
 
@@ -187,41 +184,52 @@ impl<'ctx, 'ast> Resolver<'ctx, 'ast> where 'ctx: 'ast {
             self.exit_if_has(Severity::NoImpact);
         }
 
-        self.assert_type_to_all_nodes(&type_checked_ast);
+        // self.assert_type_to_all_nodes(&type_checked_ast);
 
         type_checked_ast
     }
 
-    fn assert_type_to_all_nodes(&self, type_checked_ast: &Ast<'ast, AstTypeChecked>) {
-        // It has previously been asserted, that all nodes is inserted into the query system
-        // So therefore this is also going to assert the condition for every node
-        type_checked_ast.query_all(|node_id, query_entry| {
-            let str = match query_entry {
-                AstQueryEntry::IdentNode(ident_node) =>
-                    Some(&self.src[ident_node.span.get_byte_range()]),
-                _ => None,
-            };
+    // fn assert_type_to_all_nodes(&self, type_checked_ast: &Ast<'ast, AstTypeChecked>) {
+    //     // It has previously been asserted, that all nodes is inserted into the query system
+    //     // So therefore this is also going to assert the condition for every node
+    //     type_checked_ast.query_all(|node_id, query_entry| {
+    //         let str = match query_entry {
+    //             AstQueryEntry::IdentNode(ident_node) =>
+    //                 Some(&self.src[ident_node.span.get_byte_range()]),
+    //             _ => None,
+    //         };
 
-            assert_eq!(
-                true,
-                self.node_id_to_ty.get(node_id).is_some(),
-                "Expected all nodes to have a type. Node {} is missing one. Details:\nName: {:?}\n\nMore:\n{:?}",
-                node_id,
-                str,
-                query_entry
-            )
-        });
-    }
+    //         assert_eq!(
+    //             true,
+    //             self.node_id_to_ty.get(node_id).is_some(),
+    //             "Expected all nodes to have a type. Node {} is missing one. Details:\nName: {:?}\n\nMore:\n{:?}",
+    //             node_id.node_id,
+    //             str,
+    //             query_entry
+    //         )
+    //     });
+    // }
 
     fn has_errors(&self) -> bool {
         self.errors.len() > 0
+    }
+
+    fn get_or_make_mod_id_from_mod_name(&mut self, mod_name: Symbol) -> ModId {
+        if let Some(mod_id) = self.mod_name_to_mod_id.get(&mod_name) {
+            return *mod_id;
+        }
+
+        let mod_id = self.next_mod_id;
+        self.next_mod_id = ModId(mod_id.0 + 1);
+        self.mod_name_to_mod_id.insert(mod_name, mod_id);
+        mod_id
     }
 
     fn print_errors(&self) {
         let mut buffer = String::with_capacity(2048);
 
         for error in self.errors.iter() {
-            error.write_msg(&mut buffer, self.src);
+            error.write_msg(&mut buffer);
         }
 
         println!("{}", buffer);
@@ -240,26 +248,27 @@ impl<'ctx, 'ast> Resolver<'ctx, 'ast> where 'ctx: 'ast {
             .find(|e| e.get_severity() == severity)
             .is_some()
     }
-
-    fn get_current_scope_id(&self) -> ScopeId {
-        self.lexical_context_stack.last().expect("Expected at least one scope").scope_id
-    }
-
-    fn get_current_context_id(&self) -> ContextId {
-        self.lexical_context_stack.last().expect("Expected at least one context").context_id
-    }
 }
 
-impl<'ctx, 'ast, T> AstVisitEmitter<'ctx, 'ast, T> for Resolver<'ctx, 'ast> where T: AstState {
+impl<'ctx, 'ast, T> ResolverHandle<'ctx, 'ast, T> for Resolver<'ctx, 'ast> where T: AstState {
     /* Methods used during all passes */
-    fn set_impl_id_to_def_id(&mut self, impl_id: ImplId, def_id: DefId) {
-        self.impl_id_to_impl_def_id.insert(impl_id, def_id);
+    fn compile_rel_file(&mut self, path: ast::Path<'ast>) -> Result<u32, String> {
+        todo!()
     }
-    fn get_def_id_from_impl_id(&self, impl_id: ImplId) -> DefId {
-        *self.impl_id_to_impl_def_id.get(&impl_id).expect("Expected ImplId to DefId")
+    fn set_node_id_to_lexical_context(&mut self, node_id: NodeId, lexical_context: LexicalContext) {
+        self.node_id_to_lexical_context.insert(node_id, lexical_context);
     }
-    fn try_get_def_id_from_impl_id(&self, impl_id: ImplId) -> Option<DefId> {
-        self.impl_id_to_impl_def_id.get(&impl_id).copied()
+
+    fn try_get_def_id_from_trait_impl_id(
+        &self,
+        trait_impl_id: TraitImplId,
+        symbol: Symbol
+    ) -> Option<DefId> {
+        let def_ids = self.def_id_to_impl_id.get(&trait_impl_id)?;
+        def_ids
+            .iter()
+            .find(|def_id| def_id.symbol.get() == symbol.get())
+            .copied()
     }
     fn set_def_id_to_global_mem(&mut self, def_id: DefId) {
         let global_mem_id = GlobalMemId(self.global_mems.borrow().len() as u32);
@@ -268,31 +277,43 @@ impl<'ctx, 'ast, T> AstVisitEmitter<'ctx, 'ast, T> for Resolver<'ctx, 'ast> wher
         self.def_id_to_global_mem_id.insert(def_id, global_mem_id);
     }
     fn get_ty_from_node_id(&self, node_id: NodeId) -> Ty {
-        let ty = self.node_id_to_ty.get(&node_id).expect("Expected type to node id");
-        *ty
+        println!("Node id: {:?}", node_id);
+        *self.node_id_to_ty.get(&node_id).expect("Expected type to node id")
     }
+    fn get_mut_or_create_def_ids_from_trait_impl_id(
+        &mut self,
+        trait_impl_id: TraitImplId
+    ) -> &mut Vec<DefId> {
+        self.def_id_to_impl_id.entry(trait_impl_id).or_insert(Vec::new())
+    }
+
     fn make_const_str(&mut self, str_expr: &'ast StringExpr) -> DefId {
-        if let Some(def_id) = self.str_symbol_to_def_id.get(&str_expr.val) {
-            return def_id.0;
+        let symbol = Symbol::from_node_id(str_expr.ast_node_id);
+        if let Some(&(def_id, _)) = self.str_symbol_to_def_id.get(&symbol) {
+            self.node_id_to_def_id.insert(str_expr.ast_node_id, def_id);
+            return def_id;
         }
 
-        let def_id = <Resolver<'ctx, 'ast> as AstVisitEmitter<'_, '_, T>>::make_def_id(
-            self,
-            str_expr.ast_node_id,
-            str_expr.val
-        );
+        let def_id = <Resolver<'ctx, 'ast> as ResolverHandle<
+            '_,
+            '_,
+            T
+        >>::make_def_id_and_bind_to_node_id(self, str_expr.ast_node_id, symbol);
+
+        self.node_id_to_def_id.insert(str_expr.ast_node_id, def_id);
         self.def_id_to_name_binding.insert(
             def_id,
             NameBinding::new(NameBindingKind::ConstStr(ConstStrLen(str_expr.len as u32)))
         );
-        self.str_symbol_to_def_id.insert(str_expr.val, (def_id, ConstStrLen(str_expr.len as u32)));
+        self.str_symbol_to_def_id.insert(symbol, (def_id, ConstStrLen(str_expr.len as u32)));
+        <Resolver<'ctx, 'ast> as ResolverHandle<'_, '_, T>>::set_def_id_to_global_mem(self, def_id);
         def_id
     }
     fn report_error(&mut self, error: Error) {
         self.errors.push(error);
     }
     fn is_main_scope(&mut self) -> bool {
-        self.lexical_context_stack.len() == 1
+        true
     }
     fn append_fn(&mut self, fn_item: &'ast FnItem<'ast>) {
         self.pending_functions.push(fn_item);
@@ -313,31 +334,8 @@ impl<'ctx, 'ast, T> AstVisitEmitter<'ctx, 'ast, T> for Resolver<'ctx, 'ast> wher
         self.arena.alloc_slice_fill_iter(vec.into_iter())
     }
     /* Used during the first pass (name resolution) */
-    fn start_scope(&mut self) {
-        let current_context_id = self.get_current_context_id();
-        self.lexical_context_stack.push(
-            LexicalContext::new(current_context_id, self.next_scope_id)
-        );
-        self.next_scope_id = ScopeId(self.next_scope_id.0 + 1);
-    }
-    fn end_scope(&mut self) {
-        self.lexical_context_stack.pop();
-    }
-    fn start_context(&mut self) {
-        self.lexical_context_stack.push(
-            LexicalContext::new(self.next_context_id, self.next_scope_id)
-        );
-        self.next_context_id = ContextId(self.next_context_id.0 + 1);
-        self.next_scope_id = ScopeId(self.next_scope_id.0 + 1);
-    }
-    fn end_context(&mut self) {
-        let start_context_id = self.get_current_context_id();
-        while self.get_current_context_id() == start_context_id {
-            self.lexical_context_stack.pop();
-        }
-    }
 
-    fn make_def_id(&mut self, node_id: NodeId, symbol: Symbol) -> DefId {
+    fn make_def_id_and_bind_to_node_id(&mut self, node_id: NodeId, symbol: Symbol) -> DefId {
         let def_id = DefId::new(symbol, node_id);
         self.node_id_to_def_id.insert(node_id, def_id);
         def_id
@@ -348,65 +346,115 @@ impl<'ctx, 'ast, T> AstVisitEmitter<'ctx, 'ast, T> for Resolver<'ctx, 'ast> wher
     fn set_def_id_to_node_id(&mut self, node_id: NodeId, def_id: DefId) {
         self.node_id_to_def_id.insert(node_id, def_id);
     }
+    fn try_get_def_id_from_node_id(&self, node_id: NodeId) -> Option<DefId> {
+        self.node_id_to_def_id.get(&node_id).copied()
+    }
 
     fn bind_def_id_to_lexical_binding(&mut self, def_id: DefId, res_kind: ResKind) {
-        let prev = self.lexical_binding_to_def_id
-            .iter()
-            .find(|(binding, exisiting_def_id)| (
-                if
-                    exisiting_def_id.symbol.get() == def_id.symbol.get() &&
-                    binding.res_kind == res_kind &&
-                    res_kind == ResKind::Adt
-                {
-                    true
-                } else {
-                    false
-                }
-            ));
+        let lexical_context = self.node_id_to_lexical_context
+            .get(&def_id.node_id)
+            .expect(format!("Expected lexical context: {}", def_id.symbol.get()).as_str());
 
-        if let Some(_prev) = prev {
-            panic!("Already exists");
+        let mock_lexical_binding = LexicalBinding::new(
+            *lexical_context,
+            def_id.symbol,
+            res_kind,
+            def_id.node_id.mod_id
+        );
+        if let Some(_prev) = self.lexical_binding_to_def_id.get(&mock_lexical_binding) {
+            panic!("Adt or Fn already exists: {:?}", def_id.symbol.get());
         }
 
         let lexical_binding = LexicalBinding {
-            lexical_context: LexicalContext::new(
-                self.get_current_context_id(),
-                self.get_current_scope_id()
-            ),
+            lexical_context: *lexical_context,
             res_kind,
             symbol: def_id.symbol,
+            mod_id: def_id.node_id.mod_id,
         };
         self.lexical_binding_to_def_id.insert(lexical_binding, def_id);
     }
 
-    fn lookup_ident_declaration(&mut self, span: Span, res_kind: ResKind) -> Option<DefId> {
-        let symbol = Symbol::new(&self.src[span.get_byte_range()]);
-
+    fn lookup_ident_declaration(
+        &mut self,
+        symbol: Symbol,
+        res_kind: ResKind,
+        node_id: NodeId,
+        lexical_context_to_parent_lexical_context: &FxHashMap<LexicalContext, LexicalContext>
+    ) -> Option<DefId> {
         match res_kind {
             ResKind::ConstStr => {
-                if let Some(def_id) = self.str_symbol_to_def_id.get(&symbol) {
-                    return Some(def_id.0);
+                if let Some(&(def_id, _)) = self.str_symbol_to_def_id.get(&symbol) {
+                    return Some(def_id);
                 }
             }
             ResKind::Variable => {
-                let start_context = self.get_current_context_id();
-                // In the future, when allowing constants, the following should be true for a constant:
-                // A constant is only available after its definition, however its available at any context level
-                for lexical_context in self.lexical_context_stack.iter().rev() {
-                    if lexical_context.context_id != start_context {
+                let start_context = self.node_id_to_lexical_context
+                    .get(&node_id)
+                    .expect(
+                        format!(
+                            "Expected lexical context: {}\n{:#?}",
+                            symbol.get(),
+                            node_id
+                        ).as_str()
+                    );
+
+                let mut current_context = *start_context;
+                loop {
+                    // Can't lookup variables in other contexts (e.g. outside of a function)
+                    if current_context.context_id != start_context.context_id {
                         break;
                     }
-                    let lexical_binding = LexicalBinding::new(*lexical_context, symbol, res_kind);
+
+                    let lexical_binding = LexicalBinding::new(
+                        current_context,
+                        symbol,
+                        res_kind,
+                        node_id.mod_id
+                    );
                     if let Some(def_id) = self.lexical_binding_to_def_id.get(&lexical_binding) {
                         return Some(*def_id);
+                    }
+                    if
+                        let Some(parent_context) = lexical_context_to_parent_lexical_context.get(
+                            &current_context
+                        )
+                    {
+                        current_context = *parent_context;
+                    } else {
+                        break;
                     }
                 }
             }
-            ResKind::Adt | ResKind::Fn => {
-                for lexical_context in self.lexical_context_stack.iter().rev() {
-                    let lexical_binding = LexicalBinding::new(*lexical_context, symbol, res_kind);
+            ResKind::Fn | ResKind::Adt => {
+                let start_context = self.node_id_to_lexical_context
+                    .get(&node_id)
+                    .expect(
+                        format!(
+                            "Expected lexical context: {}\n{:#?}",
+                            symbol.get(),
+                            node_id
+                        ).as_str()
+                    );
+
+                let mut current_context = *start_context;
+                loop {
+                    let lexical_binding = LexicalBinding::new(
+                        current_context,
+                        symbol,
+                        res_kind,
+                        node_id.mod_id
+                    );
                     if let Some(def_id) = self.lexical_binding_to_def_id.get(&lexical_binding) {
                         return Some(*def_id);
+                    }
+                    if
+                        let Some(parent_context) = lexical_context_to_parent_lexical_context.get(
+                            &current_context
+                        )
+                    {
+                        current_context = *parent_context;
+                    } else {
+                        break;
                     }
                 }
             }
@@ -417,13 +465,17 @@ impl<'ctx, 'ast, T> AstVisitEmitter<'ctx, 'ast, T> for Resolver<'ctx, 'ast> wher
 
     fn lookup_ident_definition(
         &mut self,
-        span: Span,
-        res_kind: ResKind
+        symbol: Symbol,
+        res_kind: ResKind,
+        node_id: NodeId,
+        lexical_context_to_parent_lexical_context: &FxHashMap<LexicalContext, LexicalContext>
     ) -> Option<(DefId, NameBinding<'ctx>)> {
-        let def_id = <Resolver<'ctx, 'ast> as AstVisitEmitter<'_, '_, T>>::lookup_ident_declaration(
+        let def_id = <Resolver<'ctx, 'ast> as ResolverHandle<'_, '_, T>>::lookup_ident_declaration(
             self,
-            span,
-            res_kind
+            symbol,
+            res_kind,
+            node_id,
+            lexical_context_to_parent_lexical_context
         );
 
         match def_id {

@@ -24,13 +24,20 @@ impl Display for Mutability {
 #[derive(Eq, Hash, PartialEq, Debug, Clone, Copy)]
 pub struct LexicalBinding {
     pub lexical_context: LexicalContext,
+    /// The symbol is there to make it unique, when used in a hashmap
     pub symbol: Symbol,
     pub res_kind: ResKind,
+    pub mod_id: ModId,
 }
 
 impl LexicalBinding {
-    pub fn new(lexical_context: LexicalContext, symbol: Symbol, res_kind: ResKind) -> Self {
-        Self { lexical_context, symbol, res_kind }
+    pub fn new(
+        lexical_context: LexicalContext,
+        symbol: Symbol,
+        res_kind: ResKind,
+        mod_id: ModId
+    ) -> Self {
+        Self { lexical_context, symbol, res_kind, mod_id }
     }
 }
 
@@ -48,21 +55,21 @@ impl LexicalContext {
 
 /// Used during the first pass of name resolution
 #[derive(Eq, Hash, PartialEq, Debug, Clone, Copy)]
-pub struct ContextId(pub u32);
+pub struct ContextId(pub u16);
 
 /// Used during the first pass of name resolution
 #[derive(Eq, Hash, PartialEq, Debug, Clone, Copy)]
-pub struct ScopeId(pub u32);
+pub struct ScopeId(pub u16);
 
 /// NodeId is used both as AstNodeId and CfgNodeId
 #[derive(Eq, Hash, PartialEq, Debug, Clone, Copy)]
-pub struct NodeId(pub u32);
-
-impl Display for NodeId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
+pub struct NodeId {
+    pub node_id: u32,
+    pub mod_id: ModId,
 }
+
+#[derive(Eq, Hash, PartialEq, Debug, Clone, Copy)]
+pub struct ModId(pub u32);
 
 /// Refers to any definition
 #[derive(Hash, PartialEq, Eq, Debug, Clone, Copy)]
@@ -77,11 +84,11 @@ impl DefId {
     }
 
     pub fn display_as_fn(&self) -> String {
-        format!("@{}{}", self.symbol.get(), self.node_id.0)
+        format!("@{}{}_{}", self.symbol.get(), self.node_id.mod_id.0, self.node_id.node_id)
     }
 
     pub fn display_as_str(&self) -> String {
-        format!("@.str.{}", self.node_id.0)
+        format!("@.str.{}.{}", self.node_id.mod_id.0, self.node_id.node_id)
     }
 }
 
@@ -130,6 +137,12 @@ pub enum NameBindingKind<'res> {
     // Import
 }
 
+// #[derive(Debug, Clone, Copy)]
+// pub struct ConstStr {
+//     pub def_id: DefId,
+//     pub len: ConstStrLen,
+// }
+
 #[derive(Debug, Clone, Copy)]
 pub struct ConstStrLen(pub u32);
 
@@ -159,9 +172,16 @@ impl FnSig {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, new)]
+pub struct TraitImplId {
+    pub implementor_def_id: DefId,
+    /// If this is None, it means that it's an implementation for no trait
+    pub trait_def_id: Option<DefId>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, new)]
 pub struct ImplId {
-    pub def_id: DefId,
-    pub impl_symbol: Symbol,
+    pub implementor: DefId,
+    pub fn_def_id: DefId,
 }
 
 #[derive(Eq, Hash, PartialEq, Debug, Clone, Copy)]
@@ -176,10 +196,19 @@ pub enum ResKind {
     ConstStr,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum AdtKind {
+    Struct,
+    Enum,
+    EnumVariant,
+    Typedef,
+}
+
 pub type NodeIdToTy = FxHashMap<NodeId, Ty>;
 pub type NodeIdToDefId = FxHashMap<NodeId, DefId>;
 pub type DefIdToNameBinding<'res> = FxHashMap<DefId, NameBinding<'res>>;
 
+#[derive(Debug)]
 pub struct ResolvedInformation<'res> {
     pub node_id_to_ty: NodeIdToTy,
     pub node_id_to_def_id: NodeIdToDefId,

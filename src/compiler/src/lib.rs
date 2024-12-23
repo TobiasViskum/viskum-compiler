@@ -1,16 +1,17 @@
-use std::cell::RefCell;
+use std::{ cell::RefCell, path::{ self, PathBuf } };
 
 use ast::{ AstArena, AstPrettifier };
 use bumpalo::Bump;
 use codegen::CodeGen;
 use icfg::Icfg;
 use icfg_builder::IcfgBuilder;
-use ir::{ GlobalMem, ResolvedInformation };
+use ir::{ GlobalMem, ModId, ResolvedInformation };
 use parser::Parser;
 use resolver::Resolver;
 
 pub struct Compiler {
-    file: String,
+    entry_dir: PathBuf,
+    entry_file: PathBuf,
 }
 
 impl Compiler {
@@ -18,23 +19,29 @@ impl Compiler {
         let mut args = std::env::args();
         args.next();
 
-        let input_file = if let Some(input_file) = args.next() {
-            input_file
+        let mut input_file = if let Some(input_file) = args.next() {
+            path::Path::new(&input_file).to_path_buf()
         } else {
             println!("Missing file input");
             std::process::exit(1);
         };
 
-        // Ends with .vs
-
-        let input_file = if !input_file.ends_with(".vs") {
-            println!("File must end with .vs");
-            std::process::exit(1);
+        if let Some(ext) = input_file.extension() {
+            if ext != "vs" {
+                println!("File must end with .vs");
+                std::process::exit(1);
+            }
         } else {
-            input_file.replace(".vs", "")
-        };
+            println!("Must be a .vs file");
+            std::process::exit(1);
+        }
 
-        Self { file: input_file }
+        // Get last part of the path
+        let entry_file = PathBuf::from(input_file.file_name().unwrap().to_str().unwrap());
+        input_file.pop();
+        let entry_dir = input_file;
+
+        Self { entry_file, entry_dir }
     }
 
     pub fn compile_entry(&self) {
@@ -42,39 +49,44 @@ impl Compiler {
 
         let arena = Bump::new();
         let global_mems = RefCell::new(Vec::new());
-        let icfg = self.build_to_icfg(&arena, &global_mems);
+        let icfg = self.compile_icfg(&arena, &global_mems);
 
         // IcfgPrettifier::new(&icfg).print_icfg();
 
         println!("Viskum compilation took: {:?}", now.elapsed());
 
         let now = std::time::Instant::now();
-        CodeGen::new(&icfg).gen_code(&self.file);
+        CodeGen::new(&icfg).gen_code(&self.entry_file.as_os_str().to_str().unwrap());
         println!("LLVM compilation took: {:?}", now.elapsed());
     }
 
-    fn build_to_icfg<'a>(
+    fn compile_icfg<'a>(
         &self,
         arena: &'a Bump,
         global_mems: &'a RefCell<Vec<GlobalMem>>
     ) -> Icfg<'a> {
-        let file_content = self.get_file_content();
+        let file_content = match
+            std::fs::read_to_string(&self.entry_dir.join(&self.entry_file).with_extension("vs"))
+        {
+            Ok(file_content) => file_content,
+            Err(e) => {
+                eprintln!("Error reading file: {}", e);
+                std::process::exit(1);
+            }
+        };
         let ast_arena = AstArena::new();
 
         let (resolved, ast) = {
-            let parser = Parser::new(&file_content, &ast_arena);
+            let mut resolver = Resolver::new(arena, global_mems);
 
-            let (mut resolver, ast) = Resolver::from_ast(
-                &file_content,
-                parser.parse_into_ast(),
-                &arena,
-                global_mems
-            );
+            resolver.resolve_all_modules(&self.entry_dir, &self.entry_file);
 
-            // AstPrettifier::new(&ast, &file_content, None).print_ast();
+            let mut parser = Parser::new(&file_content, &ast_arena, ModId(0));
 
-            let resolved_ast = resolver.resolve_ast(ast);
-            let type_checked_ast = resolver.type_check_ast(resolved_ast);
+            let ast = parser.parse_ast();
+            let (forward_declared_ast, lexical_relations) = resolver.forward_declare_ast(ast);
+            let resolved_ast = resolver.resolve_ast(forward_declared_ast, &lexical_relations);
+            let type_checked_ast = resolver.type_check_ast(resolved_ast, &lexical_relations);
 
             (resolver.take_resolved_information(), type_checked_ast)
         };
@@ -90,13 +102,13 @@ impl Compiler {
         icfg
     }
 
-    fn get_file_content(&self) -> String {
-        match std::fs::read_to_string(&format!("{}.vs", self.file)) {
-            Ok(file_content) => file_content,
-            Err(e) => {
-                eprintln!("Error reading file: {}", e);
-                std::process::exit(1);
-            }
-        }
-    }
+    // fn get_file_content(&self) -> String {
+    //     match std::fs::read_to_string(&format!("{}.vs", self.file)) {
+    //         Ok(file_content) => file_content,
+    //         Err(e) => {
+    //             eprintln!("Error reading file: {}", e);
+    //             std::process::exit(1);
+    //         }
+    //     }
+    // }
 }

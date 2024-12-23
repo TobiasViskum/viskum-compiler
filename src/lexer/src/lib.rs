@@ -131,29 +131,31 @@ impl<'a> Lexer<'a> {
 
     fn match_keyword_or_ident(ident: &str) -> TokenKind {
         // Make a faster way than a match statement here (match a char at a time)
+
         match ident {
-            "fn" => TokenKind::Fn,
-            "declare" => TokenKind::Declare,
-            "self" => TokenKind::SmallSelf,
-            "Self" => TokenKind::BigSelf,
-            "def" => TokenKind::Def,
-            "mut" => TokenKind::Mut,
-            "impl" => TokenKind::Impl,
-            "class" => TokenKind::Class,
-            "struct" => TokenKind::Struct,
-            "enum" => TokenKind::Enum,
-            "null" => TokenKind::Null,
-            "loop" => TokenKind::Loop,
-            "while" => TokenKind::While,
-            "if" => TokenKind::If,
-            "else" => TokenKind::Else,
-            "elif" => TokenKind::Elif,
-            "break" => TokenKind::Break,
-            "continue" => TokenKind::Continue,
-            "ret" => TokenKind::Return,
-            "true" => TokenKind::True,
-            "false" => TokenKind::False,
-            "typedef" => TokenKind::Typedef,
+            t if t == TokenKind::Import.to_keyword_str() => TokenKind::Import,
+            t if t == TokenKind::From.to_keyword_str() => TokenKind::From,
+            t if t == TokenKind::Export.to_keyword_str() => TokenKind::Export,
+            t if t == TokenKind::Fn.to_keyword_str() => TokenKind::Fn,
+            t if t == TokenKind::Declare.to_keyword_str() => TokenKind::Declare,
+            t if t == TokenKind::SmallSelf.to_keyword_str() => TokenKind::SmallSelf,
+            t if t == TokenKind::BigSelf.to_keyword_str() => TokenKind::BigSelf,
+            t if t == TokenKind::Mut.to_keyword_str() => TokenKind::Mut,
+            t if t == TokenKind::Impl.to_keyword_str() => TokenKind::Impl,
+            t if t == TokenKind::Struct.to_keyword_str() => TokenKind::Struct,
+            t if t == TokenKind::Enum.to_keyword_str() => TokenKind::Enum,
+            t if t == TokenKind::Null.to_keyword_str() => TokenKind::Null,
+            t if t == TokenKind::Loop.to_keyword_str() => TokenKind::Loop,
+            t if t == TokenKind::While.to_keyword_str() => TokenKind::While,
+            t if t == TokenKind::If.to_keyword_str() => TokenKind::If,
+            t if t == TokenKind::Else.to_keyword_str() => TokenKind::Else,
+            t if t == TokenKind::Elif.to_keyword_str() => TokenKind::Elif,
+            t if t == TokenKind::Break.to_keyword_str() => TokenKind::Break,
+            t if t == TokenKind::Continue.to_keyword_str() => TokenKind::Continue,
+            t if t == TokenKind::Return.to_keyword_str() => TokenKind::Return,
+            t if t == TokenKind::True.to_keyword_str() => TokenKind::True,
+            t if t == TokenKind::False.to_keyword_str() => TokenKind::False,
+            t if t == TokenKind::Typedef.to_keyword_str() => TokenKind::Typedef,
             _ => TokenKind::Ident,
         }
     }
@@ -262,64 +264,6 @@ impl<'a> Lexer<'a> {
 mod test {
     use token::TokenKind;
     use crate::Lexer;
-
-    #[test]
-    fn tokenize_1() {
-        let input = "1 + 2 * if 2 == 2 do 8 + 9 end";
-        let expected_tokens = [
-            TokenKind::Integer,
-            TokenKind::Plus,
-            TokenKind::Integer,
-            TokenKind::Star,
-            TokenKind::If,
-            TokenKind::Integer,
-            TokenKind::Eq,
-            TokenKind::Integer,
-            TokenKind::Ident,
-            TokenKind::Integer,
-            TokenKind::Plus,
-            TokenKind::Integer,
-            TokenKind::Ident,
-        ];
-
-        expect_tokens(input, &expected_tokens)
-    }
-
-    #[test]
-    fn tokenize_2() {
-        let input =
-            "
-            def main()
-                a := 2
-                b := (8 * 2)
-                loop
-                    break
-                end
-            end
-        ";
-        let expected_tokens = [
-            TokenKind::Def,
-            TokenKind::Ident,
-            TokenKind::LeftParen,
-            TokenKind::RightParen,
-            TokenKind::Ident,
-            TokenKind::Define,
-            TokenKind::Integer,
-            TokenKind::Ident,
-            TokenKind::Define,
-            TokenKind::LeftParen,
-            TokenKind::Integer,
-            TokenKind::Star,
-            TokenKind::Integer,
-            TokenKind::RightParen,
-            TokenKind::Loop,
-            TokenKind::Break,
-            TokenKind::Ident,
-            TokenKind::Ident,
-        ];
-
-        expect_tokens(input, &expected_tokens)
-    }
 
     fn expect_tokens(src: &str, expected_tokens: &[TokenKind]) {
         let mut lexer = Lexer::new(src);
