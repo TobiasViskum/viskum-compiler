@@ -1,86 +1,87 @@
-use std::collections::VecDeque;
+use std::{ collections::VecDeque, sync::LazyLock };
 
-thread_local! {
-    static PARSE_RULES: [ParseRule; PARSE_RULE_COUNT] = {
-        let mut rules = [ParseRule::dummy(); PARSE_RULE_COUNT];
-        for (i, kind) in enum_iterator::all::<TokenKind>().enumerate() {
-            rules[
-                i
-            ] = make_parse_rule!(kind,
+const PARSE_RULE_COUNT: usize = enum_iterator::cardinality::<TokenKind>();
+static PARSE_RULES: LazyLock<[ParseRule; PARSE_RULE_COUNT]> = LazyLock::new(|| {
+    let mut rules = [ParseRule::dummy(); PARSE_RULE_COUNT];
+    for (i, kind) in enum_iterator::all::<TokenKind>().enumerate() {
+        rules[i] =
+            make_parse_rule!(kind,
 
-                /*  TOKENKIND        PREFIX                 INFIX                               POSTFIX             */
-                /*                   method     prec        method      prec                    method      prec    */
-                    LeftParen   = { (grouping   None),      (call       PrecCall        ),      (None       None) },
-                    RightParen  = { (None       None),      (None       None            ),      (None       None) },
-                    LeftCurly   = { (block_expr None),      (None       None            ),      (None       None) },
-                    RightCurly  = { (None       None),      (None       None            ),      (None       None) },
-                    LeftSquare  = { (None       None),      (index_expr PrecIndex       ),      (None       None) },
-                    RightSquare = { (None       None),      (None       None            ),      (None       None) },
-                    Eq          = { (None       None),      (eq         PrecEquality    ),      (None       None) },
-                    Ne          = { (None       None),      (ne         PrecEquality    ),      (None       None) },
-                    Ge          = { (None       None),      (ge         PrecComparison  ),      (None       None) },
-                    Gt          = { (None       None),      (gt         PrecComparison  ),      (None       None) },
-                    Le          = { (None       None),      (le         PrecComparison  ),      (None       None) },
-                    Lt          = { (None       None),      (lt         PrecComparison  ),      (None       None) },
-                    Plus        = { (None       None),      (add        PrecTerm        ),      (None       None) },
-                    Minus       = { (None       None),      (sub        PrecTerm        ),      (None       None) },
-                    Star        = { (None       None),      (mul        PrecFactor      ),      (None       None) },
-                    Slash       = { (None       None),      (div        PrecFactor      ),      (None       None) },
-                    Colon       = { (None       None),      (None       None            ),      (None       None) },
-                    Define      = { (None       None),      (define     PrecAssign      ),      (None       None) },
-                    Assign      = { (None       None),      (assign     PrecAssign      ),      (None       None) },
-                    Dot         = { (dot_float  None),      (field_expr PrecCall        ),      (None       None) },
-                    Comma       = { (None       None),      (None       None            ),      (None       None) },
-                    Bang        = { (None       None),      (None       None            ),      (None       None) },
-                    Increment   = { (pre_inc    None),      (None       None            ),      (post_inc   None) },
-                    Decrement   = { (pre_dec    None),      (None       None            ),      (post_dec   None) },
-                    DoubleQuote = { (string     None),      (None       None            ),      (None       None) },
-                    StringChar  = { (None       None),      (None       None            ),      (None       None) },
-                    Ellipsis    = { (None       None),      (None       None            ),      (None       None) },
+            /*  TOKENKIND        PREFIX                 INFIX                               POSTFIX             */
+            /*                   method     prec        method      prec                    method      prec    */
+                LeftParen   = { (grouping   None),      (call       PrecCall        ),      (None       None) },
+                RightParen  = { (None       None),      (None       None            ),      (None       None) },
+                LeftCurly   = { (block_expr None),      (None       None            ),      (None       None) },
+                RightCurly  = { (None       None),      (None       None            ),      (None       None) },
+                LeftSquare  = { (None       None),      (index_expr PrecIndex       ),      (None       None) },
+                RightSquare = { (None       None),      (None       None            ),      (None       None) },
+                Eq          = { (None       None),      (eq         PrecEquality    ),      (None       None) },
+                Ne          = { (None       None),      (ne         PrecEquality    ),      (None       None) },
+                Ge          = { (None       None),      (ge         PrecComparison  ),      (None       None) },
+                Gt          = { (None       None),      (gt         PrecComparison  ),      (None       None) },
+                Le          = { (None       None),      (le         PrecComparison  ),      (None       None) },
+                Lt          = { (None       None),      (lt         PrecComparison  ),      (None       None) },
+                Plus        = { (None       None),      (add        PrecTerm        ),      (None       None) },
+                Minus       = { (None       None),      (sub        PrecTerm        ),      (None       None) },
+                Star        = { (None       None),      (mul        PrecFactor      ),      (None       None) },
+                Slash       = { (None       None),      (div        PrecFactor      ),      (None       None) },
+                Colon       = { (None       None),      (None       None            ),      (None       None) },
+                Define      = { (None       None),      (define     PrecAssign      ),      (None       None) },
+                Assign      = { (None       None),      (assign     PrecAssign      ),      (None       None) },
+                Dot         = { (dot_float  None),      (field_expr PrecCall        ),      (None       None) },
+                Comma       = { (None       None),      (None       None            ),      (None       None) },
+                Bang        = { (None       None),      (None       None            ),      (None       None) },
+                Increment   = { (pre_inc    None),      (None       None            ),      (post_inc   None) },
+                Decrement   = { (pre_dec    None),      (None       None            ),      (post_dec   None) },
+                DoubleQuote = { (string     None),      (None       None            ),      (None       None) },
+                StringChar  = { (None       None),      (None       None            ),      (None       None) },
+                Ellipsis    = { (None       None),      (None       None            ),      (None       None) },
+                
                     
-                        
-                    // Numbers
-                    Integer     = { (integer    None),      (None       None            ),      (None       None) },
-                    Float       = { (float      None),      (None       None            ),      (None       None) },
-            
-                    // Literal `null``
-                    Null        = { (null_lit   None),      (None       None            ),      (None       None) },
-            
-                    // Booleans
-                    True        = { (true_lit   None),      (None       None            ),      (None       None) },
-                    False       = { (false_lit  None),      (None       None            ),      (None       None) },
-                        
-                    // Identifier
-                    Ident       = { (ident      None),      (None       None            ),      (None       None) },
-            
-                    // Keywords
-                    Import      = { (None       None),      (None       None            ),      (None       None) },
-                    Export      = { (None       None),      (None       None            ),      (None       None) },
-                    From        = { (None       None),      (None       None            ),      (None       None) },
-                    Impl        = { (None       None),      (None       None            ),      (None       None) },
-                    SmallSelf   = { (ident      None),      (None       None            ),      (None       None) },
-                    BigSelf     = { (ident      None),      (None       None            ),      (None       None) },
-                    Fn          = { (None       None),      (None       None            ),      (None       None) },
-                    Declare     = { (None       None),      (None       None            ),      (None       None) },
-                    Typedef     = { (None       None),      (None       None            ),      (None       None) },
-                    Mut         = { (None       None),      (None       None            ),      (None       None) },
-                    Struct      = { (None       None),      (None       None            ),      (None       None) },
-                    Enum        = { (None       None),      (None       None            ),      (None       None) },
-                    While       = { (None       None),      (None       None            ),      (None       None) },
-                    If          = { (if_expr    None),      (None       None            ),      (None       None) },
-                    Loop        = { (loop_expr  None),      (None       None            ),      (None       None) },
-                    Break       = { (None       None),      (None       None            ),      (None       None) },
-                    Continue    = { (None       None),      (None       None            ),      (None       None) },
-                    Return      = { (None       None),      (None       None            ),      (None       None) },
-                    Else        = { (None       None),      (None       None            ),      (None       None) },
-                    Elif        = { (None       None),      (None       None            ),      (None       None) },
-                    Eof         = { (None       None),      (None       None            ),      (None       None) }
+                // Numbers
+                Integer     = { (integer    None),      (None       None            ),      (None       None) },
+                Float       = { (float      None),      (None       None            ),      (None       None) },
+        
+                // Literal `null``
+                Null        = { (null_lit   None),      (None       None            ),      (None       None) },
+        
+                // Booleans
+                True        = { (true_lit   None),      (None       None            ),      (None       None) },
+                False       = { (false_lit  None),      (None       None            ),      (None       None) },
                     
-                    );
-        }
-        rules
-    };
-}
+                // Identifier
+                Ident       = { (ident      None),      (None       None            ),      (None       None) },
+
+                // Keywords
+                Import      = { (None       None),      (None       None            ),      (None       None) },
+                Export      = { (None       None),      (None       None            ),      (None       None) },
+                From        = { (None       None),      (None       None            ),      (None       None) },
+                Impl        = { (None       None),      (None       None            ),      (None       None) },
+                SmallSelf   = { (ident      None),      (None       None            ),      (None       None) },
+                BigSelf     = { (ident      None),      (None       None            ),      (None       None) },
+                Fn          = { (None       None),      (None       None            ),      (None       None) },
+                Declare     = { (None       None),      (None       None            ),      (None       None) },
+                Typedef     = { (None       None),      (None       None            ),      (None       None) },
+                Mut         = { (None       None),      (None       None            ),      (None       None) },
+                Struct      = { (None       None),      (None       None            ),      (None       None) },
+                Enum        = { (None       None),      (None       None            ),      (None       None) },
+                While       = { (None       None),      (None       None            ),      (None       None) },
+                If          = { (if_expr    None),      (None       None            ),      (None       None) },
+                Loop        = { (loop_expr  None),      (None       None            ),      (None       None) },
+                Break       = { (None       None),      (None       None            ),      (None       None) },
+                Continue    = { (None       None),      (None       None            ),      (None       None) },
+                Return      = { (None       None),      (None       None            ),      (None       None) },
+                Else        = { (None       None),      (None       None            ),      (None       None) },
+                Elif        = { (None       None),      (None       None            ),      (None       None) },
+                Pkg         = { (pkg_ident  None),      (None       None            ),      (None       None) },
+
+                Eof         = { (None       None),      (None       None            ),      (None       None) }
+                
+                );
+    }
+
+    rules
+});
 
 use ast::{
     is_stmt_adt,
@@ -88,6 +89,7 @@ use ast::{
     AsigneeExpr,
     Ast,
     AstArena,
+    AstArenaObject,
     AstMetadata,
     AstQuerySystem,
     AstState0,
@@ -119,6 +121,7 @@ use ast::{
     Pat,
     Path,
     PathField,
+    PkgIdentNode,
     PlaceExpr,
     ReturnExpr,
     Stmt,
@@ -142,9 +145,19 @@ mod make_parse_rule;
 mod expr_builder;
 mod precedence;
 
-const PARSE_RULE_COUNT: usize = enum_iterator::cardinality::<TokenKind>();
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ParsingDeclareFn {
+    Yes,
+    No,
+}
 
-type ParseRuleMethod = for<'a, 'b> fn(&'b mut Parser<'a>, &'b mut ExprBuilder<'a>);
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StopToken {
+    None,
+    Token(TokenKind),
+}
+
+type ParseRuleMethod = for<'a, 'b, 'c> fn(&'c mut Parser<'a, 'b>, &'c mut ExprBuilder<'a, 'b>);
 
 /// Each token kind is asociated with a ParseRule (specified in function: Parser::create_parse_rule)
 ///
@@ -186,7 +199,7 @@ pub(crate) trait ParserHandle<'ast> {
     fn try_as_path(&mut self, expr: Expr<'ast>) -> Option<Path<'ast>>;
 }
 
-impl<'a> ParserHandle<'a> for Parser<'a> {
+impl<'a, 'b> ParserHandle<'a> for Parser<'a, 'b> {
     fn forget_node(&mut self, node_id: NodeId) {
         self.forgotten_nodes += 1;
     }
@@ -204,6 +217,9 @@ impl<'a> ParserHandle<'a> for Parser<'a> {
                         match place_expr {
                             PlaceExpr::IdentExpr(ident_expr) => {
                                 Some(Path::PathSegment(ident_expr))
+                            }
+                            PlaceExpr::PkgIdentExpr(pkg_ident_expr) => {
+                                Some(Path::PathPkg(pkg_ident_expr))
                             }
                             PlaceExpr::TupleFieldExpr(_) => None,
                             PlaceExpr::IndexExpr(_) => None,
@@ -257,6 +273,7 @@ impl<'a> ParserHandle<'a> for Parser<'a> {
                             PlaceExpr::TupleFieldExpr(_) => None,
                             PlaceExpr::FieldExpr(_) => None,
                             PlaceExpr::IndexExpr(_) => None,
+                            PlaceExpr::PkgIdentExpr(_) => None,
                             PlaceExpr::IdentExpr(ident_expr) =>
                                 Some(
                                     Pat::IdentPat(
@@ -358,6 +375,7 @@ impl<'a> ParserHandle<'a> for Parser<'a> {
                     ExprWithoutBlock::PlaceExpr(expr) => {
                         match expr {
                             PlaceExpr::IdentExpr(expr) => Some(expr),
+                            PlaceExpr::PkgIdentExpr(_) => None,
                             PlaceExpr::TupleFieldExpr(_) => None,
                             PlaceExpr::FieldExpr(_) => None,
                             PlaceExpr::IndexExpr(_) => None,
@@ -369,23 +387,26 @@ impl<'a> ParserHandle<'a> for Parser<'a> {
     }
 }
 
-pub struct Parser<'a> {
-    lexer: Lexer<'a>,
-    ast_arena: &'a AstArena,
-    src: &'a str,
+pub struct Parser<'a, 'b> where 'a: 'b {
+    lexer: Lexer<'b>,
+    ast_arena: &'b AstArenaObject<'a>,
+    src: &'b str,
     current: Token,
     prev: Token,
-    forgotten_nodes: usize,
-    parsed_fn_count: usize,
     next_ast_node_id: u32,
     mod_id: ModId,
+
+    // Used for allocating required memory later during AST validation
+    forgotten_nodes: usize,
+    parsed_fn_count: usize,
+    def_count: usize,
 
     /// Used for error reporting
     errors: Vec<Error>,
 }
 
-impl<'a> Parser<'a> {
-    pub fn new(src: &'a str, ast_arena: &'a AstArena, mod_id: ModId) -> Self {
+impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
+    pub fn new(src: &'b str, ast_arena: &'b AstArenaObject<'a>, mod_id: ModId) -> Self {
         let mut lexer = Lexer::new(src);
 
         Self {
@@ -397,25 +418,43 @@ impl<'a> Parser<'a> {
             prev: Token::dummy(),
             next_ast_node_id: 0,
             mod_id,
+            def_count: 0,
             forgotten_nodes: 0,
             errors: Vec::new(),
         }
     }
 
-    pub fn parse_ast(&mut self) -> Ast<'a, AstState0> {
-        let global_scope = GlobalScope::new(self.parse_block_as_stmts(None));
+    pub fn parse_ast<'c>(mut self) -> Ast<'a, AstState0> where 'c: 'b {
+        let global_scope = GlobalScope::new(self.parse_block_as_stmts(StopToken::None));
 
         let nodes_count = (self.next_ast_node_id as usize) - self.forgotten_nodes;
 
-        Ast::new(global_scope, AstMetadata::new(self.parsed_fn_count, nodes_count))
+        Ast::new(
+            global_scope,
+            AstMetadata::new(
+                self.parsed_fn_count,
+                nodes_count,
+                self.def_count + self.parsed_fn_count,
+                self.mod_id
+            )
+        )
     }
 
     pub(crate) fn statement(&mut self) -> Stmt<'a> {
         match self.current.get_kind() {
             TokenKind::Impl => self.impl_statement(),
-            TokenKind::Typedef => self.typedef_statement(),
-            TokenKind::Struct => self.struct_item(),
-            TokenKind::Enum => self.enum_item(),
+            TokenKind::Typedef => {
+                self.def_count += 1;
+                self.typedef_statement()
+            }
+            TokenKind::Struct => {
+                self.def_count += 1;
+                self.struct_item()
+            }
+            TokenKind::Enum => {
+                self.def_count += 1;
+                self.enum_item()
+            }
             TokenKind::Mut => self.mut_stmt(),
             TokenKind::Break => self.break_expr(),
             TokenKind::Continue => self.continue_expr(),
@@ -428,8 +467,13 @@ impl<'a> Parser<'a> {
     }
 
     pub(crate) fn parse_path(&mut self) -> Path<'a> {
-        let first_ident = self.consume_ident("Expected ident in path");
-        let mut path = Path::PathSegment(self.ast_arena.alloc_expr_or_stmt(first_ident));
+        let mut path = if self.is_curr_kind(TokenKind::Pkg) {
+            let pkg_ident = self.consume_pkg_ident("Expected package ident in path");
+            Path::PathPkg(self.ast_arena.alloc_expr_or_stmt(pkg_ident))
+        } else {
+            let first_ident = self.consume_ident("Expected ident in path");
+            Path::PathSegment(self.ast_arena.alloc_expr_or_stmt(first_ident))
+        };
 
         while !self.is_eof() {
             if self.is_curr_kind(TokenKind::Dot) {
@@ -500,7 +544,7 @@ impl<'a> Parser<'a> {
     pub(crate) fn impl_statement(&mut self) -> Stmt<'a> {
         self.advance();
 
-        let impl_ident = self.consume_ident("Expected ident after `impl`");
+        let impl_path = self.parse_path();
 
         self.consume(TokenKind::LeftCurly, "Expected `{` before impl block");
 
@@ -518,7 +562,7 @@ impl<'a> Parser<'a> {
         self.consume(TokenKind::RightCurly, "Expected `}` after impl block");
 
         let impl_item = ImplItem::new(
-            self.ast_arena.alloc_expr_or_stmt(impl_ident),
+            impl_path,
             self.ast_arena.alloc_vec(impl_fn_items),
             self.get_ast_node_id()
         );
@@ -531,7 +575,9 @@ impl<'a> Parser<'a> {
 
         let comp_decl_item = match self.current.get_kind() {
             TokenKind::Fn => {
-                let (item_type, fn_ident, args, ret_typing) = self.parse_fn_signature(true);
+                let (item_type, fn_ident, args, ret_typing) = self.parse_fn_signature(
+                    ParsingDeclareFn::Yes
+                );
 
                 if ItemType::Normal == item_type {
                     panic!("Error: Declare statement must be a C function declaration");
@@ -704,8 +750,8 @@ impl<'a> Parser<'a> {
     }
 
     pub(crate) fn parse_typing(&mut self) -> Option<Typing<'a>> {
-        fn parse_many_typings<'a>(
-            parser: &mut Parser<'a>,
+        fn parse_many_typings<'a, 'b>(
+            parser: &mut Parser<'a, 'b>,
             mut tuple_typing: Vec<Typing<'a>>
         ) -> &'a [Typing<'a>] {
             while !parser.is_eof() && !parser.is_curr_kind(TokenKind::RightParen) {
@@ -811,7 +857,7 @@ impl<'a> Parser<'a> {
 
     pub(crate) fn parse_fn_signature(
         &mut self,
-        from_declare: bool
+        parsing_declare_fn: ParsingDeclareFn
     ) -> (ItemType, &'a IdentNode, &'a [ArgKind<'a>], Option<Typing<'a>>) {
         self.advance();
         let item_type = if self.is_curr_kind(TokenKind::Dot) {
@@ -862,8 +908,8 @@ impl<'a> Parser<'a> {
                             .parse_typing()
                             .expect("Expected type in function args");
 
-                        match (from_declare, arg_typing) {
-                            (false, Typing::VariadicArgs) =>
+                        match (parsing_declare_fn, arg_typing) {
+                            (ParsingDeclareFn::No, Typing::VariadicArgs) =>
                                 panic!("Error: Variadic args not allowed in function declaration"),
                             _ => {}
                         }
@@ -877,7 +923,7 @@ impl<'a> Parser<'a> {
                 }
             };
 
-            if from_declare {
+            if ParsingDeclareFn::Yes == parsing_declare_fn {
                 match arg {
                     ArgKind::Arg(arg) => {}
                     _ => panic!("Error: Only normal arguments are allowed in function declaration"),
@@ -899,23 +945,23 @@ impl<'a> Parser<'a> {
 
         let return_ty = self.parse_typing();
 
+        self.parsed_fn_count += 1;
+
         (item_type, self.ast_arena.alloc_expr_or_stmt(ident_expr), args, return_ty)
     }
 
     pub(crate) fn function_statement(&mut self) -> &'a FnItem<'a> {
-        let (item_type, fn_ident, args, ret_typing) = self.parse_fn_signature(false);
+        let (item_type, fn_ident, args, ret_typing) = self.parse_fn_signature(ParsingDeclareFn::No);
 
         self.consume(TokenKind::LeftCurly, "Expected `{` before function body");
 
-        let body = self.parse_block_as_stmts(Some(TokenKind::RightCurly));
+        let body = self.parse_block_as_stmts(StopToken::Token(TokenKind::RightCurly));
 
         self.consume(TokenKind::RightCurly, "Expected `}` after function body");
 
         let fn_stmt = self.ast_arena.alloc_expr_or_stmt(
             FnItem::new(fn_ident, body, args, ret_typing, item_type, self.get_ast_node_id())
         );
-
-        self.parsed_fn_count += 1;
 
         fn_stmt
     }
@@ -941,52 +987,50 @@ impl<'a> Parser<'a> {
     pub(crate) fn mut_stmt(&mut self) -> Stmt<'a> {
         let mut_span = self.prev.get_span();
         self.advance();
-        let mut expr_builder = ExprBuilder::new(self.ast_arena, None);
+        let mut expr_builder = ExprBuilder::new_with_mut_span(self.ast_arena, None, mut_span);
         self.parse_precedence(expr_builder.get_base_prec(), &mut expr_builder);
         let stmt = expr_builder.take_stmt().expect("TODO: Error handling");
-        Self::test_and_set_mutable(&stmt, mut_span).expect("Misuse of mut");
+        Self::test_and_set_mutable(&stmt).expect("Misuse of mut");
         stmt
     }
 
-    fn test_and_set_mutable<'b>(stmt: &'b Stmt<'a>, mut_span: Span) -> Result<(), &'b str> {
+    fn test_and_set_mutable(stmt: &Stmt<'a>) -> Result<(), &'b str> {
         match stmt {
-            Stmt::DefineStmt(define_stmt) => {
-                define_stmt.mut_span.set(Some(mut_span));
-                Ok(())
-            }
+            Stmt::DefineStmt(_) => Ok(()),
             Stmt::AssignStmt(_) => Err("Unexpected token `mut` in assignment"),
             Stmt::ExprStmt(_) => Err("Unexpected token `mut` in expression statement"),
             Stmt::ItemStmt(_) => Err("Unexpected token `mut` before item statement"),
         }
     }
 
-    pub(crate) fn expression(&mut self, expr_builder: &mut ExprBuilder<'a>) {
+    pub(crate) fn expression(&mut self, expr_builder: &mut ExprBuilder<'a, 'b>) {
         self.parse_precedence(expr_builder.get_base_prec(), expr_builder);
     }
 
     /// Parse rule method: `define`
-    pub(crate) fn define(&mut self, expr_builder: &mut ExprBuilder<'a>) {
+    pub(crate) fn define(&mut self, expr_builder: &mut ExprBuilder<'a, 'b>) {
         expr_builder.set_base_prec(Precedence::PrecAssign.get_next());
         self.expression(expr_builder);
+        self.def_count += 1;
         expr_builder.emit_define_stmt(self)
     }
 
     /// Parse rule method: `assign`
-    pub(crate) fn assign(&mut self, expr_builder: &mut ExprBuilder<'a>) {
+    pub(crate) fn assign(&mut self, expr_builder: &mut ExprBuilder<'a, 'b>) {
         expr_builder.set_base_prec(Precedence::PrecAssign.get_next());
         self.expression(expr_builder);
         expr_builder.emit_assign_stmt(self)
     }
 
     /// Parse rule method: `block`
-    pub(crate) fn block_expr(&mut self, expr_builder: &mut ExprBuilder<'a>) {
+    pub(crate) fn block_expr(&mut self, expr_builder: &mut ExprBuilder<'a, 'b>) {
         let block_expr = self.parse_block();
         self.consume(TokenKind::RightCurly, "Expected `}` after block");
         expr_builder.emit_block_expr(block_expr);
     }
 
     /// Parse rule method: `grouping`, called by prefix `(`
-    pub(crate) fn grouping(&mut self, expr_builder: &mut ExprBuilder<'a>) {
+    pub(crate) fn grouping(&mut self, expr_builder: &mut ExprBuilder<'a, 'b>) {
         let mut exprs = Vec::new();
         while !self.is_eof() {
             let expr = self.parse_expr_and_take(expr_builder.get_base_prec());
@@ -1005,7 +1049,7 @@ impl<'a> Parser<'a> {
     }
 
     /// Parse rule method: `string`
-    pub(crate) fn string(&mut self, expr_builder: &mut ExprBuilder<'a>) {
+    pub(crate) fn string(&mut self, expr_builder: &mut ExprBuilder<'a, 'b>) {
         let mut string_builder = String::with_capacity(16);
         let mut str_len = 1;
 
@@ -1055,7 +1099,7 @@ impl<'a> Parser<'a> {
     }
 
     /// Parse rule method: `call`
-    pub(crate) fn call(&mut self, expr_builder: &mut ExprBuilder<'a>) {
+    pub(crate) fn call(&mut self, expr_builder: &mut ExprBuilder<'a, 'b>) {
         let mut args = Vec::with_capacity(8);
         while !self.is_eof() && !self.is_curr_kind(TokenKind::RightParen) {
             let arg = self.parse_expr_and_take(Precedence::PrecAssign.get_next());
@@ -1074,8 +1118,14 @@ impl<'a> Parser<'a> {
         expr_builder.emit_call_expr(self, args);
     }
 
+    pub(crate) fn pkg_ident(&mut self, expr_builder: &mut ExprBuilder<'a, 'b>) {
+        let ident = PkgIdentNode::new(self.prev.get_span(), self.get_ast_node_id());
+
+        expr_builder.emit_pkg_ident_expr(ident);
+    }
+
     /// Parse rule method: `ident`
-    pub(crate) fn ident(&mut self, expr_builder: &mut ExprBuilder<'a>) {
+    pub(crate) fn ident(&mut self, expr_builder: &mut ExprBuilder<'a, 'b>) {
         let ident_expr = IdentNode::new(self.prev.get_span(), self.get_ast_node_id());
         Symbol::new_with_node_id(
             &self.src[ident_expr.span.get_byte_range()],
@@ -1085,25 +1135,25 @@ impl<'a> Parser<'a> {
     }
 
     /// Parse rule method: `null_lit`
-    pub(crate) fn null_lit(&mut self, expr_builder: &mut ExprBuilder<'a>) {
+    pub(crate) fn null_lit(&mut self, expr_builder: &mut ExprBuilder<'a, 'b>) {
         let null_expr = NullExpr::new(Span::dummy(), self.get_ast_node_id());
         expr_builder.emit_null_expr(null_expr);
     }
 
     /// Parse rule method: `true_lit`
-    pub(crate) fn true_lit(&mut self, expr_builder: &mut ExprBuilder<'a>) {
+    pub(crate) fn true_lit(&mut self, expr_builder: &mut ExprBuilder<'a, 'b>) {
         let bool_expr = BoolExpr::new(true, self.get_ast_node_id());
         expr_builder.emit_bool_expr(bool_expr)
     }
 
     /// Parse rule method: `false_lit`
-    pub(crate) fn false_lit(&mut self, expr_builder: &mut ExprBuilder<'a>) {
+    pub(crate) fn false_lit(&mut self, expr_builder: &mut ExprBuilder<'a, 'b>) {
         let bool_expr = BoolExpr::new(false, self.get_ast_node_id());
         expr_builder.emit_bool_expr(bool_expr)
     }
 
     /// Parse rule method: `integer`
-    pub(crate) fn integer(&mut self, expr_builder: &mut ExprBuilder<'a>) {
+    pub(crate) fn integer(&mut self, expr_builder: &mut ExprBuilder<'a, 'b>) {
         let integer_expr = self.parse_integer_expr();
         expr_builder.emit_integer_expr(integer_expr);
     }
@@ -1115,12 +1165,12 @@ impl<'a> Parser<'a> {
     }
 
     /// Parse rule method: `dot_float`
-    pub(crate) fn dot_float(&mut self, _expr_builder: &mut ExprBuilder<'a>) {
+    pub(crate) fn dot_float(&mut self, _expr_builder: &mut ExprBuilder<'a, 'b>) {
         todo!()
     }
 
     /// Parse rule method: `struct_expr`
-    pub(crate) fn struct_expr(&mut self, expr_builder: &mut ExprBuilder<'a>) {
+    pub(crate) fn struct_expr(&mut self, expr_builder: &mut ExprBuilder<'a, 'b>) {
         let mut initialization_fields = Vec::with_capacity(8);
         while !self.is_eof() && !self.is_curr_kind(TokenKind::RightCurly) {
             let field_ident = self.consume_ident("Expected ident");
@@ -1145,14 +1195,14 @@ impl<'a> Parser<'a> {
     }
 
     /// Parse rule method: `index_expr`
-    pub(crate) fn index_expr(&mut self, expr_builder: &mut ExprBuilder<'a>) {
+    pub(crate) fn index_expr(&mut self, expr_builder: &mut ExprBuilder<'a, 'b>) {
         let index_expr = self.parse_expr_and_take(Precedence::PrecAssign.get_next());
         self.consume(TokenKind::RightSquare, "Expected `]` after index expression");
         expr_builder.emit_index_expr(index_expr, self)
     }
 
     /// Parse rule method: `dot_expr`
-    pub(crate) fn field_expr(&mut self, expr_builder: &mut ExprBuilder<'a>) {
+    pub(crate) fn field_expr(&mut self, expr_builder: &mut ExprBuilder<'a, 'b>) {
         match self.current.get_kind() {
             TokenKind::Integer => {
                 self.advance();
@@ -1173,93 +1223,93 @@ impl<'a> Parser<'a> {
     }
 
     /// Parse rule method: `float`
-    pub(crate) fn float(&mut self, _expr_builder: &mut ExprBuilder<'a>) {
+    pub(crate) fn float(&mut self, _expr_builder: &mut ExprBuilder<'a, 'b>) {
         todo!("Floats not implemented yet: {:?}", self.get_lexeme_of_prev().parse::<f64>())
     }
 
     /// Parse rule method: `eq`
-    pub(crate) fn eq(&mut self, expr_builder: &mut ExprBuilder<'a>) {
+    pub(crate) fn eq(&mut self, expr_builder: &mut ExprBuilder<'a, 'b>) {
         self.binary(expr_builder, BinaryOp::ComparisonOp(ComparisonOp::Eq));
     }
 
     /// Parse rule method: `ne`
-    pub(crate) fn ne(&mut self, expr_builder: &mut ExprBuilder<'a>) {
+    pub(crate) fn ne(&mut self, expr_builder: &mut ExprBuilder<'a, 'b>) {
         self.binary(expr_builder, BinaryOp::ComparisonOp(ComparisonOp::Ne));
     }
 
     /// Parse rule method: `ge`
-    pub(crate) fn ge(&mut self, expr_builder: &mut ExprBuilder<'a>) {
+    pub(crate) fn ge(&mut self, expr_builder: &mut ExprBuilder<'a, 'b>) {
         self.binary(expr_builder, BinaryOp::ComparisonOp(ComparisonOp::Ge));
     }
 
     /// Parse rule method: `gt`
-    pub(crate) fn gt(&mut self, expr_builder: &mut ExprBuilder<'a>) {
+    pub(crate) fn gt(&mut self, expr_builder: &mut ExprBuilder<'a, 'b>) {
         self.binary(expr_builder, BinaryOp::ComparisonOp(ComparisonOp::Gt));
     }
 
     /// Parse rule method: `le`
-    pub(crate) fn le(&mut self, expr_builder: &mut ExprBuilder<'a>) {
+    pub(crate) fn le(&mut self, expr_builder: &mut ExprBuilder<'a, 'b>) {
         self.binary(expr_builder, BinaryOp::ComparisonOp(ComparisonOp::Le));
     }
 
     /// Parse rule method: `lt`
-    pub(crate) fn lt(&mut self, expr_builder: &mut ExprBuilder<'a>) {
+    pub(crate) fn lt(&mut self, expr_builder: &mut ExprBuilder<'a, 'b>) {
         self.binary(expr_builder, BinaryOp::ComparisonOp(ComparisonOp::Lt));
     }
 
     /// Parse rule method: `add`
-    pub(crate) fn add(&mut self, expr_builder: &mut ExprBuilder<'a>) {
+    pub(crate) fn add(&mut self, expr_builder: &mut ExprBuilder<'a, 'b>) {
         self.binary(expr_builder, BinaryOp::ArithmeticOp(ArithmeticOp::Add))
     }
 
     /// Parse rule method: `sub`
-    pub(crate) fn sub(&mut self, expr_builder: &mut ExprBuilder<'a>) {
+    pub(crate) fn sub(&mut self, expr_builder: &mut ExprBuilder<'a, 'b>) {
         self.binary(expr_builder, BinaryOp::ArithmeticOp(ArithmeticOp::Sub))
     }
 
     /// Parse rule method: `mul`
-    pub(crate) fn mul(&mut self, expr_builder: &mut ExprBuilder<'a>) {
+    pub(crate) fn mul(&mut self, expr_builder: &mut ExprBuilder<'a, 'b>) {
         self.binary(expr_builder, BinaryOp::ArithmeticOp(ArithmeticOp::Mul))
     }
 
     /// Parse rule method: `div`
-    pub(crate) fn div(&mut self, expr_builder: &mut ExprBuilder<'a>) {
+    pub(crate) fn div(&mut self, expr_builder: &mut ExprBuilder<'a, 'b>) {
         self.binary(expr_builder, BinaryOp::ArithmeticOp(ArithmeticOp::Div))
     }
 
     /// Logic of binary parse rule methods
-    pub(crate) fn binary(&mut self, expr_builder: &mut ExprBuilder<'a>, binary_op: BinaryOp) {
+    pub(crate) fn binary(&mut self, expr_builder: &mut ExprBuilder<'a, 'b>, binary_op: BinaryOp) {
         self.parse_precedence(self.get_parse_rule_of_prev().infix_prec.get_next(), expr_builder);
 
         expr_builder.emit_binary_expr(binary_op, self)
     }
 
-    pub(crate) fn post_inc(&mut self, expr_builder: &mut ExprBuilder<'a>) {
+    pub(crate) fn post_inc(&mut self, expr_builder: &mut ExprBuilder<'a, 'b>) {
         todo!("Post inc not implemented yet");
         self.advance();
         expr_builder.emit_post_inc_expr(self)
     }
 
-    pub(crate) fn post_dec(&mut self, expr_builder: &mut ExprBuilder<'a>) {
+    pub(crate) fn post_dec(&mut self, expr_builder: &mut ExprBuilder<'a, 'b>) {
         todo!()
         // self.advance();
         // expr_builder.emit_post_dec_expr(self)
     }
 
-    pub(crate) fn pre_inc(&mut self, expr_builder: &mut ExprBuilder<'a>) {
+    pub(crate) fn pre_inc(&mut self, expr_builder: &mut ExprBuilder<'a, 'b>) {
         todo!()
         // self.advance();
         // expr_builder.emit_pre_inc_expr(self)
     }
 
-    pub(crate) fn pre_dec(&mut self, expr_builder: &mut ExprBuilder<'a>) {
+    pub(crate) fn pre_dec(&mut self, expr_builder: &mut ExprBuilder<'a, 'b>) {
         todo!()
         // self.advance();
         // expr_builder.emit_pre_dec_expr(self)
     }
 
     /// Parse rule method: `loop_expr`
-    pub(crate) fn loop_expr(&mut self, expr_builder: &mut ExprBuilder<'a>) {
+    pub(crate) fn loop_expr(&mut self, expr_builder: &mut ExprBuilder<'a, 'b>) {
         self.consume(TokenKind::LeftCurly, "Expected `{` before loop");
         let block = self.parse_block();
         self.consume(TokenKind::RightCurly, "Expected `}` after loop");
@@ -1272,7 +1322,7 @@ impl<'a> Parser<'a> {
     }
 
     /// Parse rule method: `if_expr`
-    pub(crate) fn if_expr(&mut self, expr_builder: &mut ExprBuilder<'a>) {
+    pub(crate) fn if_expr(&mut self, expr_builder: &mut ExprBuilder<'a, 'b>) {
         let if_expr = self.parse_if_expr();
 
         expr_builder.emit_if_expr(if_expr);
@@ -1311,6 +1361,8 @@ impl<'a> Parser<'a> {
                 Some(TokenKind::LeftCurly)
             );
 
+            self.def_count += 1;
+
             CondKind::CondPat(pat, rhs)
         } else {
             CondKind::CondExpr(cond)
@@ -1318,7 +1370,7 @@ impl<'a> Parser<'a> {
 
         self.consume(TokenKind::LeftCurly, "Expected `{` after if condition");
 
-        let true_block = self.parse_block_as_stmts(Some(TokenKind::RightCurly));
+        let true_block = self.parse_block_as_stmts(StopToken::Token(TokenKind::RightCurly));
 
         self.consume(TokenKind::RightCurly, "Expected `}` after if block");
 
@@ -1342,10 +1394,10 @@ impl<'a> Parser<'a> {
         if_expr
     }
 
-    fn parse_block_as_stmts(&mut self, stop_token: Option<TokenKind>) -> &'a [Stmt<'a>] {
+    fn parse_block_as_stmts(&mut self, stop_token: StopToken) -> &'a [Stmt<'a>] {
         let mut stmts = VecDeque::with_capacity(32);
         while !self.is_eof() {
-            if let Some(stop_token) = stop_token {
+            if let StopToken::Token(stop_token) = stop_token {
                 if self.is_curr_kind(stop_token) {
                     break;
                 }
@@ -1363,7 +1415,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_block(&mut self) -> &'a BlockExpr<'a> {
-        let stmts = self.parse_block_as_stmts(Some(TokenKind::RightCurly));
+        let stmts = self.parse_block_as_stmts(StopToken::Token(TokenKind::RightCurly));
 
         let block_expr = self.ast_arena.alloc_expr_or_stmt(
             BlockExpr::new(stmts, self.get_ast_node_id())
@@ -1384,7 +1436,7 @@ impl<'a> Parser<'a> {
     pub(crate) fn parse_precedence(
         &mut self,
         mut prec: Precedence,
-        expr_builder: &mut ExprBuilder<'a>
+        expr_builder: &mut ExprBuilder<'a, 'b>
     ) {
         self.advance();
 
@@ -1531,6 +1583,17 @@ impl<'a> Parser<'a> {
         }
     }
 
+    pub(crate) fn consume_pkg_ident(&mut self, err_msg: &str) -> PkgIdentNode {
+        match self.current.get_kind() {
+            TokenKind::Pkg => {
+                let ident_node = PkgIdentNode::new(self.current.get_span(), self.get_ast_node_id());
+                self.advance();
+                ident_node
+            }
+            _ => panic!("{}", err_msg),
+        }
+    }
+
     pub(crate) fn consume_ident_span(&mut self, err_msg: &str) -> Span {
         match self.current.get_kind() {
             TokenKind::Ident => {
@@ -1549,11 +1612,11 @@ impl<'a> Parser<'a> {
         ident_node
     }
 
-    pub(crate) fn get_parse_rule_of_current(&self) -> ParseRule {
-        PARSE_RULES.with(|x| x[self.current.get_kind() as usize])
+    pub(crate) fn get_parse_rule_of_current(&self) -> &ParseRule {
+        &PARSE_RULES[self.current.get_kind() as usize]
     }
 
-    pub(crate) fn get_parse_rule_of_prev(&self) -> ParseRule {
-        PARSE_RULES.with(|x| x[self.prev.get_kind() as usize])
+    pub(crate) fn get_parse_rule_of_prev(&self) -> &ParseRule {
+        &PARSE_RULES[self.prev.get_kind() as usize]
     }
 }

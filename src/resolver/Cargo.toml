@@ -14,3 +14,4 @@ parser = { path = "../parser" }
 # Extern crates
 bumpalo = "3.1.16"
 fxhash = "0.2.1"
+threadpool = "1.8.1"

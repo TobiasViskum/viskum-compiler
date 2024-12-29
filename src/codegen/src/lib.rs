@@ -286,8 +286,9 @@ fn get_llvm_ty<'a>(ty: Ty, resolved_information: &ResolvedInformation<'a>) -> St
         }
         Ty::FnSig(_) => "ptr".to_string(),
         Ty::FnDef(_) => "ptr".to_string(),
-        Ty::AtdConstructer(_) => todo!(),
-
+        Ty::AtdConstructer(_) =>
+            panic!("AdtConstructer type (should not be this far in compilation)"),
+        Ty::Package => panic!("Package type (should not be this far in compilation)"),
         t @ (Ty::Unkown | Ty::Never | Ty::ZeroSized) =>
             panic!("{} type (should not be this far in compilation)", t),
     }
@@ -601,7 +602,7 @@ impl<'icfg> CodeGen<'icfg> {
             _ => println!("No match"),
         }
 
-        for (symbol, fn_sig) in self.icfg.clib_fns.iter().map(|def_id| {
+        for (symbol, fn_sig) in self.icfg.resolved_information.clib_fns.iter().map(|def_id| {
             let name_binding = self.icfg.resolved_information.get_name_binding_from_def_id(def_id);
             match name_binding.kind {
                 NameBindingKind::Fn(fn_sig, _, Externism::Clib) => (def_id.symbol, fn_sig),
@@ -675,7 +676,7 @@ impl<'icfg> CodeGen<'icfg> {
         println!("Code generation took: {:?}", now.elapsed());
 
         let result = Command::new("clang")
-            .arg("-O3")
+            .arg("-O0")
             .arg(&file_name_with_extension)
             .arg("-o")
             .arg("./viskum/dist/main")

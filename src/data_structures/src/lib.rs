@@ -1,3 +1,6 @@
+mod chunked_vec;
+mod chunked_hashmap;
+
 use std::{ fmt::Debug, ops::{ Deref, DerefMut } };
 
 use fxhash::FxBuildHasher;

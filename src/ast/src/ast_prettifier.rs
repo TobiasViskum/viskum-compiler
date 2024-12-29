@@ -263,7 +263,7 @@ impl<'ast, T> Visitor<'ast> for AstPrettifier<'ast, T> where T: AstState {
 
     fn visit_def_stmt(&mut self, def_stmt: &'ast crate::DefineStmt<'ast>) -> Self::Result {
         write!(self.buffer, "{}", self.get_indentation())?;
-        if def_stmt.mut_span.get().is_some() {
+        if def_stmt.mut_span.is_some() {
             write!(self.buffer, "mut ")?;
         }
         self.visit_pat(def_stmt.setter_expr)?;

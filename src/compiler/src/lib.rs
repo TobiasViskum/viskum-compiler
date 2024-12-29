@@ -1,23 +1,42 @@
-use std::{ cell::RefCell, path::{ self, PathBuf } };
+use std::{ cell::RefCell, path::{ self, PathBuf }, sync::Mutex };
 
-use ast::{ AstArena, AstPrettifier };
+use ast::{
+    Ast,
+    AstArena,
+    AstArenaObject,
+    AstPartlyResolved,
+    AstPrettifier,
+    AstUnvalidated,
+    ResolverHandle,
+    VisitAst,
+};
 use bumpalo::Bump;
 use codegen::CodeGen;
 use icfg::Icfg;
 use icfg_builder::IcfgBuilder;
-use ir::{ GlobalMem, ModId, ResolvedInformation };
+use ir::{ DefId, GlobalMem, ModId, NodeId, ResolvedInformation, Symbol };
 use parser::Parser;
 use resolver::Resolver;
+use threadpool::ThreadPool;
+use threadpool_scope::scope_with;
 
 pub struct Compiler {
     entry_dir: PathBuf,
     entry_file: PathBuf,
+    threadpool: ThreadPool,
 }
 
 impl Compiler {
     pub fn new() -> Self {
         let mut args = std::env::args();
         args.next();
+
+        let workers_amount = std::thread
+            ::available_parallelism()
+            .map(|x| x.get())
+            .unwrap_or(1);
+
+        let threadpool = ThreadPool::new(workers_amount);
 
         let mut input_file = if let Some(input_file) = args.next() {
             path::Path::new(&input_file).to_path_buf()
@@ -37,19 +56,19 @@ impl Compiler {
         }
 
         // Get last part of the path
-        let entry_file = PathBuf::from(input_file.file_name().unwrap().to_str().unwrap());
+        let entry_file = input_file.clone();
         input_file.pop();
         let entry_dir = input_file;
 
-        Self { entry_file, entry_dir }
+        Self { entry_file, entry_dir, threadpool }
     }
 
     pub fn compile_entry(&self) {
         let now = std::time::Instant::now();
 
         let arena = Bump::new();
-        let global_mems = RefCell::new(Vec::new());
-        let icfg = self.compile_icfg(&arena, &global_mems);
+        // let global_mems = RefCell::new(Vec::new());
+        let icfg = self.compile_icfg(&arena /*, &global_mems*/);
 
         // IcfgPrettifier::new(&icfg).print_icfg();
 
@@ -60,35 +79,235 @@ impl Compiler {
         println!("LLVM compilation took: {:?}", now.elapsed());
     }
 
-    fn compile_icfg<'a>(
+    pub fn parse_all_files_in_package<'ast>(
         &self,
-        arena: &'a Bump,
-        global_mems: &'a RefCell<Vec<GlobalMem>>
-    ) -> Icfg<'a> {
-        let file_content = match
-            std::fs::read_to_string(&self.entry_dir.join(&self.entry_file).with_extension("vs"))
-        {
+        ast_arena: &'ast AstArena
+    ) -> (Vec<(Ast<'ast, AstUnvalidated>, String, ModId)>, ModId) {
+        let files = match std::fs::read_dir(&self.entry_dir) {
+            Ok(files) => {
+                files
+                    .filter_map(|file| {
+                        let file = file.unwrap();
+                        let path = file.path();
+                        if let Some(ext) = path.extension() {
+                            if ext == "vs" { Some(path) } else { None }
+                        } else {
+                            None
+                        }
+                    })
+                    .collect::<Vec<_>>()
+            }
+            Err(e) => {
+                eprintln!("Error reading directory: {}", e);
+                std::process::exit(1);
+            }
+        };
+
+        let entry_file_id = files
+            .iter()
+            .enumerate()
+            .find_map(|(i, file)| {
+                if file == &self.entry_file {
+                    return Some(ModId(i as u32));
+                } else {
+                    None
+                }
+            })
+            .expect("Cannot find entry file in directory");
+
+        let asts = Mutex::new(Vec::with_capacity(files.len()));
+
+        scope_with(&self.threadpool, |s| {
+            let mut next_mod_id: u32 = 0;
+
+            for file in files {
+                let mod_id = ModId(next_mod_id);
+                let asts_ref = &asts;
+
+                s.execute(move || {
+                    let bump = ast_arena.get();
+                    let (ast, file_content) = self.parse_file(file, bump, mod_id);
+
+                    asts_ref.lock().unwrap().push((ast, file_content, mod_id));
+                });
+
+                next_mod_id += 1;
+            }
+        });
+
+        (asts.into_inner().unwrap(), entry_file_id)
+    }
+
+    fn parse_file<'ast>(
+        &self,
+        path: PathBuf,
+        ast_arena: AstArenaObject<'ast>,
+        mod_id: ModId
+    ) -> (Ast<'ast, AstUnvalidated>, String) {
+        let file_content = match std::fs::read_to_string(&path) {
             Ok(file_content) => file_content,
             Err(e) => {
                 eprintln!("Error reading file: {}", e);
                 std::process::exit(1);
             }
         };
+
+        let parser = Parser::new(&file_content, &ast_arena, mod_id);
+
+        (parser.parse_ast(), file_content)
+    }
+
+    fn compile_icfg<'a>(&self, arena: &'a Bump) -> Icfg<'a> {
         let ast_arena = AstArena::new();
 
-        let (resolved, ast) = {
-            let mut resolver = Resolver::new(arena, global_mems);
+        let (resolved_functions, resolved_information) = {
+            let (asts, entry_mod_id) = self.parse_all_files_in_package(&ast_arena);
 
-            resolver.resolve_all_modules(&self.entry_dir, &self.entry_file);
+            let total_nodes = asts
+                .iter()
+                .map(|(ast, _, _)| ast.metadata.node_count)
+                .sum::<usize>();
 
-            let mut parser = Parser::new(&file_content, &ast_arena, ModId(0));
+            let total_def_count = asts
+                .iter()
+                .map(|(ast, _, _)| ast.metadata.def_count)
+                .sum::<usize>();
 
-            let ast = parser.parse_ast();
-            let (forward_declared_ast, lexical_relations) = resolver.forward_declare_ast(ast);
-            let resolved_ast = resolver.resolve_ast(forward_declared_ast, &lexical_relations);
-            let type_checked_ast = resolver.type_check_ast(resolved_ast, &lexical_relations);
+            let mut resolver = Resolver::new(
+                arena,
+                total_nodes,
+                total_def_count /*, global_mems */
+            );
 
-            (resolver.take_resolved_information(), type_checked_ast)
+            let asts_count = asts.len();
+
+            let ast_pre_resolve_visit_results = {
+                let ast_visit_results = Mutex::new(Vec::with_capacity(asts_count));
+                let ast_visit_results_ref = &ast_visit_results;
+
+                let global_visit_results = Mutex::new(Vec::with_capacity(asts_count));
+                let global_visit_results_ref = &global_visit_results;
+
+                scope_with(&self.threadpool, |s| {
+                    let resolver_handle = &resolver;
+                    for (ast, _, _) in asts {
+                        s.execute(move || {
+                            let (ast, global_visit_result, local_visit_result) = ast
+                                .into_visitor(resolver_handle)
+                                .visit();
+
+                            global_visit_results_ref.lock().unwrap().push(global_visit_result);
+                            ast_visit_results_ref.lock().unwrap().push((ast, local_visit_result));
+                        });
+                    }
+                });
+
+                for global_visit_result in global_visit_results.into_inner().unwrap() {
+                    resolver.use_visit_result_from_pre_resolve(global_visit_result);
+                }
+
+                ast_visit_results.into_inner().unwrap()
+            };
+
+            let ast_resolve_visit_results = {
+                let ast_visit_results = Mutex::new(Vec::with_capacity(asts_count));
+                let ast_visit_results_ref = &ast_visit_results;
+
+                let global_visit_results = Mutex::new(Vec::with_capacity(asts_count));
+                let global_visit_results_ref = &global_visit_results;
+
+                scope_with(&self.threadpool, |s| {
+                    let resolver_handle = &resolver;
+                    for (ast, local_visit_result) in ast_pre_resolve_visit_results {
+                        s.execute(move || {
+                            let (ast, global_visit_result, local_visit_result) = ast
+                                .into_visitor(resolver_handle, local_visit_result)
+                                .visit();
+
+                            global_visit_results_ref.lock().unwrap().push(global_visit_result);
+                            ast_visit_results_ref.lock().unwrap().push((ast, local_visit_result));
+                        });
+                    }
+                });
+
+                for global_visit_result in global_visit_results.into_inner().unwrap() {
+                    resolver.use_visit_result_from_resolve(global_visit_result);
+                }
+
+                ast_visit_results.into_inner().unwrap()
+            };
+
+            let _ = {
+                let ast_visit_results = Mutex::new(Vec::with_capacity(asts_count));
+                let ast_visit_results_ref = &ast_visit_results;
+
+                let global_visit_results = Mutex::new(Vec::with_capacity(asts_count));
+                let global_visit_results_ref = &global_visit_results;
+
+                scope_with(&self.threadpool, |s| {
+                    let resolver_handle = &resolver;
+                    for (ast, local_visit_result) in ast_resolve_visit_results {
+                        s.execute(move || {
+                            let (ast, global_visit_result, local_visit_result) = ast
+                                .into_visitor(resolver_handle, local_visit_result)
+                                .visit();
+
+                            global_visit_results_ref.lock().unwrap().push(global_visit_result);
+                            ast_visit_results_ref.lock().unwrap().push((ast, local_visit_result));
+                        });
+                    }
+                });
+
+                for global_visit_result in global_visit_results.into_inner().unwrap() {
+                    resolver.use_visit_result_from_type_check(global_visit_result);
+                }
+
+                ast_visit_results.into_inner().unwrap()
+            };
+
+            // std::thread::scope(|s| {
+            //     for (ast, file_content, mod_id) in asts {
+            //         // AstPrettifier::new(&ast, &file_content, None).print_ast();
+
+            //         let (ast, global_visit_result, local_visit_result) = ast
+            //             .into_visitor(&resolver)
+            //             .visit();
+
+            //         resolver.use_visit_result_from_pre_resolve(global_visit_result);
+
+            //         // resolver.node_id_to_def_id.extend(global_visit_result.node_id_to_def_id);
+
+            //         let (ast, global_visit_result, local_visit_result) = ast
+            //             .into_visitor(&resolver, local_visit_result)
+            //             .visit();
+
+            //         resolver.use_visit_result_from_resolve(global_visit_result);
+
+            //         let (ast, global_visit_result, local_visit_result) = ast
+            //             .into_visitor(&resolver, local_visit_result)
+            //             .visit();
+
+            //         resolver.use_visit_result_from_type_check(global_visit_result);
+
+            //         // let ast = ast.into_visitor(&mut resolver, &visit_result, true).visit();
+
+            //         // s.spawn(
+            //         //     || {
+            //         //         // let (forward_declared_ast, lexical_relations) =
+            //         //         //     resolver.forward_declare_ast(ast);
+            //         //     }
+            //         // );
+            //     }
+            // });
+
+            // let mut parser = Parser::new(&file_content, &ast_arena, ModId(0));
+
+            // let ast = parser.parse_ast();
+            // let (forward_declared_ast, lexical_relations) = resolver.forward_declare_ast(ast);
+            // let resolved_ast = resolver.resolve_ast(forward_declared_ast, &lexical_relations);
+            // resolver.type_check_ast(resolved_ast);
+
+            resolver.take_resolved_information()
         };
 
         // AstPrettifier::new(
@@ -97,8 +316,8 @@ impl Compiler {
         //     Some(&resolved_information.node_id_to_ty)
         // ).print_ast();
 
-        let icfg_builder = IcfgBuilder::new(ast, resolved.1, global_mems, &file_content, arena);
-        let icfg = icfg_builder.build(resolved.0);
+        let icfg_builder = IcfgBuilder::new(resolved_information, arena);
+        let icfg = icfg_builder.build(resolved_functions);
         icfg
     }
 

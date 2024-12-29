@@ -10,7 +10,6 @@ declare fn.C time(time *int64) int
 declare fn.C sleep(time int) int
 declare fn.C clock_gettime(realtime int, timespec *mut TimeSpec) int
 
-
 struct TimeSpec {
     tv_sec int64,
     tv_nsec int64
@@ -18,7 +17,6 @@ struct TimeSpec {
 
 impl TimeSpec {
     fn new() Self {
-
         ret Self {
             tv_sec: 0,
             tv_nsec: 0
@@ -45,8 +43,8 @@ struct Something {
 }
 
 struct.C Vec {
-    len uint,
-    cap uint,
+    len int,
+    cap int,
     items [*]int,
 }
 
@@ -60,9 +58,12 @@ impl Vec {
     }
 
     fn.C push(*mut self, item int) {
+        printf("Len: %d, Cap: %d\n", self.len, self.cap)
+
         if self.len == self.cap {
             self.cap = if self.cap == 0 { 2 } else { self.cap * 2 }
             size := self.cap * 4
+            
             self.items = if self.len == 0 { malloc(size) } else { realloc(self.items, size) }
         }
         self.items[self.len] = item
@@ -156,8 +157,7 @@ struct.C StrVec {
 
 }
 
-fn runTests() {
-    
+fn runTests() {    
     maybe := Option.Some(2)
 
     if Option.Some(x) := maybe {
@@ -172,7 +172,15 @@ fn runTests() {
 
 fn.C main(argc int, args *str) {
 
+    point := pkg.Point.new(2, 3, 4)
+
+    sumOfPoint := point.sum()
+
+    point.dbg()
+
+    printf("Sum of point: %d\n", sumOfPoint)
     
+    printf("doSomething result: %d\n", pkg.doSomething())
    
     runTests()
 
@@ -181,6 +189,11 @@ fn.C main(argc int, args *str) {
     now.elapsed()
 }
 
+impl pkg.Point {
+    fn dbg(self) {
+        printf("Point { x: %d, y: %d, z: %d }\n", self.x, self.y, self.z)
+    }
+}
 
 
 struct TestUtils

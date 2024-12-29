@@ -57,7 +57,7 @@ impl GlobalSession {
 
     pub(crate) fn intern_vec_of_types<T>(&self, types: Vec<T>) -> &'static [T] {
         let interned_ty = unsafe {
-            &*(self.arena.alloc_slice_fill_iter(types.into_iter()) as *mut [T])
+            &*(self.arena.alloc_slice_fill_iter(types.into_iter()) as *const [T])
         };
 
         interned_ty

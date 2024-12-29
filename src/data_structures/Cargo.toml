@@ -6,3 +6,5 @@ edition = "2021"
 [dependencies]
 fxhash = "0.2.1"
 indexmap = "2.5.0"
+threadpool = "1.8.1"
+threadpool_scope = "0.1.0"

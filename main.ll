@@ -8,51 +8,34 @@ declare i32 @time(ptr noundef)
 declare i32 @sleep(i32 noundef)
 declare i32 @clock_gettime(i32 noundef, ptr noundef)
 
-@.str.1.430 = private unnamed_addr constant [17 x i8] c"Elapsed: %ld %s\0A\00"
-@.str.1.408 = private unnamed_addr constant [4 x i8] c"µs\00"
-@.str.1.598 = private unnamed_addr constant [21 x i8] c"\1B[32mTest %d passed\0A\00"
-@.str.1.579 = private unnamed_addr constant [34 x i8] c"\1B[31mAssert: %d != %d, Err: '%s'\0A\00"
-@.str.1.564 = private unnamed_addr constant [5 x i8] c"\1B[0m\00"
-@.str.1.307 = private unnamed_addr constant [2 x i8] c"\0A\00"
-@.str.1.274 = private unnamed_addr constant [10 x i8] c"Cap = %d\0A\00"
-@.str.1.508 = private unnamed_addr constant [18 x i8] c"Sum of point: %d\0A\00"
-@.str.1.540 = private unnamed_addr constant [31 x i8] c"Point { x: %d, y: %d, z: %d }\0A\00"
-@.str.1.459 = private unnamed_addr constant [21 x i8] c"Hello, value is: %d\0A\00"
-@.str.1.665 = private unnamed_addr constant [1 x i8] c"\00"
 @.str.1.423 = private unnamed_addr constant [2 x i8] c"s\00"
+@.str.1.91 = private unnamed_addr constant [38 x i8] c"TimeSpec { tv_sec: %d, tv_nsec: %d }\0A\00"
 @.str.1.399 = private unnamed_addr constant [3 x i8] c"ns\00"
 @.str.1.289 = private unnamed_addr constant [11 x i8] c"[%d] = %d\0A\00"
 @.str.1.268 = private unnamed_addr constant [10 x i8] c"Len = %d\0A\00"
 @.str.1.137 = private unnamed_addr constant [18 x i8] c"Len: %d, Cap: %d\0A\00"
 @.str.1.417 = private unnamed_addr constant [3 x i8] c"ms\00"
-@.str.1.91 = private unnamed_addr constant [38 x i8] c"TimeSpec { tv_sec: %d, tv_nsec: %d }\0A\00"
-@.str.1.512 = private unnamed_addr constant [24 x i8] c"doSomething result: %d\0A\00"
 @.str.1.463 = private unnamed_addr constant [30 x i8] c"Hello, value is: %d + 1 = %d\0A\00"
+@.str.1.430 = private unnamed_addr constant [17 x i8] c"Elapsed: %ld %s\0A\00"
+@.str.1.408 = private unnamed_addr constant [4 x i8] c"µs\00"
+@.str.1.614 = private unnamed_addr constant [1 x i8] c"\00"
+@.str.1.547 = private unnamed_addr constant [21 x i8] c"\1B[32mTest %d passed\0A\00"
+@.str.1.307 = private unnamed_addr constant [2 x i8] c"\0A\00"
+@.str.1.274 = private unnamed_addr constant [10 x i8] c"Cap = %d\0A\00"
+@.str.1.513 = private unnamed_addr constant [5 x i8] c"\1B[0m\00"
+@.str.1.528 = private unnamed_addr constant [34 x i8] c"\1B[31mAssert: %d != %d, Err: '%s'\0A\00"
+@.str.1.459 = private unnamed_addr constant [21 x i8] c"Hello, value is: %d\0A\00"
 
 define i32 @main() {
-    %1 = alloca [12 x i8], align 4
-    %2 = alloca [4 x i8], align 4
-    %3 = alloca [16 x i8], align 8
-    br label %4
-4:
-    %5 = sext i8 2 to i32
-    %6 = sext i8 3 to i32
-    %7 = sext i8 4 to i32
-    %8 = call [12 x i8] (i32, i32, i32) @new0_9(i32 noundef %5, i32 noundef %6, i32 noundef %7)
-    store [12 x i8] %8, ptr %1
-    %9 = call i32 (ptr) @sum0_26(ptr noundef %1)
-    store i32 %9, ptr %2
-    call void (ptr) @dbg1_537(ptr noundef %1)
-    %10 = load i32, ptr %2
-    %11 = call i32 (ptr, ...) @printf(ptr noundef @.str.1.508, i32 noundef %10)
-    %12 = call i32 () @doSomething0_43()
-    %13 = call i32 (ptr, ...) @printf(ptr noundef @.str.1.512, i32 noundef %12)
+    %1 = alloca [16 x i8], align 8
+    br label %2
+2:
     call void () @runTests1_444()
-    %14 = call [16 x i8] () @new1_333()
-    store [16 x i8] %14, ptr %3
-    %15 = sext i8 1 to i32
-    %16 = call i32 (i32) @sleep(i32 noundef %15)
-    %17 = call i64 (ptr) @elapsed1_350(ptr noundef %3)
+    %3 = call [16 x i8] () @new1_333()
+    store [16 x i8] %3, ptr %1
+    %4 = sext i8 1 to i32
+    %5 = call i32 (i32) @sleep(i32 noundef %4)
+    %6 = call i64 (ptr) @elapsed1_350(ptr noundef %1)
     ret i32 0
 }
 
@@ -74,12 +57,10 @@ define [12 x i8] @new0_9(i32 noundef %0, i32 noundef %1, i32 noundef %2) {
     %12 = load i32, ptr %6
     %13 = getelementptr inbounds i8, ptr %7, i64 8
     store i32 %12, ptr %13
-    %14 = load [12 x i8], ptr %7
-    ret [12 x i8] %14
     unreachable
 }
 
-define i32 @sum0_26(ptr noundef %0) {
+define i32 @sum0_25(ptr noundef %0) {
     %2 = alloca [8 x i8], align 8
     br label %3
 3:
@@ -91,19 +72,9 @@ define i32 @sum0_26(ptr noundef %0) {
     %8 = load i32, ptr %7
     %9 = add nsw i32 %5, %8
     %10 = load ptr, ptr %2
-    %11 = getelementptr inbounds i8, ptr %10, i64 8
-    %12 = load i32, ptr %11
-    %13 = add nsw i32 %9, %12
-    ret i32 %13
-    unreachable
-}
-
-define i32 @doSomething0_43() {
-    br label %1
-1:
-    %2 = mul nsw i8 2, 3
-    %3 = sext i8 %2 to i32
-    ret i32 %3
+    %11 = load i32, ptr %10
+    %12 = add nsw i32 %9, %11
+    ret i32 %12
     unreachable
 }
 
@@ -514,30 +485,13 @@ define void @runTests1_444() {
     store i32 %21, ptr %5
     br label %22
 22:
-    %23 = call [20 x i8] () @new1_616()
+    %23 = call [20 x i8] () @new1_565()
     store [20 x i8] %23, ptr %3
-    call void (ptr) @runTests1_633(ptr noundef %3)
+    call void (ptr) @runTests1_582(ptr noundef %3)
     ret void
 }
 
-define void @dbg1_537(ptr noundef %0) {
-    %2 = alloca [8 x i8], align 8
-    br label %3
-3:
-    store ptr %0, ptr %2
-    %4 = load ptr, ptr %2
-    %5 = load i32, ptr %4
-    %6 = load ptr, ptr %2
-    %7 = getelementptr inbounds i8, ptr %6, i64 4
-    %8 = load i32, ptr %7
-    %9 = load ptr, ptr %2
-    %10 = getelementptr inbounds i8, ptr %9, i64 8
-    %11 = load i32, ptr %10
-    %12 = call i32 (ptr, ...) @printf(ptr noundef @.str.1.540, i32 noundef %5, i32 noundef %8, i32 noundef %11)
-    ret void
-}
-
-define [0 x i8] @new1_556() {
+define [0 x i8] @new1_505() {
     %1 = alloca [0 x i8], align 1
     br label %2
 2:
@@ -546,16 +500,16 @@ define [0 x i8] @new1_556() {
     unreachable
 }
 
-define void @printReset1_561(ptr noundef %0) {
+define void @printReset1_510(ptr noundef %0) {
     %2 = alloca [8 x i8], align 8
     br label %3
 3:
     store ptr %0, ptr %2
-    %4 = call i32 (ptr) @printf(ptr noundef @.str.1.564)
+    %4 = call i32 (ptr) @printf(ptr noundef @.str.1.513)
     ret void
 }
 
-define void @assertInt1_567(ptr noundef %0, i32 noundef %1, i32 noundef %2, ptr noundef %3) {
+define void @assertInt1_516(ptr noundef %0, i32 noundef %1, i32 noundef %2, ptr noundef %3) {
     %5 = alloca [8 x i8], align 8
     %6 = alloca [4 x i8], align 4
     %7 = alloca [4 x i8], align 4
@@ -574,9 +528,9 @@ define void @assertInt1_567(ptr noundef %0, i32 noundef %1, i32 noundef %2, ptr 
     %14 = load i32, ptr %6
     %15 = load i32, ptr %7
     %16 = load ptr, ptr %8
-    %17 = call i32 (ptr, ...) @printf(ptr noundef @.str.1.579, i32 noundef %14, i32 noundef %15, ptr noundef %16)
+    %17 = call i32 (ptr, ...) @printf(ptr noundef @.str.1.528, i32 noundef %14, i32 noundef %15, ptr noundef %16)
     %18 = load ptr, ptr %5
-    call void (ptr) @printReset1_561(ptr noundef %18)
+    call void (ptr) @printReset1_510(ptr noundef %18)
     %19 = sext i8 1 to i32
     call void (i32) @exit(i32 noundef %19)
     br label %20
@@ -584,7 +538,7 @@ define void @assertInt1_567(ptr noundef %0, i32 noundef %1, i32 noundef %2, ptr 
     ret void
 }
 
-define void @printTestSucces1_593(ptr noundef %0, i32 noundef %1) {
+define void @printTestSucces1_542(ptr noundef %0, i32 noundef %1) {
     %3 = alloca [8 x i8], align 8
     %4 = alloca [4 x i8], align 4
     br label %5
@@ -592,19 +546,19 @@ define void @printTestSucces1_593(ptr noundef %0, i32 noundef %1) {
     store ptr %0, ptr %3
     store i32 %1, ptr %4
     %6 = load i32, ptr %4
-    %7 = call i32 (ptr, ...) @printf(ptr noundef @.str.1.598, i32 noundef %6)
+    %7 = call i32 (ptr, ...) @printf(ptr noundef @.str.1.547, i32 noundef %6)
     %8 = load ptr, ptr %3
-    call void (ptr) @printReset1_561(ptr noundef %8)
+    call void (ptr) @printReset1_510(ptr noundef %8)
     ret void
 }
 
-define [20 x i8] @new1_616() {
+define [20 x i8] @new1_565() {
     %1 = alloca [20 x i8], align 1
     br label %2
 2:
     %3 = call [16 x i8] () @new1_121()
     store [16 x i8] %3, ptr %1
-    %4 = call [0 x i8] () @new1_556()
+    %4 = call [0 x i8] () @new1_505()
     %5 = getelementptr inbounds i8, ptr %1, i64 16
     store [0 x i8] %4, ptr %5
     %6 = sext i8 1 to i32
@@ -615,19 +569,19 @@ define [20 x i8] @new1_616() {
     unreachable
 }
 
-define void @runTests1_633(ptr noundef %0) {
+define void @runTests1_582(ptr noundef %0) {
     %2 = alloca [8 x i8], align 8
     br label %3
 3:
     store ptr %0, ptr %2
     %4 = load ptr, ptr %2
-    call void (ptr) @testPush1_644(ptr noundef %4)
+    call void (ptr) @testPush1_593(ptr noundef %4)
     %5 = load ptr, ptr %2
-    call void (ptr) @testPop1_678(ptr noundef %5)
+    call void (ptr) @testPop1_627(ptr noundef %5)
     ret void
 }
 
-define void @testPush1_644(ptr noundef %0) {
+define void @testPush1_593(ptr noundef %0) {
     %2 = alloca [8 x i8], align 8
     br label %3
 3:
@@ -641,16 +595,16 @@ define void @testPush1_644(ptr noundef %0) {
     %9 = call ptr (ptr) @last1_216(ptr noundef %8)
     %10 = load i32, ptr %9
     %11 = sext i8 2 to i32
-    call void (ptr, i32, i32, ptr) @assertInt1_567(ptr noundef %7, i32 noundef %10, i32 noundef %11, ptr noundef @.str.1.665)
+    call void (ptr, i32, i32, ptr) @assertInt1_516(ptr noundef %7, i32 noundef %10, i32 noundef %11, ptr noundef @.str.1.614)
     %12 = load ptr, ptr %2
     %13 = getelementptr inbounds i8, ptr %12, i64 16
     %14 = load ptr, ptr %2
-    %15 = call i32 (ptr) @getTestCount1_712(ptr noundef %14)
-    call void (ptr, i32) @printTestSucces1_593(ptr noundef %13, i32 noundef %15)
+    %15 = call i32 (ptr) @getTestCount1_661(ptr noundef %14)
+    call void (ptr, i32) @printTestSucces1_542(ptr noundef %13, i32 noundef %15)
     ret void
 }
 
-define void @testPop1_678(ptr noundef %0) {
+define void @testPop1_627(ptr noundef %0) {
     %2 = alloca [8 x i8], align 8
     br label %3
 3:
@@ -663,16 +617,16 @@ define void @testPop1_678(ptr noundef %0) {
     %8 = load ptr, ptr %2
     %9 = call i32 (ptr) @pop1_244(ptr noundef %8)
     %10 = sext i8 94 to i32
-    call void (ptr, i32, i32, ptr) @assertInt1_567(ptr noundef %7, i32 noundef %9, i32 noundef %10, ptr noundef @.str.1.665)
+    call void (ptr, i32, i32, ptr) @assertInt1_516(ptr noundef %7, i32 noundef %9, i32 noundef %10, ptr noundef @.str.1.614)
     %11 = load ptr, ptr %2
     %12 = getelementptr inbounds i8, ptr %11, i64 16
     %13 = load ptr, ptr %2
-    %14 = call i32 (ptr) @getTestCount1_712(ptr noundef %13)
-    call void (ptr, i32) @printTestSucces1_593(ptr noundef %12, i32 noundef %14)
+    %14 = call i32 (ptr) @getTestCount1_661(ptr noundef %13)
+    call void (ptr, i32) @printTestSucces1_542(ptr noundef %12, i32 noundef %14)
     ret void
 }
 
-define i32 @getTestCount1_712(ptr noundef %0) {
+define i32 @getTestCount1_661(ptr noundef %0) {
     %2 = alloca [8 x i8], align 8
     br label %3
 3:

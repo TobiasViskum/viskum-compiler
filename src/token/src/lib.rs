@@ -149,6 +149,8 @@ pub enum TokenKind {
     Export,
     /// Keyword `from`
     From,
+    /// Keyword `pkg`
+    Pkg,
 
     /// End of ofile
     Eof,
@@ -188,6 +190,7 @@ impl TokenKind {
             Self::True => "true",
             Self::False => "false",
             Self::Null => "null",
+            Self::Pkg => "pkg",
             _ => "",
         }
     }

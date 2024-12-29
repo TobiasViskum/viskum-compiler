@@ -9,6 +9,8 @@ https://github.com/rust-lang/rust/blob/master/compiler/rustc_ast/src/visit.rs
 use crate::{
     AsigneeExpr,
     AssignStmt,
+    Ast,
+    AstState,
     BinaryExpr,
     BlockExpr,
     BoolExpr,
@@ -40,6 +42,7 @@ use crate::{
     Pat,
     Path,
     PathField,
+    PkgIdentNode,
     PlaceExpr,
     ReturnExpr,
     Stmt,
@@ -53,11 +56,22 @@ use crate::{
     ValueExpr,
 };
 
+pub trait VisitAst<'ast, T> where T: AstState {
+    /// Only shared with the next pass
+    type LocalVisitResult;
+
+    /// Shared with the global resolver
+    type GlobalVisitResult;
+
+    fn visit<N>(self) -> (Ast<'ast, N>, Self::GlobalVisitResult, Self::LocalVisitResult)
+        where T: AstState<NextState = N>, N: AstState;
+}
+
 /// A default implementation exists for all ast nodes, meaning
 /// the whole ast will be visited from left to right by default
 ///
 /// Each implementation can be overwritten for each state the Ast can be in
-/// (e.g. Ast\<AstUnresolved\> or Ast\<AstResolved\>)
+/// (e.g. Ast\<'ast, AstUnresolved\> or Ast\<'ast, AstResolved\>)
 pub trait Visitor<'ast>: Sized {
     type Result: Sized;
 
@@ -97,6 +111,11 @@ pub trait Visitor<'ast>: Sized {
 
     #[allow(unused_variables)]
     fn visit_path_segment(&mut self, path_segment: &'ast IdentNode) -> Self::Result {
+        Self::default_result()
+    }
+
+    #[allow(unused_variables)]
+    fn visit_pkg_ident_expr(&mut self, pkg_ident_expr: &'ast PkgIdentNode) -> Self::Result {
         Self::default_result()
     }
 
@@ -383,6 +402,7 @@ pub fn walk_place_expr<'a, V>(visitor: &mut V, place_expr: PlaceExpr<'a>) -> V::
             visitor.visit_tuple_field_expr(tuple_field_expr),
         PlaceExpr::FieldExpr(field_expr) => visitor.visit_field_expr(field_expr),
         PlaceExpr::IndexExpr(index_expr) => visitor.visit_index_expr(index_expr),
+        PlaceExpr::PkgIdentExpr(pkg_ident_expr) => visitor.visit_pkg_ident_expr(pkg_ident_expr),
     }
 }
 
@@ -596,6 +616,7 @@ pub fn walk_path<'a, V>(visitor: &mut V, path: Path<'a>) -> V::Result where V: V
     match path {
         Path::PathField(path_field) => visitor.visit_path_field(path_field),
         Path::PathSegment(path_segment) => visitor.visit_path_segment(path_segment),
+        Path::PathPkg(path_pkg) => visitor.visit_pkg_ident_expr(path_pkg),
     }
 }
 

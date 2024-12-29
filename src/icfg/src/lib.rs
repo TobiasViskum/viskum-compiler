@@ -51,18 +51,16 @@ pub enum Liveness {
 
 pub struct Icfg<'a> {
     pub cfgs: Vec<Cfg<'a>>,
-    pub global_mems: &'a RefCell<Vec<GlobalMem>>,
+    // pub global_mems: &'a RefCell<Vec<GlobalMem>>,
     pub resolved_information: ResolvedInformation<'a>,
-    pub clib_fns: Vec<DefId>,
 }
 impl<'a> Icfg<'a> {
     pub fn new(
         cfgs: Vec<Cfg<'a>>,
-        global_mems: &'a RefCell<Vec<GlobalMem>>,
-        resolved_information: ResolvedInformation<'a>,
-        clib_fns: Vec<DefId>
+        // global_mems: &'a RefCell<Vec<GlobalMem>>,
+        resolved_information: ResolvedInformation<'a>
     ) -> Self {
-        Self { cfgs, global_mems, resolved_information, clib_fns }
+        Self { cfgs, resolved_information }
     }
 
     // pub fn analyze(&mut self) {

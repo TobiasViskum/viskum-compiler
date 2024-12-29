@@ -9,6 +9,7 @@ use crate::{
     DefIdToNameBinding,
     FnSig,
     Mutability,
+    NameBinding,
     NameBindingKind,
     ResolvedInformation,
     Symbol,
@@ -110,6 +111,8 @@ pub enum Ty {
     ZeroSized,
     /// `...` Only used when declaring C-functions
     VariadicArgs,
+    /// Package type
+    Package,
     /// If the resulting type of an operation is unkown (error)
     Unkown,
 }
@@ -350,9 +353,9 @@ impl Ty {
 
     pub fn get_expanded_dereffed_ty<'a>(
         &self,
-        def_id_to_name_binding: &DefIdToNameBinding<'a>
+        get_def_id_to_name_binding: impl Fn(DefId) -> Option<&'a NameBinding<'a>>
     ) -> Ty {
-        self.auto_deref().get_expanded_ty(def_id_to_name_binding)
+        self.auto_deref().get_expanded_ty(get_def_id_to_name_binding)
     }
 
     pub fn deref_until_stack_ptr_and_one_more_if_ptr(&self) -> Ty {
@@ -378,20 +381,23 @@ impl Ty {
         }
     }
 
-    fn get_expanded_ty<'a>(&self, def_id_to_name_binding: &DefIdToNameBinding<'a>) -> Ty {
+    fn get_expanded_ty<'a>(
+        &self,
+        get_def_id_to_name_binding: impl Fn(DefId) -> Option<&'a NameBinding<'a>>
+    ) -> Ty {
         match self {
             Self::FnDef(def_id) => {
-                let name_binding = def_id_to_name_binding.get(&def_id).unwrap();
+                let name_binding = get_def_id_to_name_binding(*def_id).unwrap();
                 match name_binding.kind {
                     NameBindingKind::Fn(fn_sig, _, _) => Ty::FnSig(fn_sig),
                     _ => panic!("Expected fn"),
                 }
             }
             Self::Adt(def_id) => {
-                let name_binding = def_id_to_name_binding.get(&def_id).unwrap();
+                let name_binding = get_def_id_to_name_binding(*def_id).unwrap();
                 match name_binding.kind {
                     NameBindingKind::Adt(Adt::Typedef(ty)) =>
-                        ty.get_expanded_ty(def_id_to_name_binding),
+                        ty.get_expanded_ty(get_def_id_to_name_binding),
                     _ => Ty::Adt(*def_id),
                 }
             }
@@ -400,14 +406,14 @@ impl Ty {
         }
     }
 
-    pub fn test_binary(
+    pub fn test_binary<'a>(
         &self,
         other: Ty,
         op: BinaryOp,
-        def_id_to_name_binding: &DefIdToNameBinding
+        get_def_id_to_name_binding: &impl Fn(DefId) -> Option<&'a NameBinding<'a>>
     ) -> Option<Ty> {
-        let lhs = self.get_expanded_dereffed_ty(def_id_to_name_binding);
-        let rhs = other.get_expanded_dereffed_ty(def_id_to_name_binding);
+        let lhs = self.get_expanded_dereffed_ty(get_def_id_to_name_binding);
+        let rhs = other.get_expanded_dereffed_ty(get_def_id_to_name_binding);
 
         match op {
             BinaryOp::ArithmeticOp(arithmetic_op) => {
@@ -434,11 +440,11 @@ impl Ty {
         }
     }
 
-    pub fn try_deref_as_tuple(
+    pub fn try_deref_as_tuple<'a>(
         &self,
-        def_id_to_name_binding: &DefIdToNameBinding
+        get_def_id_to_name_binding: impl Fn(DefId) -> Option<&'a NameBinding<'a>>
     ) -> Option<&'static [Ty]> {
-        let ty = self.auto_deref().get_expanded_ty(def_id_to_name_binding);
+        let ty = self.auto_deref().get_expanded_ty(get_def_id_to_name_binding);
 
         match ty {
             Ty::Tuple(tuple_ty) => Some(tuple_ty),
@@ -448,12 +454,12 @@ impl Ty {
 
     pub fn try_deref_as_adt<'a>(
         &self,
-        def_id_to_name_binding: &DefIdToNameBinding<'a>
+        get_def_id_to_name_binding: impl Fn(DefId) -> Option<&'a NameBinding<'a>>
     ) -> Option<(DefId, Adt<'a>)> {
         let ty = self.auto_deref();
         match ty {
             Ty::Adt(def_id) => {
-                let name_binding = def_id_to_name_binding.get(&def_id).unwrap();
+                let name_binding = get_def_id_to_name_binding(def_id).unwrap();
                 match name_binding.kind {
                     NameBindingKind::Adt(adt) => Some((def_id, adt)),
                     _ => None,
@@ -507,7 +513,8 @@ impl Ty {
 impl GetTyAttr for Ty {
     fn get_ty_attr(&self, resolved_information: &ResolvedInformation) -> TyAttr {
         let mut ty_attr = match self {
-            Self::AtdConstructer(_) => todo!("Constructer function"),
+            Self::AtdConstructer(_) => panic!("Constructer function"),
+            Self::Package => panic!("Package"),
             Self::VariadicArgs => panic!("`...` should not be used in this context"),
             Self::ZeroSized => TyAttr::new(0, 0),
             Self::FnDef(_) => TyAttr::new(8, 8),
@@ -623,6 +630,7 @@ impl Display for Ty {
         match self {
             Self::Null => write!(f, "null"),
             Self::AtdConstructer(def_id) => write!(f, "{}", def_id.symbol.get()),
+            Self::Package => write!(f, "pkg"),
             Self::ZeroSized => write!(f, "ZeroSized"),
             Self::VariadicArgs => write!(f, "..."),
             Self::FnDef(def_id) => write!(f, "FnDef({})", def_id.symbol.get()),

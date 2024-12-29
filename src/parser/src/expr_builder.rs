@@ -1,6 +1,7 @@
 use ast::{
     AssignStmt,
     AstArena,
+    AstArenaObject,
     BinaryExpr,
     BlockExpr,
     BoolExpr,
@@ -19,6 +20,7 @@ use ast::{
     IntegerExpr,
     LoopExpr,
     NullExpr,
+    PkgIdentNode,
     PlaceExpr,
     Stmt,
     StringExpr,
@@ -33,25 +35,45 @@ use token::TokenKind;
 
 use crate::{ precedence::Precedence, ParserHandle };
 
-pub(crate) struct ExprBuilder<'ast> {
+pub(crate) struct ExprBuilder<'ast, 'b> {
     final_stmt: Option<Stmt<'ast>>,
     exprs: Vec<Expr<'ast>>,
     /// Token that can be used to stop parsing the current expression
     /// Primarily used for parsing if|while <Expr> { ... }, since we don't want to parse '{' as an infix operator,
     /// And therefore terminate the expression at the '{' token
     pub terminate_infix_token: Option<TokenKind>,
-    ast_arena: &'ast AstArena,
+    ast_arena: &'b AstArenaObject<'ast>,
     base_precedence: Precedence,
+    mut_span: Option<Span>,
 }
 
-impl<'ast> ExprBuilder<'ast> {
-    pub fn new(ast_arena: &'ast AstArena, terminate_infix_token: Option<TokenKind>) -> Self {
+impl<'ast, 'b> ExprBuilder<'ast, 'b> {
+    pub fn new(
+        ast_arena: &'b AstArenaObject<'ast>,
+        terminate_infix_token: Option<TokenKind>
+    ) -> Self {
         Self {
             ast_arena,
             terminate_infix_token,
             exprs: Vec::with_capacity(32),
             final_stmt: None,
             base_precedence: Precedence::PrecAssign,
+            mut_span: None,
+        }
+    }
+
+    pub fn new_with_mut_span(
+        ast_arena: &'b AstArenaObject<'ast>,
+        terminate_infix_token: Option<TokenKind>,
+        mut_span: Span
+    ) -> Self {
+        Self {
+            ast_arena,
+            terminate_infix_token,
+            exprs: Vec::with_capacity(32),
+            final_stmt: None,
+            base_precedence: Precedence::PrecAssign,
+            mut_span: Some(mut_span),
         }
     }
 
@@ -77,7 +99,12 @@ impl<'ast> ExprBuilder<'ast> {
         };
 
         let define_stmt = self.ast_arena.alloc_expr_or_stmt(
-            DefineStmt::new(pattern_expr, value_expr, parser_handle.get_ast_node_id())
+            DefineStmt::new(
+                self.mut_span,
+                pattern_expr,
+                value_expr,
+                parser_handle.get_ast_node_id()
+            )
         );
 
         self.final_stmt = Some(Stmt::DefineStmt(define_stmt));
@@ -245,6 +272,16 @@ impl<'ast> ExprBuilder<'ast> {
             );
             self.exprs.push(expr);
         }
+    }
+
+    pub fn emit_pkg_ident_expr(&mut self, pkg_ident_expr: PkgIdentNode) {
+        let pkg_ident_expr = self.ast_arena.alloc_expr_or_stmt(pkg_ident_expr);
+
+        let expr = Expr::ExprWithoutBlock(
+            ExprWithoutBlock::PlaceExpr(PlaceExpr::PkgIdentExpr(pkg_ident_expr))
+        );
+
+        self.exprs.push(expr);
     }
 
     pub fn emit_ident_expr(&mut self, ident_node: IdentNode) {

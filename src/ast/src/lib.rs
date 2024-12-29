@@ -51,25 +51,25 @@ Stmt(
 */
 
 mod typechecker;
-mod passes;
 mod visitor;
 mod ast_arena;
 mod ast_prettifier;
 mod ast_query_system;
 mod ast_state;
 mod ast_visitor;
+pub mod ast_pre_resolver;
+pub mod ast_resolver;
+pub mod ast_type_checker;
 
 pub use ast_state::*;
-pub use ast_arena::AstArena;
+pub use ast_arena::{ AstArena, AstArenaObject };
 pub use ast_prettifier::AstPrettifier;
 pub use ast_query_system::{ AstQueryEntry, AstQuerySystem };
-use ast_visitor::AstPreResolver;
-pub use ast_visitor::{ ResolverHandle, AstResolver, AstTypeChecker };
-use fxhash::FxHashMap;
+pub use ast_visitor::ResolverHandle;
 pub use visitor::*;
 
-use std::{ cell::Cell, marker::PhantomData };
-use ir::{ LexicalContext, Mutability, NodeId, Symbol };
+use std::marker::PhantomData;
+use ir::{ ModId, Mutability, NodeId };
 use op::BinaryOp;
 use span::Span;
 use derive_new::new;
@@ -88,6 +88,8 @@ pub struct Ast<'ast, T> where T: AstState {
 pub struct AstMetadata {
     pub fn_count: usize,
     pub node_count: usize,
+    pub def_count: usize,
+    pub mod_id: ModId,
 }
 
 impl<'ast, T> Ast<'ast, T> where T: AstState {
@@ -98,38 +100,6 @@ impl<'ast, T> Ast<'ast, T> where T: AstState {
             metadata: self.metadata,
             _state: PhantomData,
         }
-    }
-}
-
-impl<'ast, 'ctx, 'c> Ast<'ast, AstUnvalidated> where 'ctx: 'ast, 'ast: 'c {
-    pub fn into_visitor<E>(self, resolver_handle: &'c mut E) -> AstPreResolver<'ctx, 'ast, 'c, E>
-        where E: ResolverHandle<'ctx, 'ast, AstUnvalidated>
-    {
-        AstPreResolver::new(self, resolver_handle)
-    }
-}
-
-impl<'ast, 'ctx, 'c> Ast<'ast, AstPartlyResolved> where 'ctx: 'ast, 'ast: 'c {
-    pub fn into_visitor<E>(
-        self,
-        resolver_handle: &'c mut E,
-        lexical_context_to_parent_lexical_context: &'c FxHashMap<LexicalContext, LexicalContext>
-    ) -> AstResolver<'ctx, 'ast, 'c, E>
-        where E: ResolverHandle<'ctx, 'ast, AstPartlyResolved>
-    {
-        AstResolver::new(self, resolver_handle, lexical_context_to_parent_lexical_context)
-    }
-}
-
-impl<'ast, 'ctx, 'c> Ast<'ast, AstResolved> where 'ctx: 'ast, 'ast: 'c {
-    pub fn into_visitor<E>(
-        self,
-        resolver_handle: &'c mut E,
-        lexical_context_to_parent_lexical_context: &'c FxHashMap<LexicalContext, LexicalContext>
-    ) -> AstTypeChecker<'ctx, 'ast, 'c, E>
-        where E: ResolverHandle<'ctx, 'ast, AstResolved>
-    {
-        AstTypeChecker::new(self, resolver_handle, lexical_context_to_parent_lexical_context)
     }
 }
 
@@ -183,7 +153,7 @@ pub struct ImportItem<'ast> {
 
 #[derive(Debug, new)]
 pub struct ImplItem<'ast> {
-    pub ident_node: &'ast IdentNode,
+    pub implementor_path: Path<'ast>,
     pub impl_fns: &'ast [&'ast FnItem<'ast>],
     pub ast_node_id: NodeId,
 }
@@ -277,8 +247,7 @@ pub struct FieldInitialization<'ast> {
 
 #[derive(Debug, new)]
 pub struct DefineStmt<'ast> {
-    #[new(value = "None.into()")]
-    pub mut_span: Cell<Option<Span>>,
+    pub mut_span: Option<Span>,
     pub setter_expr: Pat<'ast>,
     pub value_expr: Expr<'ast>,
     pub ast_node_id: NodeId,
@@ -316,6 +285,7 @@ pub struct TupleStructPat<'ast> {
 #[derive(Debug, Clone, Copy)]
 pub enum Path<'ast> {
     PathSegment(&'ast IdentNode),
+    PathPkg(&'ast PkgIdentNode),
     PathField(&'ast PathField<'ast>),
 }
 
@@ -405,6 +375,7 @@ pub enum PlaceExpr<'ast> {
     TupleFieldExpr(&'ast TupleFieldExpr<'ast>),
     FieldExpr(&'ast FieldExpr<'ast>),
     IndexExpr(&'ast IndexExpr<'ast>),
+    PkgIdentExpr(&'ast PkgIdentNode),
 }
 
 #[derive(Debug, new)]
@@ -430,6 +401,13 @@ pub struct TupleFieldExpr<'ast> {
 
 #[derive(Debug, new)]
 pub struct IdentNode {
+    pub span: Span,
+    pub ast_node_id: NodeId,
+}
+
+/// Refers specifically to the keyword `pkg`
+#[derive(Debug, new)]
+pub struct PkgIdentNode {
     pub span: Span,
     pub ast_node_id: NodeId,
 }
@@ -553,6 +531,7 @@ pub fn get_node_id_from_place_expr(place_expr: PlaceExpr) -> NodeId {
         PlaceExpr::TupleFieldExpr(tuple_field_expr) => tuple_field_expr.ast_node_id,
         PlaceExpr::FieldExpr(field_expr) => field_expr.ast_node_id,
         PlaceExpr::IndexExpr(index_expr) => index_expr.ast_node_id,
+        PlaceExpr::PkgIdentExpr(pkg_ident_expr) => pkg_ident_expr.ast_node_id,
     }
 }
 

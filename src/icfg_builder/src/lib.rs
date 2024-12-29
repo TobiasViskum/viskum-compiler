@@ -89,66 +89,47 @@ use ir::{
 use op::{ BinaryOp, ComparisonOp };
 use resolver::ResolvedFunctions;
 
-pub struct IcfgBuilder<'icfg, 'ast> {
-    ast: Ast<'ast, AstTypeChecked>,
+pub struct IcfgBuilder<'icfg> {
     cfgs: Vec<Cfg<'icfg>>,
-    global_mems: &'icfg RefCell<Vec<GlobalMem>>,
+    // global_mems: &'icfg RefCell<Vec<GlobalMem>>,
     resolved_information: ResolvedInformation<'icfg>,
-    clib_fns: Vec<DefId>,
 
-    src: &'ast str,
     arena: &'icfg Bump,
 }
 
-impl<'icfg, 'ast> IcfgBuilder<'icfg, 'ast> {
+impl<'icfg> IcfgBuilder<'icfg> {
     pub fn new(
-        ast: Ast<'ast, AstTypeChecked>,
         resolved_information: ResolvedInformation<'icfg>,
-        global_mems: &'icfg RefCell<Vec<GlobalMem>>,
-        src: &'ast str,
+        // global_mems: &'icfg RefCell<Vec<GlobalMem>>,
         arena: &'icfg Bump
     ) -> Self {
         Self {
-            ast,
             cfgs: Default::default(),
-            global_mems,
-            clib_fns: Default::default(),
+            // global_mems,
 
             resolved_information,
-            src,
+
             arena,
         }
     }
 
-    pub fn build(mut self, resolved_functions: ResolvedFunctions<'ast>) -> Icfg<'icfg> {
-        for stmt in self.ast.main_scope.stmts {
-            if
-                let Stmt::ItemStmt(
-                    ItemStmt::CompDeclItem(CompDeclItem::CompFnDeclItem(fn_decl_item)),
-                ) = stmt
-            {
-                let def_id = self.resolved_information.get_def_id_from_node_id(
-                    &fn_decl_item.ident_node.ast_node_id
-                );
-                self.clib_fns.push(def_id);
-            }
-        }
-
+    pub fn build<'ast>(mut self, resolved_functions: ResolvedFunctions<'ast>) -> Icfg<'icfg> {
         let main_fn = resolved_functions.main_fn.expect("Do something if main doesn't exist");
         let cfg_builder = self.new_cfg_builder(main_fn, true);
         let cfg = cfg_builder.build_cfg();
         self.cfgs.push(cfg);
 
+        // TODO: Make this multi-threaded
         for fn_item in resolved_functions.pending_functions {
             let cfg_builder = self.new_cfg_builder(fn_item, false);
             let cfg = cfg_builder.build_cfg();
             self.cfgs.push(cfg);
         }
 
-        Icfg::new(self.cfgs, self.global_mems, self.resolved_information, self.clib_fns)
+        Icfg::new(self.cfgs, self.resolved_information)
     }
 
-    pub(crate) fn new_cfg_builder<'c>(
+    pub(crate) fn new_cfg_builder<'ast, 'c>(
         &'c mut self,
         fn_item: &'ast FnItem<'ast>,
         is_main: bool
@@ -168,7 +149,7 @@ impl<'icfg, 'ast> IcfgBuilder<'icfg, 'ast> {
 }
 
 pub struct CfgBuilder<'icfg, 'ast, 'c> {
-    icfg_builder: &'c mut IcfgBuilder<'icfg, 'ast>,
+    icfg_builder: &'c mut IcfgBuilder<'icfg>,
 
     is_main_fn: bool,
     compiling_fn: &'ast FnItem<'ast>,
@@ -191,7 +172,7 @@ pub struct CfgBuilder<'icfg, 'ast, 'c> {
 
 impl<'icfg, 'ast, 'c> CfgBuilder<'icfg, 'ast, 'c> {
     pub fn new(
-        icfg_builder: &'c mut IcfgBuilder<'icfg, 'ast>,
+        icfg_builder: &'c mut IcfgBuilder<'icfg>,
         compiling_fn: &'ast FnItem<'ast>,
         is_main_fn: bool
     ) -> Self {
@@ -1368,7 +1349,9 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
         let tuple_ty = match
             self.icfg_builder
                 .get_ty_from_node_id(get_node_id_from_expr(tuple_field_expr.lhs))
-                .try_deref_as_tuple(&self.icfg_builder.resolved_information.def_id_to_name_binding)
+                .try_deref_as_tuple(|def_id| {
+                    self.icfg_builder.resolved_information.def_id_to_name_binding.get(&def_id)
+                })
         {
             Some(tuple_ty) => tuple_ty,
             None => unreachable!("Should not be able to go here if previous pass was successfull"),
@@ -1405,10 +1388,14 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
     }
 
     fn visit_field_expr(&mut self, field_expr: &'ast FieldExpr<'ast>) -> Self::Result {
-        let ty = self.icfg_builder.get_ty_from_node_id(get_node_id_from_expr(field_expr.lhs));
-        let visit_result = self.visit_expr(field_expr.lhs);
+        let lhs_ty = self.icfg_builder.get_ty_from_node_id(get_node_id_from_expr(field_expr.lhs));
 
-        if let Ty::AtdConstructer(def_id) = ty {
+        if let Ty::Package = lhs_ty {
+            return self.visit_ident_expr(field_expr.rhs);
+        }
+
+        let visit_result = self.visit_expr(field_expr.lhs);
+        if let Ty::AtdConstructer(def_id) = lhs_ty {
             if
                 let Some(rhs_def_id) =
                     self.icfg_builder.resolved_information.try_get_def_id_from_node_id(
@@ -1490,7 +1477,7 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
         let lhs_place = match
             self.get_operand_from_visit_result(
                 visit_result,
-                ty.deref_until_stack_ptr_and_one_more_if_ptr()
+                lhs_ty.deref_until_stack_ptr_and_one_more_if_ptr()
             )
         {
             (Operand::PlaceKind(place), _, _) => place,
@@ -1508,7 +1495,7 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
             None => unreachable!("Should not be able to go here if previous pass was successfull"),
         };
 
-        let is_mutable = ty.deref_until_stack_ptr().is_mut_ptr();
+        let is_mutable = lhs_ty.deref_until_stack_ptr().is_mut_ptr();
 
         let mut byte_offset = 0;
         let elem_ty = struct_fields
@@ -1620,36 +1607,30 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
 
             AsigneeExpr::PlaceExpr(place_expr) => {
                 match place_expr {
+                    PlaceExpr::PkgIdentExpr(_) => { panic!("Invalid assignee (pkg)") }
                     PlaceExpr::TupleFieldExpr(tuple_field_expr) => {
-                        let (place, ty) = visit_expr!(visit_tuple_field_expr, tuple_field_expr);
-                        (place, ty)
+                        visit_expr!(visit_tuple_field_expr, tuple_field_expr)
                     }
                     PlaceExpr::FieldExpr(field_expr) => {
-                        let (place, ty) = visit_expr!(visit_field_expr, field_expr);
-                        (place, ty)
+                        visit_expr!(visit_field_expr, field_expr)
                     }
                     PlaceExpr::IndexExpr(index_expr) => {
-                        let (place, ty) = visit_expr!(visit_index_expr, index_expr);
-                        (place, ty)
+                        visit_expr!(visit_index_expr, index_expr)
                     }
                     PlaceExpr::IdentExpr(ident_expr) => {
-                        let (place, ty) = {
-                            let assingment_ty = self.icfg_builder
-                                .get_ty_from_node_id(ident_expr.ast_node_id)
-                                .deref_until_stack_ptr_and_one_more_if_ptr();
-                            let visit_result = self.visit_ident_expr(ident_expr);
-                            let operand = self.get_operand_from_visit_result(
-                                visit_result,
-                                assingment_ty
-                            ).0;
+                        let assingment_ty = self.icfg_builder
+                            .get_ty_from_node_id(ident_expr.ast_node_id)
+                            .deref_until_stack_ptr_and_one_more_if_ptr();
+                        let visit_result = self.visit_ident_expr(ident_expr);
+                        let operand = self.get_operand_from_visit_result(
+                            visit_result,
+                            assingment_ty
+                        ).0;
 
-                            match operand {
-                                Operand::PlaceKind(place) => (place, assingment_ty),
-                                _ => unreachable!("Expected PlaceKind"),
-                            }
-                        };
-
-                        (place, ty)
+                        match operand {
+                            Operand::PlaceKind(place) => (place, assingment_ty),
+                            _ => unreachable!("Expected PlaceKind"),
+                        }
                     }
                 }
             }

@@ -27,17 +27,11 @@ pub struct LexicalBinding {
     /// The symbol is there to make it unique, when used in a hashmap
     pub symbol: Symbol,
     pub res_kind: ResKind,
-    pub mod_id: ModId,
 }
 
 impl LexicalBinding {
-    pub fn new(
-        lexical_context: LexicalContext,
-        symbol: Symbol,
-        res_kind: ResKind,
-        mod_id: ModId
-    ) -> Self {
-        Self { lexical_context, symbol, res_kind, mod_id }
+    pub fn new(lexical_context: LexicalContext, symbol: Symbol, res_kind: ResKind) -> Self {
+        Self { lexical_context, symbol, res_kind }
     }
 }
 
@@ -78,6 +72,10 @@ pub struct DefId {
     pub node_id: NodeId,
 }
 
+/// Refers to a package
+#[derive(Hash, PartialEq, Eq, Debug, Clone, Copy)]
+pub struct PkgId(pub u32);
+
 impl DefId {
     pub fn new(symbol: Symbol, node_id: NodeId) -> Self {
         Self { symbol, node_id }
@@ -117,6 +115,7 @@ impl<'res> NameBinding<'res> {
             NameBindingKind::Adt(_) => ResKind::Adt,
             NameBindingKind::Fn(_, _, _) => ResKind::Fn,
             NameBindingKind::ConstStr(_) => ResKind::ConstStr,
+            NameBindingKind::Pkg(_) => todo!(),
         }
     }
 }
@@ -133,6 +132,7 @@ pub enum NameBindingKind<'res> {
     Adt(Adt<'res>),
     Fn(FnSig, HasSelfArg, Externism),
     ConstStr(ConstStrLen),
+    Pkg(&'res [DefId]),
     // Module
     // Import
 }
@@ -213,8 +213,9 @@ pub struct ResolvedInformation<'res> {
     pub node_id_to_ty: NodeIdToTy,
     pub node_id_to_def_id: NodeIdToDefId,
     pub def_id_to_name_binding: DefIdToNameBinding<'res>,
-    pub def_id_to_global_mem_id: FxHashMap<DefId, GlobalMemId>,
+    // pub def_id_to_global_mem_id: FxHashMap<DefId, GlobalMemId>,
     pub const_strs: Vec<(DefId, ConstStrLen)>,
+    pub clib_fns: Vec<DefId>,
 }
 
 impl<'res> ResolvedInformation<'res> {
@@ -231,14 +232,14 @@ impl<'res> ResolvedInformation<'res> {
     }
 
     pub fn get_name_binding_from_def_id(&self, def_id: &DefId) -> NameBinding<'res> {
-        *self.def_id_to_name_binding.get(def_id).expect("Expected name to be binded to def id")
+        *self.def_id_to_name_binding.get(def_id).expect("Expected namebinding to def_id")
     }
 
-    pub fn get_global_mem_id_from_def_id(&self, def_id: &DefId) -> GlobalMemId {
-        *self.def_id_to_global_mem_id
-            .get(def_id)
-            .expect("Expected global mem to be binded to def id")
-    }
+    // pub fn get_global_mem_id_from_def_id(&self, def_id: &DefId) -> GlobalMemId {
+    //     *self.def_id_to_global_mem_id
+    //         .get(def_id)
+    //         .expect("Expected global mem to be binded to def id")
+    // }
 
     pub fn is_clib_fn(&self, def_id: &DefId) -> bool {
         match self.get_name_binding_from_def_id(def_id).kind {

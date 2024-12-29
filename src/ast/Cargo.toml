@@ -3,8 +3,6 @@ name = "ast"
 version = "0.1.0"
 edition = "2021"
 
-
-
 [dependencies]
 # Libs in project
 op = { path = "../op" }
@@ -16,6 +14,7 @@ data_structures = { path = "../data_structures" }
 # Extern crates
 fxhash = "0.2.1"
 derive-new = "0.7.0"
-bumpalo = "3.16.0"
+# bumpalo = "3.16.0"
 paste = "1.0.15"
 typed-arena = "2.0.2"
+bumpalo-herd = "0.1.2"
