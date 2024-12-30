@@ -16,3 +16,5 @@ data_structures = { path = "../data_structures" }
 # Extern crates
 fxhash = "0.2.1"
 bumpalo = "3.16.0"
+threadpool = "1.8.1"
+threadpool_scope = "0.1.0"

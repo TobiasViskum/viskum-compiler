@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::{ cell::RefCell, sync::Mutex };
 
 use ast::{
     get_ident_node_from_arg_kind,
@@ -88,28 +88,27 @@ use ir::{
 };
 use op::{ BinaryOp, ComparisonOp };
 use resolver::ResolvedFunctions;
+use threadpool::ThreadPool;
+use threadpool_scope::scope_with;
 
-pub struct IcfgBuilder<'icfg> {
-    cfgs: Vec<Cfg<'icfg>>,
+pub struct IcfgBuilder<'icfg, 'th> where 'icfg: 'th {
+    cfgs: Mutex<Vec<Cfg<'icfg>>>,
     // global_mems: &'icfg RefCell<Vec<GlobalMem>>,
     resolved_information: ResolvedInformation<'icfg>,
-
-    arena: &'icfg Bump,
+    threadpool: &'th ThreadPool,
 }
 
-impl<'icfg> IcfgBuilder<'icfg> {
+impl<'icfg, 'th> IcfgBuilder<'icfg, 'th> where 'icfg: 'th {
     pub fn new(
         resolved_information: ResolvedInformation<'icfg>,
         // global_mems: &'icfg RefCell<Vec<GlobalMem>>,
-        arena: &'icfg Bump
+        threadpool: &'th ThreadPool
     ) -> Self {
         Self {
             cfgs: Default::default(),
             // global_mems,
-
+            threadpool,
             resolved_information,
-
-            arena,
         }
     }
 
@@ -117,20 +116,30 @@ impl<'icfg> IcfgBuilder<'icfg> {
         let main_fn = resolved_functions.main_fn.expect("Do something if main doesn't exist");
         let cfg_builder = self.new_cfg_builder(main_fn, true);
         let cfg = cfg_builder.build_cfg();
-        self.cfgs.push(cfg);
+        self.cfgs.lock().unwrap().push(cfg);
 
-        // TODO: Make this multi-threaded
-        for fn_item in resolved_functions.pending_functions {
-            let cfg_builder = self.new_cfg_builder(fn_item, false);
-            let cfg = cfg_builder.build_cfg();
-            self.cfgs.push(cfg);
-        }
+        scope_with(self.threadpool, |s| {
+            for fn_item in resolved_functions.pending_functions {
+                s.execute(|| {
+                    let cfg_builder = self.new_cfg_builder(fn_item, false);
+                    let cfg = cfg_builder.build_cfg();
+                    self.cfgs.lock().unwrap().push(cfg);
+                });
+            }
+        });
 
-        Icfg::new(self.cfgs, self.resolved_information)
+        // // TODO: Make this multi-threaded
+        // for fn_item in resolved_functions.pending_functions {
+        //     let cfg_builder = self.new_cfg_builder(fn_item, false);
+        //     let cfg = cfg_builder.build_cfg();
+        //     self.cfgs.push(cfg);
+        // }
+
+        Icfg::new(self.cfgs.into_inner().unwrap(), self.resolved_information)
     }
 
     pub(crate) fn new_cfg_builder<'ast, 'c>(
-        &'c mut self,
+        &'c self,
         fn_item: &'ast FnItem<'ast>,
         is_main: bool
     ) -> CfgBuilder<'icfg, 'ast, 'c> {
@@ -149,7 +158,7 @@ impl<'icfg> IcfgBuilder<'icfg> {
 }
 
 pub struct CfgBuilder<'icfg, 'ast, 'c> {
-    icfg_builder: &'c mut IcfgBuilder<'icfg>,
+    icfg_builder: &'c IcfgBuilder<'icfg, 'c>,
 
     is_main_fn: bool,
     compiling_fn: &'ast FnItem<'ast>,
@@ -172,7 +181,7 @@ pub struct CfgBuilder<'icfg, 'ast, 'c> {
 
 impl<'icfg, 'ast, 'c> CfgBuilder<'icfg, 'ast, 'c> {
     pub fn new(
-        icfg_builder: &'c mut IcfgBuilder<'icfg>,
+        icfg_builder: &'c IcfgBuilder<'icfg, 'c>,
         compiling_fn: &'ast FnItem<'ast>,
         is_main_fn: bool
     ) -> Self {

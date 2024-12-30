@@ -33,7 +33,9 @@ use ir::{
     UintTy,
     VOID_TY,
 };
-use std::{ fmt::{ Display, Write }, fs::File, process::Command, sync::Arc };
+use threadpool::ThreadPool;
+use threadpool_scope::scope_with;
+use std::{ fmt::{ Display, Write }, fs::File, process::Command, sync::{ Arc, Mutex } };
 
 const INDENTATION: usize = 4;
 
@@ -582,84 +584,88 @@ impl<'a> CfgVisitor for CodeGenUnit<'a> {
 
 pub struct CodeGen<'icfg> {
     icfg: &'icfg Icfg<'icfg>,
+    threadpool: &'icfg ThreadPool,
 }
 
 impl<'icfg> CodeGen<'icfg> {
-    pub fn new(icfg: &'icfg Icfg) -> Self {
-        Self { icfg }
+    pub fn new(icfg: &'icfg Icfg, threadpool: &'icfg ThreadPool) -> Self {
+        Self { icfg, threadpool }
     }
 
     pub fn gen_code(&self, file_name: &str) {
         let now = std::time::Instant::now();
 
-        let mut buffer = String::with_capacity(65536);
+        let buffer = Mutex::new(String::with_capacity(65536));
 
-        let vec = vec![1, 2, 3, 4];
-
-        match &vec[..] {
-            [1, x @ .., 3, 4] => println!("{:?}", x),
-
-            _ => println!("No match"),
-        }
-
-        for (symbol, fn_sig) in self.icfg.resolved_information.clib_fns.iter().map(|def_id| {
+        let iter = self.icfg.resolved_information.clib_fns.iter().map(|def_id| {
             let name_binding = self.icfg.resolved_information.get_name_binding_from_def_id(def_id);
             match name_binding.kind {
                 NameBindingKind::Fn(fn_sig, _, Externism::Clib) => (def_id.symbol, fn_sig),
                 _ => panic!("Expected extern function"),
             }
-        }) {
-            write!(
-                buffer,
-                "declare {} @{}(",
-                get_llvm_ty(*fn_sig.ret_ty, &self.icfg.resolved_information),
-                symbol.get()
-            ).expect("Error writing to buffer");
+        });
 
-            for (i, arg_ty) in fn_sig.args.iter().enumerate() {
-                write!(buffer, "{}", get_llvm_ty(*arg_ty, &self.icfg.resolved_information)).expect(
-                    "Error writing to buffer"
-                );
-                if *arg_ty != Ty::VariadicArgs {
-                    write!(buffer, " noundef").expect("Error writing to buffer");
-                }
-                if i != fn_sig.args.len() - 1 {
-                    write!(buffer, ", ").expect("Error writing to buffer");
-                }
+        scope_with(self.threadpool, |s| {
+            let buffer = &buffer;
+            for (symbol, fn_sig) in iter {
+                s.execute(move || {
+                    let mut local_buffer = String::with_capacity(128);
+                    write!(
+                        local_buffer,
+                        "declare {} @{}(",
+                        get_llvm_ty(*fn_sig.ret_ty, &self.icfg.resolved_information),
+                        symbol.get()
+                    ).expect("Error writing to buffer");
+
+                    for (i, arg_ty) in fn_sig.args.iter().enumerate() {
+                        write!(
+                            local_buffer,
+                            "{}",
+                            get_llvm_ty(*arg_ty, &self.icfg.resolved_information)
+                        ).expect("Error writing to buffer");
+                        if *arg_ty != Ty::VariadicArgs {
+                            write!(local_buffer, " noundef").expect("Error writing to buffer");
+                        }
+                        if i != fn_sig.args.len() - 1 {
+                            write!(local_buffer, ", ").expect("Error writing to buffer");
+                        }
+                    }
+
+                    writeln!(local_buffer, ")").expect("Error writing to buffer");
+
+                    buffer.lock().unwrap().push_str(&local_buffer);
+                });
+            }
+        });
+
+        // This part isn't parallelized because there's so little to do in each loop iteration (about 1% of the total time)
+        {
+            let mut locked_buffer = buffer.lock().unwrap();
+            writeln!(locked_buffer).expect("Error writing to buffer");
+
+            for (const_str, const_str_len) in self.icfg.resolved_information.const_strs.iter() {
+                writeln!(
+                    locked_buffer,
+                    "{} = private unnamed_addr constant [{} x i8] c\"{}\"",
+                    const_str.display_as_str(),
+                    const_str_len.0,
+                    const_str.symbol.get()
+                ).expect("Error writing to buffer");
             }
 
-            writeln!(buffer, ")").expect("Error writing to buffer");
+            writeln!(locked_buffer).expect("Error writing to buffer");
         }
 
-        writeln!(buffer).expect("Error writing to buffer");
-
-        for (const_str, const_str_len) in self.icfg.resolved_information.const_strs.iter() {
-            writeln!(
-                buffer,
-                "{} = private unnamed_addr constant [{} x i8] c\"{}\"",
-                const_str.display_as_str(),
-                const_str_len.0,
-                const_str.symbol.get()
-            ).expect("Error writing to buffer");
-        }
-
-        writeln!(buffer).expect("Error writing to buffer");
-
-        std::thread::scope(|s| {
-            let mut join_handles = Vec::with_capacity(self.icfg.cfgs.len());
+        scope_with(self.threadpool, |s| {
             let resolved_information = &self.icfg.resolved_information;
 
             for cfg in self.icfg.cfgs.iter() {
-                let join_handle = s.spawn(|| {
-                    let mut buffer = String::with_capacity(1024);
-                    CodeGenUnit::new(cfg, resolved_information).gen_code(&mut buffer);
-                    buffer
+                let buffer = &buffer;
+                s.execute(move || {
+                    let mut local_buffer = String::with_capacity(1024);
+                    CodeGenUnit::new(cfg, resolved_information).gen_code(&mut local_buffer);
+                    buffer.lock().unwrap().push_str(&local_buffer);
                 });
-                join_handles.push(join_handle);
-            }
-
-            for join_handle in join_handles {
-                write!(buffer, "{}", join_handle.join().unwrap()).expect("Error writing to buffer");
             }
         });
 
@@ -670,7 +676,7 @@ impl<'icfg> CodeGen<'icfg> {
 
             let mut file = File::create(&file_name_with_extension).expect("Error creating file");
             use std::io::Write;
-            file.write_all(buffer.as_bytes()).expect("Error writing to file");
+            file.write_all(buffer.lock().unwrap().as_bytes()).expect("Error writing to file");
         }
 
         println!("Code generation took: {:?}", now.elapsed());

@@ -1,20 +1,11 @@
-use std::{ cell::RefCell, path::{ self, PathBuf }, sync::Mutex };
+use std::{ path::{ self, PathBuf }, sync::Mutex };
 
-use ast::{
-    Ast,
-    AstArena,
-    AstArenaObject,
-    AstPartlyResolved,
-    AstPrettifier,
-    AstUnvalidated,
-    ResolverHandle,
-    VisitAst,
-};
+use ast::{ Ast, AstArena, AstArenaObject, AstUnvalidated, VisitAst };
 use bumpalo::Bump;
 use codegen::CodeGen;
 use icfg::Icfg;
 use icfg_builder::IcfgBuilder;
-use ir::{ DefId, GlobalMem, ModId, NodeId, ResolvedInformation, Symbol };
+use ir::ModId;
 use parser::Parser;
 use resolver::Resolver;
 use threadpool::ThreadPool;
@@ -75,7 +66,9 @@ impl Compiler {
         println!("Viskum compilation took: {:?}", now.elapsed());
 
         let now = std::time::Instant::now();
-        CodeGen::new(&icfg).gen_code(&self.entry_file.as_os_str().to_str().unwrap());
+        CodeGen::new(&icfg, &self.threadpool).gen_code(
+            &self.entry_file.as_os_str().to_str().unwrap()
+        );
         println!("LLVM compilation took: {:?}", now.elapsed());
     }
 
@@ -161,7 +154,10 @@ impl Compiler {
         let ast_arena = AstArena::new();
 
         let (resolved_functions, resolved_information) = {
-            let (asts, entry_mod_id) = self.parse_all_files_in_package(&ast_arena);
+            let now = std::time::Instant::now();
+            let (asts, _) = self.parse_all_files_in_package(&ast_arena);
+            println!("Parsing took: {:?}", now.elapsed());
+            let now = std::time::Instant::now();
 
             let total_nodes = asts
                 .iter()
@@ -178,6 +174,9 @@ impl Compiler {
                 total_nodes,
                 total_def_count /*, global_mems */
             );
+
+            println!("Setting up resolver took: {:?}", now.elapsed());
+            let now = std::time::Instant::now();
 
             let asts_count = asts.len();
 
@@ -202,12 +201,24 @@ impl Compiler {
                     }
                 });
 
+                // let merged_results = global_visit_results
+                //     .into_inner()
+                //     .unwrap()
+                //     .into_iter()
+                //     .fold(MergedResults::new(), |mut acc, result| {
+                //         acc.merge(result);
+                //         acc
+                //     });
+
                 for global_visit_result in global_visit_results.into_inner().unwrap() {
                     resolver.use_visit_result_from_pre_resolve(global_visit_result);
                 }
 
                 ast_visit_results.into_inner().unwrap()
             };
+
+            println!("Pre-resolving took: {:?}", now.elapsed());
+            let now = std::time::Instant::now();
 
             let ast_resolve_visit_results = {
                 let ast_visit_results = Mutex::new(Vec::with_capacity(asts_count));
@@ -237,6 +248,9 @@ impl Compiler {
                 ast_visit_results.into_inner().unwrap()
             };
 
+            println!("Resolving took: {:?}", now.elapsed());
+            let now = std::time::Instant::now();
+
             let _ = {
                 let ast_visit_results = Mutex::new(Vec::with_capacity(asts_count));
                 let ast_visit_results_ref = &ast_visit_results;
@@ -265,69 +279,17 @@ impl Compiler {
                 ast_visit_results.into_inner().unwrap()
             };
 
-            // std::thread::scope(|s| {
-            //     for (ast, file_content, mod_id) in asts {
-            //         // AstPrettifier::new(&ast, &file_content, None).print_ast();
-
-            //         let (ast, global_visit_result, local_visit_result) = ast
-            //             .into_visitor(&resolver)
-            //             .visit();
-
-            //         resolver.use_visit_result_from_pre_resolve(global_visit_result);
-
-            //         // resolver.node_id_to_def_id.extend(global_visit_result.node_id_to_def_id);
-
-            //         let (ast, global_visit_result, local_visit_result) = ast
-            //             .into_visitor(&resolver, local_visit_result)
-            //             .visit();
-
-            //         resolver.use_visit_result_from_resolve(global_visit_result);
-
-            //         let (ast, global_visit_result, local_visit_result) = ast
-            //             .into_visitor(&resolver, local_visit_result)
-            //             .visit();
-
-            //         resolver.use_visit_result_from_type_check(global_visit_result);
-
-            //         // let ast = ast.into_visitor(&mut resolver, &visit_result, true).visit();
-
-            //         // s.spawn(
-            //         //     || {
-            //         //         // let (forward_declared_ast, lexical_relations) =
-            //         //         //     resolver.forward_declare_ast(ast);
-            //         //     }
-            //         // );
-            //     }
-            // });
-
-            // let mut parser = Parser::new(&file_content, &ast_arena, ModId(0));
-
-            // let ast = parser.parse_ast();
-            // let (forward_declared_ast, lexical_relations) = resolver.forward_declare_ast(ast);
-            // let resolved_ast = resolver.resolve_ast(forward_declared_ast, &lexical_relations);
-            // resolver.type_check_ast(resolved_ast);
+            println!("Type checking took: {:?}", now.elapsed());
 
             resolver.take_resolved_information()
         };
 
-        // AstPrettifier::new(
-        //     &ast,
-        //     &file_content,
-        //     Some(&resolved_information.node_id_to_ty)
-        // ).print_ast();
+        let now = std::time::Instant::now();
 
-        let icfg_builder = IcfgBuilder::new(resolved_information, arena);
+        let icfg_builder = IcfgBuilder::new(resolved_information, &self.threadpool);
         let icfg = icfg_builder.build(resolved_functions);
+
+        println!("Building ICFG took: {:?}", now.elapsed());
         icfg
     }
-
-    // fn get_file_content(&self) -> String {
-    //     match std::fs::read_to_string(&format!("{}.vs", self.file)) {
-    //         Ok(file_content) => file_content,
-    //         Err(e) => {
-    //             eprintln!("Error reading file: {}", e);
-    //             std::process::exit(1);
-    //         }
-    //     }
-    // }
 }
