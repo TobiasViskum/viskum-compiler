@@ -17,6 +17,12 @@ pub struct Compiler {
     threadpool: ThreadPool,
 }
 
+impl Default for Compiler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Compiler {
     pub fn new() -> Self {
         let mut args = std::env::args();
@@ -67,7 +73,7 @@ impl Compiler {
 
         let now = std::time::Instant::now();
         CodeGen::new(&icfg, &self.threadpool).gen_code(
-            &self.entry_file.as_os_str().to_str().unwrap()
+            self.entry_file.as_os_str().to_str().unwrap()
         );
         println!("LLVM compilation took: {:?}", now.elapsed());
     }
@@ -101,7 +107,7 @@ impl Compiler {
             .enumerate()
             .find_map(|(i, file)| {
                 if file == &self.entry_file {
-                    return Some(ModId(i as u32));
+                    Some(ModId(i as u32))
                 } else {
                     None
                 }

@@ -1,13 +1,10 @@
-use std::{ cell::RefCell, sync::Mutex };
+use std::sync::Mutex;
 
 use ast::{
     get_ident_node_from_arg_kind,
     get_node_id_from_expr,
     AsigneeExpr,
-    Ast,
-    AstTypeChecked,
     CallExpr,
-    CompDeclItem,
     CondKind,
     Expr,
     FieldExpr,
@@ -16,7 +13,6 @@ use ast::{
     IfExpr,
     IfFalseBranchExpr,
     IndexExpr,
-    ItemStmt,
     LoopExpr,
     NullExpr,
     Pat,
@@ -27,7 +23,6 @@ use ast::{
     Visitor,
 };
 
-use bumpalo::Bump;
 use fxhash::FxHashMap;
 use icfg::{
     BasicBlock,
@@ -58,7 +53,6 @@ use ir::{
     CfgFnKind,
     DefId,
     GetTyAttr,
-    GlobalMem,
     HasSelfArg,
     IntTy,
     LocalMem,
@@ -112,7 +106,7 @@ impl<'icfg, 'th> IcfgBuilder<'icfg, 'th> where 'icfg: 'th {
         }
     }
 
-    pub fn build<'ast>(mut self, resolved_functions: ResolvedFunctions<'ast>) -> Icfg<'icfg> {
+    pub fn build<'ast>(self, resolved_functions: ResolvedFunctions<'ast>) -> Icfg<'icfg> {
         let main_fn = resolved_functions.main_fn.expect("Do something if main doesn't exist");
         let cfg_builder = self.new_cfg_builder(main_fn, true);
         let cfg = cfg_builder.build_cfg();
@@ -567,8 +561,8 @@ impl Default for VisitResult {
     }
 }
 
-fn set_result_mem_id_to_if_expr_result<'icfg, 'ast, 'c>(
-    cfg_builder: &mut CfgBuilder<'icfg, 'ast, 'c>,
+fn set_result_mem_id_to_if_expr_result<'ast>(
+    cfg_builder: &mut CfgBuilder<'_, 'ast, '_>,
     if_expr: &'ast IfExpr<'ast>
 ) -> ResultMemId {
     let result_mem_id = cfg_builder.set_result_mem_id_to_expr_result(
@@ -583,7 +577,7 @@ fn set_result_mem_id_to_if_expr_result<'icfg, 'ast, 'c>(
     result_mem_id
 }
 
-impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
+impl<'ast> Visitor<'ast> for CfgBuilder<'_, 'ast, '_> {
     /// This is a kind of "lazy-load" result. For example when visiting a variable, it just returns the place it lives in.
     /// It doesn't add the load node before requesting so with the method `get_operand_from_visit_result`.
     /// This useful because for example in a field expr, we don't necessarily want to add a load node (we may want to add a ByteAccessNode instead)
@@ -667,8 +661,8 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
     }
 
     fn visit_if_expr(&mut self, if_expr: &'ast IfExpr<'ast>) -> Self::Result {
-        fn make_cond_and_locals_from_cond_pat<'icfg, 'ast, 'c>(
-            cfg_builder: &mut CfgBuilder<'icfg, 'ast, 'c>,
+        fn make_cond_and_locals_from_cond_pat<'ast>(
+            cfg_builder: &mut CfgBuilder<'_, 'ast, '_>,
             pat: Pat<'ast>,
             expr_visit_result: VisitResult
             // expr_operand: Operand,
@@ -728,8 +722,7 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
                     if
                         tuple_struct_pat.fields
                             .iter()
-                            .find(|x| !matches!(x, Pat::IdentPat(_)))
-                            .is_some()
+                            .any(|x| !matches!(&x, Pat::IdentPat(_)))
                     {
                         cfg_builder.new_basic_block();
                     }
@@ -817,8 +810,8 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
 
         let ty_to_match = self.icfg_builder.get_ty_from_node_id(if_expr.ast_node_id);
 
-        fn compile_true_block<'icfg, 'ast, 'c>(
-            cfg_builder: &mut CfgBuilder<'icfg, 'ast, 'c>,
+        fn compile_true_block<'ast>(
+            cfg_builder: &mut CfgBuilder<'_, 'ast, '_>,
             true_block: &'ast [Stmt<'ast>],
             result_mem_id: Option<ResultMemId>,
             ty_to_match: Ty
@@ -1106,8 +1099,8 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
     }
 
     fn visit_loop_expr(&mut self, loop_expr: &'ast LoopExpr<'ast>) -> Self::Result {
-        fn set_result_mem_id_to_loop_expr_result<'icfg, 'ast, 'c>(
-            cfg_builder: &mut CfgBuilder<'icfg, 'ast, 'c>,
+        fn set_result_mem_id_to_loop_expr_result<'ast>(
+            cfg_builder: &mut CfgBuilder<'_, 'ast, '_>,
             loop_expr: &'ast LoopExpr<'ast>
         ) -> ResultMemId {
             cfg_builder.set_result_mem_id_to_expr_result(
@@ -1124,8 +1117,8 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
             None
         };
 
-        let prev_break_bb_ids = std::mem::replace(&mut self.break_bb_ids, vec![]);
-        let prev_continue_bb_ids = std::mem::replace(&mut self.continue_bb_ids, vec![]);
+        let prev_break_bb_ids = std::mem::take(&mut self.break_bb_ids);
+        let prev_continue_bb_ids = std::mem::take(&mut self.continue_bb_ids);
 
         // Pushes branch node to loop, to the BasicBlock before the loop
         let loop_bb_id = self.get_next_bb_id();
@@ -1285,7 +1278,7 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
             ty.auto_deref()
         );
         let mut call_args_tys = Vec::with_capacity(fn_args_tys.len());
-        if let Some(_) = self_operand {
+        if self_operand.is_some() {
             call_args_tys.push(fn_args_tys[0]);
         }
 
@@ -1297,7 +1290,7 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
             }
 
             for (i, arg) in call_expr.args.iter().enumerate() {
-                let i = if let Some(_) = self_operand { i + 1 } else { i };
+                let i = if self_operand.is_some() { i + 1 } else { i };
 
                 let mut ty_to_match = if found_variadic {
                     self.icfg_builder.get_ty_from_node_id(get_node_id_from_expr(*arg))
@@ -1824,7 +1817,7 @@ impl<'icfg, 'ast, 'c> Visitor<'ast> for CfgBuilder<'icfg, 'ast, 'c> {
     }
 }
 
-impl<'icfg, 'ast, 'c> CfgBuilder<'icfg, 'ast, 'c> {
+impl<'ast> CfgBuilder<'_, 'ast, '_> {
     fn init_tuple_or_struct_field(
         &mut self,
         expr: Expr<'ast>,

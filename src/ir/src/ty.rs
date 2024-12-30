@@ -232,7 +232,7 @@ impl Ty {
 
         if let Some(ty) = get_biggest(lhs, rhs) {
             Some(ty)
-        } else { get_biggest(rhs, lhs).map(|ty| ty) }
+        } else { get_biggest(rhs, lhs) }
     }
 
     pub fn from_int(int: i64) -> Self {

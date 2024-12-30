@@ -249,7 +249,7 @@ impl<'a> Lexer<'a> {
     }
 
     fn is_digit(char: char) -> bool {
-        ('0'..='9').contains(&char)
+        char.is_ascii_digit()
     }
 
     fn is_alphabetic(char: char) -> bool {
