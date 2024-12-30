@@ -46,6 +46,8 @@ use crate::{
     ImportItem,
     Pat,
     Path,
+    PathField,
+    PkgIdentNode,
     ResolverHandle,
     StructExpr,
     StructItem,
@@ -66,6 +68,7 @@ pub struct LocalVisitResult {
 #[derive(Debug)]
 pub struct GlobalVisitResult {
     pub pkg_symbol_to_def_id: FxHashMap<Symbol, DefId>,
+    pub pkg_def_id_to_res_kind: FxHashMap<DefId, ResKind>,
 }
 
 #[derive(Debug)]
@@ -78,6 +81,7 @@ pub struct AstPreResolver<'ctx, 'ast, 'b, E> where E: ResolverHandle<'ctx, 'ast,
     node_id_to_def_id: FxHashMap<NodeId, DefId>,
     lexical_binding_to_def_id: FxHashMap<LexicalBinding, DefId>,
     pkg_symbol_to_def_id: FxHashMap<Symbol, DefId>,
+    pkg_def_id_to_res_kind: FxHashMap<DefId, ResKind>,
     next_scope_id: ScopeId,
     next_context_id: ContextId,
     is_in_impl: bool,
@@ -99,6 +103,7 @@ impl<'ctx, 'ast, 'b, E> VisitAst<'ast, AstUnvalidated>
             self.ast.next_state(),
             GlobalVisitResult {
                 pkg_symbol_to_def_id: self.pkg_symbol_to_def_id,
+                pkg_def_id_to_res_kind: self.pkg_def_id_to_res_kind,
             },
             LocalVisitResult {
                 lexical_context_to_parent_lexical_context: self.lexical_context_to_parent_lexical_context,
@@ -139,6 +144,7 @@ impl<'ctx, 'ast, 'b, E> AstPreResolver<'ctx, 'ast, 'b, E>
                 FxBuildHasher::default()
             ),
             pkg_symbol_to_def_id: FxHashMap::default(),
+            pkg_def_id_to_res_kind: FxHashMap::default(),
             next_scope_id: ScopeId(1),
             next_context_id: ContextId(1),
             is_in_impl: false,
@@ -162,6 +168,7 @@ impl<'ctx, 'ast, 'b, E> AstPreResolver<'ctx, 'ast, 'b, E>
             // def_id.node_id.mod_id
         );
 
+        self.pkg_def_id_to_res_kind.insert(def_id, res_kind);
         self.lexical_binding_to_def_id.insert(lexical_binding, def_id);
     }
 
@@ -344,6 +351,20 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
         }
     }
 
+    fn visit_path_field(&mut self, path_field: &'ast PathField<'ast>) -> Self::Result {
+        self.visit_path(path_field.lhs);
+        self.bind_node_id_to_lexical_context(path_field.rhs.ast_node_id);
+        self.bind_node_id_to_lexical_context(path_field.ast_node_id);
+    }
+
+    fn visit_path_segment(&mut self, path_segment: &'ast IdentNode) -> Self::Result {
+        self.bind_node_id_to_lexical_context(path_segment.ast_node_id);
+    }
+
+    fn visit_path_pkg(&mut self, pkg_ident_expr: &'ast PkgIdentNode) -> Self::Result {
+        self.bind_node_id_to_lexical_context(pkg_ident_expr.ast_node_id);
+    }
+
     fn visit_field_expr(&mut self, field_expr: &'ast FieldExpr<'ast>) -> Self::Result {
         self.visit_expr(field_expr.lhs);
     }
@@ -355,7 +376,7 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
 
     fn visit_import_item(&mut self, import_item: &'ast ImportItem<'ast>) -> Self::Result {
         for path in import_item.import_items_path {
-            self.traverse_path_and_bind_idents(*path);
+            self.visit_path(*path);
         }
     }
 

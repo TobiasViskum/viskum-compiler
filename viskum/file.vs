@@ -1,4 +1,4 @@
-
+import pkg.Point, pkg.doSomething
 
 declare fn.C realloc(prevItems [*]int, bytesize int) [*]int
 declare fn.C malloc(bytesize int) [*]int
@@ -172,7 +172,7 @@ fn runTests() {
 
 fn.C main(argc int, args *str) {
 
-    point := pkg.Point.new(2, 3, 4)
+    point := Point.new(2, 3, 4)
 
     sumOfPoint := point.sum()
 
@@ -180,7 +180,7 @@ fn.C main(argc int, args *str) {
 
     printf("Sum of point: %d\n", sumOfPoint)
     
-    printf("doSomething result: %d\n", pkg.doSomething())
+    printf("doSomething result: %d\n", doSomething())
    
     runTests()
 

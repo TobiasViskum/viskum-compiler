@@ -289,6 +289,26 @@ pub enum Path<'ast> {
     PathField(&'ast PathField<'ast>),
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum ImportPath<'ast> {
+    Path(Path<'ast>),
+    PathEverything(&'ast PathEverything),
+}
+
+/// `*` in an import path to import everything e.g. `pkg.*`
+#[derive(Debug, Clone, Copy, new)]
+pub struct PathEverything {
+    pub span: Span,
+    pub ast_node_id: NodeId,
+}
+
+/// Multiple paths seperated by commas `,` in brackes e.g. `pkg.{A, B, C}`
+#[derive(Debug, Clone, Copy, new)]
+pub struct PathMultiple<'ast> {
+    pub paths: &'ast [Path<'ast>],
+    pub ast_node_id: NodeId,
+}
+
 /// Paths seperated by dots `.`
 #[derive(Debug, Clone, Copy, new)]
 pub struct PathField<'ast> {

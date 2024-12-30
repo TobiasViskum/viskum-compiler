@@ -53,6 +53,7 @@ pub struct Resolver<'ctx, 'ast> {
 
     // Package information
     pkg_symbol_to_def_id: FxHashMap<Symbol, DefId>,
+    pkg_def_id_to_res_kind: FxHashMap<DefId, ResKind>,
     pkg_def_id_to_name_binding: FxHashMap<DefId, NameBinding<'ctx>>,
     pkg_def_id_to_ty: FxHashMap<DefId, Ty>,
     pkg_trait_impl_id_to_def_ids: FxHashMap<TraitImplId, Vec<DefId>>,
@@ -68,6 +69,7 @@ pub struct Resolver<'ctx, 'ast> {
     // def_id_to_global_mem_id: FxHashMap<DefId, GlobalMemId>,
     // global_mems: &'ctx RefCell<Vec<GlobalMem>>,
 
+    /// Replace with `OnceLock<&'ast FnItem<'ast>>`
     found_main_fn: Mutex<Option<&'ast FnItem<'ast>>>,
     pending_functions: Vec<&'ast FnItem<'ast>>,
     /// This is all const strings
@@ -157,6 +159,7 @@ impl<'ctx, 'ast> Resolver<'ctx, 'ast> where 'ctx: 'ast {
             def_id_to_impl_id: Default::default(),
 
             pkg_def_id_to_name_binding: Default::default(),
+            pkg_def_id_to_res_kind: Default::default(),
             pkg_symbol_to_def_id: Default::default(),
             pkg_trait_impl_id_to_def_ids: Default::default(),
             pkg_def_id_to_ty: Default::default(),
@@ -183,11 +186,8 @@ impl<'ctx, 'ast> Resolver<'ctx, 'ast> where 'ctx: 'ast {
         }
 
         self.pkg_symbol_to_def_id.extend(global_visit_result.pkg_symbol_to_def_id);
+        self.pkg_def_id_to_res_kind.extend(global_visit_result.pkg_def_id_to_res_kind);
     }
-
-    // pub fn create_def(&mut self) {
-    //     if self.pkg_def_id.get()
-    // }
 
     pub fn use_visit_result_from_resolve(
         &mut self,
@@ -336,6 +336,9 @@ impl<'ctx, 'ast, T> ResolverHandle<'ctx, 'ast, T> for Resolver<'ctx, 'ast> where
     }
     fn lookup_pkg_member_ty(&self, def_id: &DefId) -> Option<Ty> {
         self.pkg_def_id_to_ty.get(def_id).copied()
+    }
+    fn lookup_pkg_member_res_kind(&self, def_id: &DefId) -> ResKind {
+        *self.pkg_def_id_to_res_kind.get(def_id).expect("Expected ResKind")
     }
     fn lookup_pkg_member_name_binding(&self, def_id: &DefId) -> Option<&NameBinding<'ctx>> {
         self.pkg_def_id_to_name_binding.get(&def_id)

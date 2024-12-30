@@ -41,6 +41,7 @@ use crate::{
     NullExpr,
     Pat,
     Path,
+    PathEverything,
     PathField,
     PkgIdentNode,
     PlaceExpr,
@@ -111,6 +112,16 @@ pub trait Visitor<'ast>: Sized {
 
     #[allow(unused_variables)]
     fn visit_path_segment(&mut self, path_segment: &'ast IdentNode) -> Self::Result {
+        Self::default_result()
+    }
+
+    #[allow(unused_variables)]
+    fn visit_path_pkg(&mut self, pkg_ident_expr: &'ast PkgIdentNode) -> Self::Result {
+        Self::default_result()
+    }
+
+    #[allow(unused_variables)]
+    fn visit_path_everything(&mut self, path_everything: &'ast PathEverything) -> Self::Result {
         Self::default_result()
     }
 
@@ -616,7 +627,7 @@ pub fn walk_path<'a, V>(visitor: &mut V, path: Path<'a>) -> V::Result where V: V
     match path {
         Path::PathField(path_field) => visitor.visit_path_field(path_field),
         Path::PathSegment(path_segment) => visitor.visit_path_segment(path_segment),
-        Path::PathPkg(path_pkg) => visitor.visit_pkg_ident_expr(path_pkg),
+        Path::PathPkg(path_pkg) => visitor.visit_path_pkg(path_pkg),
     }
 }
 

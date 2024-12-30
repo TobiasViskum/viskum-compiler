@@ -18,8 +18,6 @@ impl Point {
     }
 }
 
-
-
 fn doSomething() int {
     ret 2 * 3
 }

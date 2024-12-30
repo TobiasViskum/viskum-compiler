@@ -234,10 +234,10 @@ impl<'ctx, 'ast, 'b, E> AstResolver<'ctx, 'ast, 'b, E>
         }
     }
 
-    fn resolve_path_ty_and_def_id(&mut self, path: Path<'ast>) -> DefId {
+    fn resolve_path_def_id(&mut self, path: Path<'ast>) -> DefId {
         match path {
             Path::PathField(path_field) => {
-                let _ = self.resolve_path_ty_and_def_id(path_field.lhs);
+                let _ = self.resolve_path_def_id(path_field.lhs);
 
                 if let Path::PathPkg(_) = path_field.lhs {
                     let rhs_symbol = Symbol::from_node_id(path_field.rhs.ast_node_id);
@@ -249,7 +249,7 @@ impl<'ctx, 'ast, 'b, E> AstResolver<'ctx, 'ast, 'b, E>
                     self.set_def_id_to_node_id(path_field.rhs.ast_node_id, def_id);
                     def_id
                 } else {
-                    unreachable!("Unreachable as long as belows panics")
+                    panic!("Extern packages are not yet supported")
                 }
             }
             Path::PathSegment(ident_node) => {
@@ -534,14 +534,13 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
                     .find(|&x| x.symbol == rhs_symbol);
 
                 if is_symbol_in_file.is_some() {
-                    todo!(
-                        "Report error: Cannot get pkg.{} as `{}` is defined in the current file",
+                    println!(
+                        "Suggestion: `{}` is defined in the current file so it's unecessary to access it like this: pkg.{}",
                         rhs_symbol.get(),
                         rhs_symbol.get()
                     );
-                } else {
-                    self.set_def_id_to_node_id(field_expr.rhs.ast_node_id, def_id);
                 }
+                self.set_def_id_to_node_id(field_expr.rhs.ast_node_id, def_id);
             } else {
                 todo!("Report error: Undefined package member: {}", rhs_symbol.get());
             }
@@ -609,14 +608,20 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
     }
 
     fn visit_import_item(&mut self, import_item: &'ast ImportItem<'ast>) -> Self::Result {
-        println!("Imported file: {:#?}", import_item);
+        for import_item in import_item.import_items_path.iter() {
+            let def_id = self.resolve_path_def_id(*import_item);
+            let lexical_binding = LexicalBinding::new(
+                LexicalContext { context_id: ContextId(0), scope_id: ScopeId(0) },
+                def_id.symbol,
+                self.resolver_handle.lookup_pkg_member_res_kind(&def_id)
+            );
+            self.local_visit_result.lexical_binding_to_def_id.insert(lexical_binding, def_id);
+        }
 
         if let Some(from_path) = import_item.from_path {
             todo!("Importing from other packages not supported yet");
         }
         // let result = self.resolver_handle.compile_rel_file(import_item.from_path);
-
-        todo!();
     }
 
     fn visit_comp_fn_decl_item(
@@ -666,7 +671,7 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
     }
 
     fn visit_impl_item(&mut self, impl_item: &'ast ImplItem<'ast>) -> Self::Result {
-        let implementor_id = self.resolve_path_ty_and_def_id(impl_item.implementor_path);
+        let implementor_id = self.resolve_path_def_id(impl_item.implementor_path);
 
         // self.lookup_ident_declaration(impl_item.ident_node, ResKind::Adt).expect(
         //     format!(

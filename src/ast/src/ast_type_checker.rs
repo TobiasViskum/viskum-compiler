@@ -819,13 +819,33 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
         Ty::Unkown
     }
 
+    fn visit_path_pkg(&mut self, pkg_ident_expr: &'ast PkgIdentNode) -> Self::Result {
+        self.set_type_to_node_id(pkg_ident_expr.ast_node_id, Ty::Package);
+        Ty::Package
+    }
+
     fn visit_path_field(&mut self, path_field: &'ast PathField<'ast>) -> Self::Result {
         let lhs_ty = self.visit_path(path_field.lhs);
         let rhs_symbol = Symbol::from_node_id(path_field.rhs.ast_node_id);
 
         let def_id = match lhs_ty {
             Ty::AtdConstructer(def_id) => def_id,
-            _ => panic!("Invalid lhs of path field"),
+            Ty::Package => {
+                let def_id = self.get_def_id_from_node_id(path_field.rhs.ast_node_id);
+                let name_binding = self.resolver_handle
+                    .lookup_pkg_member_name_binding(&def_id)
+                    .expect("Package member not found");
+
+                return match name_binding.kind {
+                    NameBindingKind::Adt(_) => Ty::AtdConstructer(def_id),
+                    NameBindingKind::Fn(_, _, _) => Ty::FnDef(def_id),
+                    _ =>
+                        panic!(
+                            "Expected adt or function (because that's the only kinds of members a package can have and export)"
+                        ),
+                };
+            }
+            ty => { panic!("Invalid lhs of path field: {}\n{:?}", ty, path_field.lhs) }
         };
 
         let name_binding = self.get_namebinding_from_def_id(def_id);

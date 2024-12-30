@@ -122,6 +122,7 @@ pub trait ResolverHandle<'ctx, 'ast, T> where T: AstState {
     fn lookup_pkg_member(&self, symbol: Symbol) -> Option<DefId>;
     fn lookup_pkg_member_name_binding(&self, def_id: &DefId) -> Option<&NameBinding<'ctx>>;
     fn lookup_pkg_member_ty(&self, def_id: &DefId) -> Option<Ty>;
+    fn lookup_pkg_member_res_kind(&self, def_id: &DefId) -> ResKind;
     fn lookup_trait_impl_def_ids(&self, trait_impl_id: &TraitImplId) -> Option<&Vec<DefId>>;
     fn get_or_set_pkg_def_id(&self, pkg_ident_node: &'ast PkgIdentNode) -> DefId;
 
