@@ -15,6 +15,12 @@ impl Symbol {
         with_global_session(|globals| globals.intern_str(str))
     }
 
+    pub fn can_be_constant(&self) -> bool {
+        self.get()
+            .chars()
+            .all(|c| (c.is_uppercase() || c == '_'))
+    }
+
     pub fn new_with_node_id(str: &str, node_id: NodeId) -> Self {
         with_global_session(|globals| {
             let symbol = globals.intern_str(str);

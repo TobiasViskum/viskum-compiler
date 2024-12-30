@@ -19,24 +19,6 @@ pub trait ResolverHandle<'ctx, 'ast, T> where T: AstState {
     fn lookup_trait_impl_def_ids(&self, trait_impl_id: &TraitImplId) -> Option<&Vec<DefId>>;
     fn get_or_set_pkg_def_id(&self, pkg_ident_node: &'ast PkgIdentNode) -> DefId;
 
-    // /// Saves the DefId of the extern function in the resolver
-    // fn mark_as_extern_fn(&mut self, def_id: DefId);
-    /// Makes a new DefId and binds it to the given NodeId
-    fn lookup_ident_declaration(
-        &mut self,
-        symbol: Symbol,
-        res_kind: ResKind,
-        node_id: NodeId,
-        lexical_context_to_parent_lexical_context: &FxHashMap<LexicalContext, LexicalContext>
-    ) -> Option<DefId>;
-    fn lookup_ident_definition(
-        &mut self,
-        symbol: Symbol,
-        res_kind: ResKind,
-        node_id: NodeId,
-        lexical_context_to_parent_lexical_context: &FxHashMap<LexicalContext, LexicalContext>
-    ) -> Option<(DefId, NameBinding<'ctx>)>;
-
     fn set_main_fn(&self, fn_item: &'ast FnItem<'ast>) -> bool;
 
     /// Makes the string global, so all identical strings after this call, will be bound to the same DefId

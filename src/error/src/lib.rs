@@ -147,6 +147,7 @@ impl ErrorKind {
                     ResKind::Variable => "varable",
                     ResKind::Fn => "function",
                     ResKind::ConstStr => "constant string",
+                    ResKind::ConstVariable => "constant variable",
                 };
 
                 write!(

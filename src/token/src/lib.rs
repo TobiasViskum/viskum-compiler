@@ -145,10 +145,6 @@ pub enum TokenKind {
     Typedef,
     /// Keyword `import`
     Import,
-    /// Keyword `export`
-    Export,
-    /// Keyword `from`
-    From,
     /// Keyword `pkg`
     Pkg,
 
@@ -185,8 +181,6 @@ impl TokenKind {
             Self::Return => "ret",
             Self::Typedef => "typedef",
             Self::Import => "import",
-            Self::Export => "export",
-            Self::From => "from",
             Self::True => "true",
             Self::False => "false",
             Self::Null => "null",

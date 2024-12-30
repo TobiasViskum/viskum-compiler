@@ -146,7 +146,6 @@ pub enum ItemStmt<'ast> {
 
 #[derive(Debug, new)]
 pub struct ImportItem<'ast> {
-    pub from_path: Option<Path<'ast>>,
     pub import_items_path: &'ast [Path<'ast>],
     pub ast_node_id: NodeId,
 }

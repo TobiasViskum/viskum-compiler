@@ -134,8 +134,6 @@ impl<'a> Lexer<'a> {
 
         match ident {
             "import" => TokenKind::Import,
-            "from" => TokenKind::From,
-            "exprt" => TokenKind::Export,
             "fn" => TokenKind::Fn,
             "declare" => TokenKind::Declare,
             "self" => TokenKind::SmallSelf,

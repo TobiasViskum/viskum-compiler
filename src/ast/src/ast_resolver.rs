@@ -1,4 +1,3 @@
-
 use error::{ Error, ErrorKind };
 use fxhash::{ FxBuildHasher, FxHashMap };
 use ir::{
@@ -215,7 +214,14 @@ impl<'ctx, 'ast, 'b, E> AstResolver<'ctx, 'ast, 'b, E>
         match pat {
             Pat::IdentPat(ident_node) => {
                 let def_id = self.get_def_id_from_node_id(ident_node.ast_node_id);
-                self.make_lexical_binding_to_def_id(def_id, ResKind::Variable);
+
+                let res_kind = if def_id.symbol.can_be_constant() {
+                    ResKind::ConstVariable
+                } else {
+                    ResKind::Variable
+                };
+
+                self.make_lexical_binding_to_def_id(def_id, res_kind);
             }
             Pat::TupleStructPat(tuple_struct_pat) => {
                 for field in tuple_struct_pat.fields.iter() {
@@ -234,7 +240,9 @@ impl<'ctx, 'ast, 'b, E> AstResolver<'ctx, 'ast, 'b, E>
                     let rhs_symbol = Symbol::from_node_id(path_field.rhs.ast_node_id);
                     let def_id = self.resolver_handle
                         .lookup_pkg_member(rhs_symbol)
-                        .unwrap_or_else(|| panic!("`{}` is not a member of package", rhs_symbol.get()));
+                        .unwrap_or_else(||
+                            panic!("`{}` is not a member of package", rhs_symbol.get())
+                        );
                     self.set_def_id_to_node_id(path_field.rhs.ast_node_id, def_id);
                     def_id
                 } else {
@@ -244,8 +252,12 @@ impl<'ctx, 'ast, 'b, E> AstResolver<'ctx, 'ast, 'b, E>
             Path::PathSegment(ident_node) => {
                 let def_id = self
                     .lookup_ident_declaration(ident_node, ResKind::Adt)
-                    .unwrap_or_else(|| panic!("Expected adt `{}` to be defined",
-                            Symbol::from_node_id(ident_node.ast_node_id).get()));
+                    .unwrap_or_else(||
+                        panic!(
+                            "Expected adt `{}` to be defined",
+                            Symbol::from_node_id(ident_node.ast_node_id).get()
+                        )
+                    );
                 self.set_def_id_to_node_id(ident_node.ast_node_id, def_id);
                 def_id
             }
@@ -398,6 +410,33 @@ impl<'ctx, 'ast, 'b, E> AstResolver<'ctx, 'ast, 'b, E>
         let symbol = Symbol::from_node_id(node_id);
 
         match res_kind {
+            ResKind::ConstVariable => {
+                let start_context = self.get_lexical_context_from_node_id(node_id);
+
+                let mut current_context = start_context;
+
+                loop {
+                    if
+                        let Some(def_id) = self.local_visit_result.lexical_binding_to_def_id.get(
+                            &LexicalBinding::new(current_context, symbol, res_kind)
+                        )
+                    {
+                        return Some(*def_id);
+                    }
+                    if
+                        let Some(parent_context) =
+                            self.local_visit_result.lexical_context_to_parent_lexical_context.get(
+                                &current_context
+                            )
+                    {
+                        current_context = *parent_context;
+                    } else {
+                        break;
+                    }
+                }
+
+                todo!();
+            }
             ResKind::ConstStr => {
                 unimplemented!("Should not be here (const str in lookup_ident_declaration)");
                 // if let Some(&(def_id, _)) = self.str_symbol_to_def_id.get(&symbol) {
@@ -414,15 +453,9 @@ impl<'ctx, 'ast, 'b, E> AstResolver<'ctx, 'ast, 'b, E>
                         break;
                     }
 
-                    let lexical_binding = LexicalBinding::new(
-                        current_context,
-                        symbol,
-                        res_kind
-                        // node_id.mod_id
-                    );
                     if
                         let Some(def_id) = self.local_visit_result.lexical_binding_to_def_id.get(
-                            &lexical_binding
+                            &LexicalBinding::new(current_context, symbol, res_kind)
                         )
                     {
                         return Some(*def_id);
@@ -481,9 +514,7 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
 {
     type Result = ();
 
-    fn default_result() -> Self::Result {
-        
-    }
+    fn default_result() -> Self::Result {}
 
     fn visit_ident_pat(&mut self, ident_node: &'ast IdentNode) -> Self::Result {
         self.visit_ident_expr(ident_node)
@@ -542,25 +573,36 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
     }
 
     fn visit_ident_expr(&mut self, ident_node: &'ast IdentNode) -> Self::Result {
-        if let Some(def_id) = self.lookup_ident_declaration(ident_node, ResKind::Variable) {
-            self.set_def_id_to_node_id(ident_node.ast_node_id, def_id);
-        } else if let Some(def_id) = self.lookup_ident_declaration(ident_node, ResKind::Fn) {
+        if let Some(def_id) = self.lookup_ident_declaration(ident_node, ResKind::Fn) {
             self.set_def_id_to_node_id(ident_node.ast_node_id, def_id);
         } else if let Some(def_id) = self.lookup_ident_declaration(ident_node, ResKind::Adt) {
             self.set_def_id_to_node_id(ident_node.ast_node_id, def_id);
-        } else if
-            // This is for the atd constructor `Self`
-            let (Some(TraitImplId { implementor_def_id, .. }), true) = (
-                self.trait_impl_context,
-                Symbol::from_node_id(ident_node.ast_node_id) == *BIG_SELF_SYMBOL,
-            )
-        {
-            self.set_def_id_to_node_id(ident_node.ast_node_id, implementor_def_id);
         } else {
             let symbol = Symbol::from_node_id(ident_node.ast_node_id);
-            self.resolver_handle.report_error(
-                Error::new(ErrorKind::UndefinedLookup(symbol, ResKind::Variable), ident_node.span)
-            );
+            let res_kind = if symbol.can_be_constant() {
+                ResKind::ConstVariable
+            } else {
+                ResKind::Variable
+            };
+            if let Some(def_id) = self.lookup_ident_declaration(ident_node, res_kind) {
+                self.set_def_id_to_node_id(ident_node.ast_node_id, def_id);
+            } else if
+                // This is for the atd constructor `Self`
+                let (Some(TraitImplId { implementor_def_id, .. }), true) = (
+                    self.trait_impl_context,
+                    Symbol::from_node_id(ident_node.ast_node_id) == *BIG_SELF_SYMBOL,
+                )
+            {
+                self.set_def_id_to_node_id(ident_node.ast_node_id, implementor_def_id);
+            } else {
+                let symbol = Symbol::from_node_id(ident_node.ast_node_id);
+                self.resolver_handle.report_error(
+                    Error::new(
+                        ErrorKind::UndefinedLookup(symbol, ResKind::Variable),
+                        ident_node.span
+                    )
+                );
+            }
         }
     }
 
@@ -599,11 +641,6 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
             );
             self.local_visit_result.lexical_binding_to_def_id.insert(lexical_binding, def_id);
         }
-
-        if let Some(from_path) = import_item.from_path {
-            todo!("Importing from other packages not supported yet");
-        }
-        // let result = self.resolver_handle.compile_rel_file(import_item.from_path);
     }
 
     fn visit_comp_fn_decl_item(
@@ -655,16 +692,7 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
     fn visit_impl_item(&mut self, impl_item: &'ast ImplItem<'ast>) -> Self::Result {
         let implementor_id = self.resolve_path_def_id(impl_item.implementor_path);
 
-        // self.lookup_ident_declaration(impl_item.ident_node, ResKind::Adt).expect(
-        //     format!(
-        //         "Cannot implement undefined type `{}`",
-        //         Symbol::from_node_id(impl_item.ident_node.ast_node_id).get()
-        //     ).as_str()
-        // );
-
         let trait_impl_id = TraitImplId::new(implementor_id, None);
-
-        // self.set_def_id_to_node_id(impl_item.ident_node.ast_node_id, implementor_id);
 
         self.begin_impl_context(trait_impl_id);
 
@@ -674,7 +702,6 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
 
         self.end_impl_context();
 
-        // self.set_type_to_node_id(impl_item.ident_node.ast_node_id, Ty::Adt(implementor_id));
         self.set_type_to_node_id(impl_item.ast_node_id, VOID_TY);
     }
 

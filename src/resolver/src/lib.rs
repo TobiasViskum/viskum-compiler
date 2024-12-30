@@ -21,32 +21,24 @@ use ir::{
 
 /// Main resolver struct. This is responsible for validating all the Asts in a package
 pub struct Resolver<'ctx, 'ast> {
-    lexical_binding_to_def_id: FxHashMap<LexicalBinding, DefId>,
-    node_id_to_lexical_context: FxHashMap<NodeId, LexicalContext>,
-
     // Package information
     pkg_symbol_to_def_id: FxHashMap<Symbol, DefId>,
     pkg_def_id_to_res_kind: FxHashMap<DefId, ResKind>,
     pkg_def_id_to_name_binding: FxHashMap<DefId, NameBinding<'ctx>>,
-    pkg_def_id_to_ty: FxHashMap<DefId, Ty>,
     pkg_trait_impl_id_to_def_ids: FxHashMap<TraitImplId, Vec<DefId>>,
-
-    /// Built during the first pass (name resolution) and then used in the rest of the passes
-    node_id_to_def_id: FxHashMap<NodeId, DefId>,
-
-    def_id_to_name_binding: FxHashMap<DefId, NameBinding<'ctx>>,
-    node_id_to_ty: FxHashMap<NodeId, Ty>,
-
     pkg_def_id: OnceLock<DefId>,
 
-    // def_id_to_global_mem_id: FxHashMap<DefId, GlobalMemId>,
-    // global_mems: &'ctx RefCell<Vec<GlobalMem>>,
+    node_id_to_def_id: FxHashMap<NodeId, DefId>,
+    node_id_to_ty: FxHashMap<NodeId, Ty>,
+    def_id_to_name_binding: FxHashMap<DefId, NameBinding<'ctx>>,
 
     /// Replace with `OnceLock<&'ast FnItem<'ast>>`
     found_main_fn: OnceLock<&'ast FnItem<'ast>>,
     pending_functions: Vec<&'ast FnItem<'ast>>,
+
     /// This is all const strings
     str_symbol_to_def_id: Mutex<FxHashMap<Symbol, (DefId, ConstStrLen)>>,
+    constants: Vec<DefId>,
 
     clib_fns: Vec<DefId>,
 
@@ -123,19 +115,15 @@ impl<'ctx, 'ast> Resolver<'ctx, 'ast> where 'ctx: 'ast {
         }
 
         Self {
-            // global_mems,
-            // def_id_to_global_mem_id: hashmap_with_capacity!(total_def_count),
             def_id_to_name_binding: hashmap_with_capacity!(total_def_count),
-            lexical_binding_to_def_id: hashmap_with_capacity!(total_def_count),
-            node_id_to_lexical_context: hashmap_with_capacity!(total_nodes),
             str_symbol_to_def_id: Default::default(),
 
             pkg_def_id_to_name_binding: Default::default(),
             pkg_def_id_to_res_kind: Default::default(),
             pkg_symbol_to_def_id: Default::default(),
             pkg_trait_impl_id_to_def_ids: Default::default(),
-            pkg_def_id_to_ty: Default::default(),
             pkg_def_id: OnceLock::new(),
+            constants: Vec::new(),
 
             node_id_to_def_id: hashmap_with_capacity!(total_nodes),
             node_id_to_ty: hashmap_with_capacity!(total_nodes),
@@ -173,9 +161,7 @@ impl<'ctx, 'ast> Resolver<'ctx, 'ast> where 'ctx: 'ast {
             trait_impl_id,
             new_def_ids,
         ) in global_visit_result.trait_impl_id_to_def_ids.into_iter() {
-            let def_ids = self.pkg_trait_impl_id_to_def_ids
-                .entry(trait_impl_id)
-                .or_default();
+            let def_ids = self.pkg_trait_impl_id_to_def_ids.entry(trait_impl_id).or_default();
 
             def_ids.extend(new_def_ids);
         }
@@ -216,9 +202,7 @@ impl<'ctx, 'ast> Resolver<'ctx, 'ast> where 'ctx: 'ast {
     fn has_error_severity(&self, severity: Severity) -> bool {
         let errors = self.errors.lock().unwrap();
 
-        errors
-            .iter()
-            .any(|e| e.get_severity() == severity)
+        errors.iter().any(|e| e.get_severity() == severity)
     }
 }
 
@@ -229,7 +213,7 @@ impl<'ctx, 'ast, T> ResolverHandle<'ctx, 'ast, T> for Resolver<'ctx, 'ast> where
         self.pkg_symbol_to_def_id.get(&symbol).copied()
     }
     fn get_or_set_pkg_def_id(&self, pkg_ident_node: &'ast ast::PkgIdentNode) -> DefId {
-        *self.pkg_def_id.get_or_init(|| { DefId::new(*PKG_SYMBOL, pkg_ident_node.ast_node_id) })
+        *self.pkg_def_id.get_or_init(|| DefId::new(*PKG_SYMBOL, pkg_ident_node.ast_node_id))
     }
 
     fn lookup_pkg_member_res_kind(&self, def_id: &DefId) -> ResKind {
@@ -267,114 +251,5 @@ impl<'ctx, 'ast, T> ResolverHandle<'ctx, 'ast, T> for Resolver<'ctx, 'ast> where
     }
     fn report_error(&self, error: Error) {
         self.errors.lock().unwrap().push(error);
-    }
-
-    /* Used during the first pass (name resolution) */
-    fn lookup_ident_declaration(
-        &mut self,
-        symbol: Symbol,
-        res_kind: ResKind,
-        node_id: NodeId,
-        lexical_context_to_parent_lexical_context: &FxHashMap<LexicalContext, LexicalContext>
-    ) -> Option<DefId> {
-        match res_kind {
-            ResKind::ConstStr => {
-                // if let Some(&(def_id, _)) = self.str_symbol_to_def_id.get(&symbol) {
-                //     return Some(def_id);
-                // }
-                unimplemented!();
-            }
-            ResKind::Variable => {
-                let start_context = self.node_id_to_lexical_context
-                    .get(&node_id)
-                    .unwrap_or_else(|| panic!("Expected lexical context: {}\n{:#?}",
-                            symbol.get(),
-                            node_id));
-
-                let mut current_context = *start_context;
-                loop {
-                    // Can't lookup variables in other contexts (e.g. outside of a function)
-                    if current_context.context_id != start_context.context_id {
-                        break;
-                    }
-
-                    let lexical_binding = LexicalBinding::new(
-                        current_context,
-                        symbol,
-                        res_kind
-                        // node_id.mod_id
-                    );
-                    if let Some(def_id) = self.lexical_binding_to_def_id.get(&lexical_binding) {
-                        return Some(*def_id);
-                    }
-                    if
-                        let Some(parent_context) = lexical_context_to_parent_lexical_context.get(
-                            &current_context
-                        )
-                    {
-                        current_context = *parent_context;
-                    } else {
-                        break;
-                    }
-                }
-            }
-            ResKind::Fn | ResKind::Adt => {
-                let start_context = self.node_id_to_lexical_context
-                    .get(&node_id)
-                    .unwrap_or_else(|| panic!("Expected lexical context: {}\n{:#?}",
-                            symbol.get(),
-                            node_id));
-
-                let mut current_context = *start_context;
-                loop {
-                    let lexical_binding = LexicalBinding::new(
-                        current_context,
-                        symbol,
-                        res_kind
-                        // node_id.mod_id
-                    );
-                    if let Some(def_id) = self.lexical_binding_to_def_id.get(&lexical_binding) {
-                        return Some(*def_id);
-                    }
-                    if
-                        let Some(parent_context) = lexical_context_to_parent_lexical_context.get(
-                            &current_context
-                        )
-                    {
-                        current_context = *parent_context;
-                    } else {
-                        break;
-                    }
-                }
-            }
-        }
-
-        None
-    }
-
-    fn lookup_ident_definition(
-        &mut self,
-        symbol: Symbol,
-        res_kind: ResKind,
-        node_id: NodeId,
-        lexical_context_to_parent_lexical_context: &FxHashMap<LexicalContext, LexicalContext>
-    ) -> Option<(DefId, NameBinding<'ctx>)> {
-        let def_id = <Resolver<'_, '_> as ResolverHandle<'_, '_, T>>::lookup_ident_declaration(
-            self,
-            symbol,
-            res_kind,
-            node_id,
-            lexical_context_to_parent_lexical_context
-        );
-
-        match def_id {
-            Some(def_id) => {
-                let name_binding = self.def_id_to_name_binding
-                    .get(&def_id)
-                    .expect("Expected DefId to NameBinding");
-                Some((def_id, *name_binding))
-            }
-            None => None,
-        }
     }
 }

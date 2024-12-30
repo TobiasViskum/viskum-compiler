@@ -1,4 +1,4 @@
-use std::{ collections::VecDeque, sync::LazyLock };
+use std::sync::LazyLock;
 
 const PARSE_RULE_COUNT: usize = enum_iterator::cardinality::<TokenKind>();
 static PARSE_RULES: LazyLock<[ParseRule; PARSE_RULE_COUNT]> = LazyLock::new(|| {
@@ -54,8 +54,6 @@ static PARSE_RULES: LazyLock<[ParseRule; PARSE_RULE_COUNT]> = LazyLock::new(|| {
 
                 // Keywords
                 Import      = { (None       None),      (None       None            ),      (None       None) },
-                Export      = { (None       None),      (None       None            ),      (None       None) },
-                From        = { (None       None),      (None       None            ),      (None       None) },
                 Impl        = { (None       None),      (None       None            ),      (None       None) },
                 SmallSelf   = { (ident      None),      (None       None            ),      (None       None) },
                 BigSelf     = { (ident      None),      (None       None            ),      (None       None) },
@@ -498,7 +496,7 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
         self.advance();
         let mut import_items = vec![self.parse_path()];
 
-        while !self.is_eof() && !self.is_curr_kind(TokenKind::From) {
+        while !self.is_eof() {
             if self.is_curr_kind(TokenKind::Comma) {
                 self.advance();
                 import_items.push(self.parse_path());
@@ -508,31 +506,9 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
             }
         }
 
-        if !(self.current.get_kind() == TokenKind::From) {
-            let import_stmt = ItemStmt::ImportItem(
-                self.ast_arena.alloc_expr_or_stmt(
-                    ImportItem::new(
-                        None,
-                        self.ast_arena.alloc_vec(import_items),
-                        self.get_ast_node_id()
-                    )
-                )
-            );
-
-            return Stmt::ItemStmt(import_stmt);
-        }
-
-        self.consume(TokenKind::From, "Expected `from` after `import`");
-
-        let from_path = self.parse_path();
-
         let import_stmt = ItemStmt::ImportItem(
             self.ast_arena.alloc_expr_or_stmt(
-                ImportItem::new(
-                    Some(from_path),
-                    self.ast_arena.alloc_vec(import_items),
-                    self.get_ast_node_id()
-                )
+                ImportItem::new(self.ast_arena.alloc_vec(import_items), self.get_ast_node_id())
             )
         );
 
@@ -906,7 +882,14 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
                             .parse_typing()
                             .expect("Expected type in function args");
 
-                        if let (ParsingDeclareFn::No, Typing::VariadicArgs) = (parsing_declare_fn, arg_typing) { panic!("Error: Variadic args not allowed in function declaration") }
+                        if
+                            let (ParsingDeclareFn::No, Typing::VariadicArgs) = (
+                                parsing_declare_fn,
+                                arg_typing,
+                            )
+                        {
+                            panic!("Error: Variadic args not allowed in function declaration");
+                        }
 
                         let arg = Field::new(
                             self.ast_arena.alloc_expr_or_stmt(arg_ident),
@@ -1389,7 +1372,7 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
     }
 
     fn parse_block_as_stmts(&mut self, stop_token: StopToken) -> &'a [Stmt<'a>] {
-        let mut stmts = VecDeque::with_capacity(32);
+        let mut stmts = Vec::with_capacity(32);
         while !self.is_eof() {
             if let StopToken::Token(stop_token) = stop_token {
                 if self.is_curr_kind(stop_token) {
@@ -1397,12 +1380,7 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
                 }
             }
 
-            let stmt = self.statement();
-            if is_stmt_adt(&stmt) {
-                stmts.push_front(stmt);
-            } else {
-                stmts.push_back(stmt);
-            }
+            stmts.push(self.statement());
         }
 
         self.ast_arena.alloc_vec(stmts.into())

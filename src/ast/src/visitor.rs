@@ -471,11 +471,7 @@ pub fn walk_import_item<'a, V>(visitor: &mut V, import_item: &'a ImportItem<'a>)
         visitor.visit_path(*import_item);
     }
 
-    if let Some(from_path) = import_item.from_path {
-        visitor.visit_path(from_path)
-    } else {
-        V::default_result()
-    }
+    V::default_result()
 }
 
 pub fn walk_comp_decl_item<'a, V>(visitor: &mut V, comp_decl_item: CompDeclItem<'a>) -> V::Result

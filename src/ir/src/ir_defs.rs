@@ -191,6 +191,7 @@ pub struct AdtId(pub DefId);
 #[derive(Hash, Eq, PartialEq, Debug, Clone, Copy)]
 pub enum ResKind {
     Variable,
+    ConstVariable,
     Adt,
     Fn,
     ConstStr,

@@ -325,9 +325,7 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
 {
     type Result = ();
 
-    fn default_result() -> Self::Result {
-        
-    }
+    fn default_result() -> Self::Result {}
 
     fn visit_string_expr(&mut self, string_expr: &'ast crate::StringExpr) -> Self::Result {
         let def_id = self.resolver_handle.make_const_str(string_expr, || -> DefId {
@@ -406,7 +404,9 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
         }
         self.end_scope();
 
-        if let Some(x) = comp_fn_decl_item.return_ty { self.visit_typing(&x) }
+        if let Some(x) = comp_fn_decl_item.return_ty {
+            self.visit_typing(&x)
+        }
     }
 
     fn visit_block_expr(&mut self, expr: &'ast BlockExpr<'ast>) -> Self::Result {
@@ -537,7 +537,9 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
         self.bind_node_id_to_lexical_context(fn_item.ident_node.ast_node_id);
         self.make_lexical_binding_to_def_id(def_id, ResKind::Fn);
 
-        if let Some(x) = fn_item.return_ty { self.visit_typing(&x) }
+        if let Some(x) = fn_item.return_ty {
+            self.visit_typing(&x);
+        }
 
         self.start_context();
 
