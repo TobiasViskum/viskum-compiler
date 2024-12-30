@@ -232,9 +232,7 @@ impl<'ctx, 'ast, T> ResolverHandle<'ctx, 'ast, T> for Resolver<'ctx, 'ast> where
     fn get_or_set_pkg_def_id(&self, pkg_ident_node: &'ast ast::PkgIdentNode) -> DefId {
         *self.pkg_def_id.get_or_init(|| { DefId::new(*PKG_SYMBOL, pkg_ident_node.ast_node_id) })
     }
-    fn lookup_pkg_member_ty(&self, def_id: &DefId) -> Option<Ty> {
-        self.pkg_def_id_to_ty.get(def_id).copied()
-    }
+
     fn lookup_pkg_member_res_kind(&self, def_id: &DefId) -> ResKind {
         *self.pkg_def_id_to_res_kind.get(def_id).expect("Expected ResKind")
     }
