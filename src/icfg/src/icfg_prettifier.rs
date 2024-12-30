@@ -1,7 +1,6 @@
-use data_structures::Either;
 
 use crate::{ cfg_visitor::{ walk_basic_block, CfgVisitor }, Cfg, Icfg, Operand, PlaceKind };
-use std::fmt::{ Display, Write };
+use std::fmt::Write;
 
 const INDENTATION: usize = 4;
 
@@ -26,7 +25,7 @@ impl<'b> IcfgPrettifier<'b> {
 
     fn display_place_kind(place: &PlaceKind, cfg: &Cfg) -> String {
         let mut temp_buffer = String::with_capacity(8);
-        (|| -> Result<(), std::fmt::Error> {
+        {
             match place {
                 // PlaceKind::GlobalMemId(global_mem_id) => {
                 //     write!(temp_buffer, "{}", cfg.get_global_mem(*global_mem_id))
@@ -39,7 +38,7 @@ impl<'b> IcfgPrettifier<'b> {
                 }
                 PlaceKind::TempId(temp_id) => { write!(temp_buffer, "{}", temp_id) }
             }
-        })().expect("Unexpected write error");
+        }.expect("Unexpected write error");
         temp_buffer
     }
 
@@ -65,7 +64,7 @@ impl<'b> IcfgPrettifier<'b> {
     }
 }
 
-impl<'b> CfgVisitor for IcfgPrettifier<'b> {
+impl CfgVisitor for IcfgPrettifier<'_> {
     type Result = Result<(), std::fmt::Error>;
 
     fn default_result() -> Self::Result {
@@ -90,9 +89,9 @@ impl<'b> CfgVisitor for IcfgPrettifier<'b> {
         basic_block: &crate::BasicBlock,
         cfg: &crate::Cfg
     ) -> Self::Result {
-        write!(self.buffer, "bb{}: {{\n", basic_block.basic_block_id.0)?;
+        writeln!(self.buffer, "bb{}: {{", basic_block.basic_block_id.0)?;
         walk_basic_block(self, basic_block, cfg)?;
-        write!(self.buffer, "}}\n")?;
+        writeln!(self.buffer, "}}")?;
 
         Self::default_result()
     }

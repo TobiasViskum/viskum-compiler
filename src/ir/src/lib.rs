@@ -47,7 +47,7 @@ impl GlobalSession {
         for token in enum_iterator::all::<TokenKind>() {
             let keyword_str = token.to_keyword_str();
 
-            if keyword_str != "" {
+            if !keyword_str.is_empty() {
                 global_session.intern_str(keyword_str);
             }
         }
@@ -57,7 +57,7 @@ impl GlobalSession {
 
     pub(crate) fn intern_vec_of_types<T>(&self, types: Vec<T>) -> &'static [T] {
         let interned_ty = unsafe {
-            &*(self.arena.alloc_slice_fill_iter(types.into_iter()) as *const [T])
+            &*(self.arena.alloc_slice_fill_iter(types) as *const [T])
         };
 
         interned_ty
@@ -82,13 +82,13 @@ impl GlobalSession {
 
         let string: &mut str = self.arena.alloc_str(string);
         // Safe because the symbol interner lives as long as the program
-        let string: &'static str = unsafe { &*(string.as_ref() as *const str) };
+        let string: &'static str = unsafe { &*(string as *const str) };
 
         let (idx, _) = self.interned_strings.insert_full(string);
         Symbol::from_id(idx)
     }
 
     pub(crate) fn get_str(&self, symbol: &Symbol) -> &'static str {
-        *self.interned_strings.get_index(symbol.id.0 as usize).expect("Expected string")
+        self.interned_strings.get_index(symbol.id.0 as usize).expect("Expected string")
     }
 }

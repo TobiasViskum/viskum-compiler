@@ -1,6 +1,5 @@
 use ast::{
     AssignStmt,
-    AstArena,
     AstArenaObject,
     BinaryExpr,
     BlockExpr,
@@ -29,7 +28,7 @@ use ast::{
     TupleFieldExpr,
     ValueExpr,
 };
-use op::{ ArithmeticOp, BinaryOp };
+use op::BinaryOp;
 use span::Span;
 use token::TokenKind;
 
@@ -251,7 +250,7 @@ impl<'ast, 'b> ExprBuilder<'ast, 'b> {
         parser_handle: &mut impl ParserHandle<'ast>,
         exprs: Vec<Expr<'ast>>
     ) {
-        assert_eq!(true, exprs.len() > 0, "Expected at least one expr in group (got 0)");
+        assert!(!exprs.is_empty(), "Expected at least one expr in group (got 0)");
 
         // Now we have a regular grouping expr
         if exprs.len() == 1 {

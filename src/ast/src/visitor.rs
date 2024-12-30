@@ -458,7 +458,7 @@ pub fn walk_impl_item<'a, V>(visitor: &mut V, impl_item: &'a ImplItem<'a>) -> V:
     where V: Visitor<'a>
 {
     impl_item.impl_fns.iter().for_each(|item| {
-        visitor.visit_fn_item(*item);
+        visitor.visit_fn_item(item);
     });
 
     V::default_result()

@@ -35,7 +35,7 @@ use ir::{
 };
 use threadpool::ThreadPool;
 use threadpool_scope::scope_with;
-use std::{ fmt::{ Display, Write }, fs::File, process::Command, sync::{ Arc, Mutex } };
+use std::{ fmt::{ Display, Write }, fs::File, process::Command, sync::Mutex };
 
 const INDENTATION: usize = 4;
 
@@ -75,7 +75,7 @@ impl<'a> CodeGenUnitHelper<'a> {
     }
 }
 
-impl<'a> CfgVisitor for CodeGenUnitHelper<'a> {
+impl CfgVisitor for CodeGenUnitHelper<'_> {
     type Result = ();
     fn default_result() -> Self::Result {}
 
@@ -218,7 +218,8 @@ impl<'a> CodeGenUnit<'a> {
     }
 
     pub(crate) fn get_llvm_operand(&self, operand: &Operand) -> String {
-        let string = match &operand {
+        
+        match &operand {
             Operand::PlaceKind(place) => { format!("{}", self.get_ssa_id_from_place(place)) }
             Operand::Const(const_val) => {
                 match const_val {
@@ -242,12 +243,11 @@ impl<'a> CodeGenUnit<'a> {
                     Const::Void => panic!("Void cannot be used as an operand"),
                 }
             }
-        };
-        string
+        }
     }
 }
 
-fn get_llvm_ty<'a>(ty: Ty, resolved_information: &ResolvedInformation<'a>) -> String {
+fn get_llvm_ty(ty: Ty, resolved_information: &ResolvedInformation<'_>) -> String {
     match &ty {
         Ty::PrimTy(prim_ty) => {
             match prim_ty {
@@ -296,7 +296,7 @@ fn get_llvm_ty<'a>(ty: Ty, resolved_information: &ResolvedInformation<'a>) -> St
     }
 }
 
-impl<'a> CfgVisitor for CodeGenUnit<'a> {
+impl CfgVisitor for CodeGenUnit<'_> {
     type Result = Result<(), std::fmt::Error>;
 
     fn default_result() -> Self::Result {
@@ -669,7 +669,7 @@ impl<'icfg> CodeGen<'icfg> {
             }
         });
 
-        let file_name_with_extension = format!("./viskum/dist/main.ll");
+        let file_name_with_extension = "./viskum/dist/main.ll".to_string();
         {
             // Ensure directory exists
             std::fs::create_dir_all("./viskum/dist").expect("Error creating directory");

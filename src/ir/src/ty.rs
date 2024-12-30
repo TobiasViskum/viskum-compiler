@@ -232,11 +232,7 @@ impl Ty {
 
         if let Some(ty) = get_biggest(lhs, rhs) {
             Some(ty)
-        } else if let Some(ty) = get_biggest(rhs, lhs) {
-            Some(ty)
-        } else {
-            None
-        }
+        } else { get_biggest(rhs, lhs).map(|ty| ty) }
     }
 
     pub fn from_int(int: i64) -> Self {
@@ -297,10 +293,10 @@ impl Ty {
         self.auto_deref() == NULL_TY
     }
 
-    pub fn test_eq_strict<'a>(
+    pub fn test_eq_strict(
         &self,
         other: Ty,
-        def_id_to_name_binding: &DefIdToNameBinding<'a>
+        def_id_to_name_binding: &DefIdToNameBinding<'_>
     ) -> bool {
         if self.is_ptr() && other.is_null() {
             return true;
@@ -308,7 +304,9 @@ impl Ty {
             return true;
         }
 
-        let is_eq = match (*self, other) {
+        
+
+        match (*self, other) {
             (Self::StackPtr(inner_ty1, mutability1), Self::Ptr(inner_ty2, mutability2)) => {
                 inner_ty1.test_eq_strict(*inner_ty2, def_id_to_name_binding) &&
                     (mutability1 as u8) >= (mutability2 as u8)
@@ -346,9 +344,7 @@ impl Ty {
                     (mutability1 as u8) >= (mutability2 as u8)
             }
             _ => *self == other,
-        };
-
-        is_eq
+        }
     }
 
     pub fn get_expanded_dereffed_ty<'a>(
@@ -417,7 +413,7 @@ impl Ty {
 
         match op {
             BinaryOp::ArithmeticOp(arithmetic_op) => {
-                use ArithmeticOp::*;
+                
 
                 if lhs.is_num_ty() && rhs.is_num_ty() {
                     return Self::get_biggest_num_ty(lhs, rhs).map(|x| x.auto_deref());
@@ -541,7 +537,9 @@ impl GetTyAttr for Ty {
             Self::Adt(def_id) => {
                 let name_binding = resolved_information.get_name_binding_from_def_id(def_id);
 
-                let ty_attr = match name_binding.kind {
+                
+
+                match name_binding.kind {
                     NameBindingKind::Adt(adt) => {
                         match adt {
                             Adt::EnumVariant(parent_def_id, _, tys) => {
@@ -607,9 +605,7 @@ impl GetTyAttr for Ty {
                     }
 
                     _ => panic!("Invalid ADT"),
-                };
-
-                ty_attr
+                }
             }
             Self::Ptr(_, _) => TyAttr::new(8, 8),
             Self::ManyPtr(_, _) => TyAttr::new(8, 8),

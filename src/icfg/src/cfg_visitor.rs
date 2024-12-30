@@ -20,18 +20,18 @@ use crate::{
     TyCastNode,
 };
 
-struct Linear;
-struct LeftToRight;
+// struct Linear;
+// struct LeftToRight;
 
-impl CfgVisitMode for Linear {
-    fn is_linear() -> bool {
-        true
-    }
-}
+// impl CfgVisitMode for Linear {
+//     fn is_linear() -> bool {
+//         true
+//     }
+// }
 
-pub trait CfgVisitMode {
-    fn is_linear() -> bool;
-}
+// pub trait CfgVisitMode {
+//     fn is_linear() -> bool;
+// }
 
 /// This is the visitor trait that visits a cfg
 ///

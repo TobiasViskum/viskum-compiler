@@ -56,7 +56,7 @@ impl<'ast, T> AstPrettifier<'ast, T> where T: AstState {
     }
 }
 
-fn write_typing<'ast>(buffer: &mut String, src: &str, typing: &Typing<'ast>) {
+fn write_typing(buffer: &mut String, src: &str, typing: &Typing<'_>) {
     match typing {
         Typing::SelfType => write!(buffer, "Self").expect("Unexpected write error"),
         Typing::VariadicArgs => write!(buffer, "...").expect("Unexpected write error"),
@@ -172,15 +172,15 @@ impl<'ast, T> Visitor<'ast> for AstPrettifier<'ast, T> where T: AstState {
 
         write_typing(&mut self.buffer, self.src, &typedef_item.type_expr);
 
-        write!(self.buffer, "\n")?;
+        writeln!(self.buffer)?;
 
         Self::default_result()
     }
 
     fn visit_struct_item(&mut self, struct_item: &'ast crate::StructItem<'ast>) -> Self::Result {
-        write!(
+        writeln!(
             self.buffer,
-            "{}struct {} {{\n",
+            "{}struct {} {{",
             self.get_indentation(),
             Symbol::from_node_id(struct_item.ident_node.ast_node_id).get()
         )?;
@@ -194,12 +194,12 @@ impl<'ast, T> Visitor<'ast> for AstPrettifier<'ast, T> where T: AstState {
 
             write_typing(&mut self.buffer, self.src, &field.type_expr);
 
-            write!(self.buffer, ",\n")?;
+            writeln!(self.buffer, ",")?;
         }
 
         self.decrement_scope_depth();
 
-        write!(self.buffer, "{}}}\n", self.get_indentation())?;
+        writeln!(self.buffer, "{}}}", self.get_indentation())?;
 
         Self::default_result()
     }
@@ -238,13 +238,13 @@ impl<'ast, T> Visitor<'ast> for AstPrettifier<'ast, T> where T: AstState {
             }
         }
 
-        write!(self.buffer, ") {{\n")?;
+        writeln!(self.buffer, ") {{")?;
 
         self.increment_scope_depth();
         self.visit_stmts(fn_item.body)?;
         self.decrement_scope_depth();
 
-        write!(self.buffer, "{}}}\n", self.get_indentation())?;
+        writeln!(self.buffer, "{}}}", self.get_indentation())?;
 
         Self::default_result()
     }
@@ -256,7 +256,7 @@ impl<'ast, T> Visitor<'ast> for AstPrettifier<'ast, T> where T: AstState {
             self.visit_expr(expr)?;
         }
 
-        write!(self.buffer, "\n")?;
+        writeln!(self.buffer)?;
 
         Self::default_result()
     }
@@ -277,7 +277,7 @@ impl<'ast, T> Visitor<'ast> for AstPrettifier<'ast, T> where T: AstState {
         write!(self.buffer, " := ")?;
         self.visit_expr(def_stmt.value_expr)?;
 
-        write!(self.buffer, "\n")?;
+        writeln!(self.buffer)?;
 
         Self::default_result()
     }
@@ -333,7 +333,7 @@ impl<'ast, T> Visitor<'ast> for AstPrettifier<'ast, T> where T: AstState {
     }
 
     fn visit_loop_expr(&mut self, loop_expr: &'ast crate::LoopExpr<'ast>) -> Self::Result {
-        write!(self.buffer, "loop\n")?;
+        writeln!(self.buffer, "loop")?;
         self.increment_scope_depth();
         self.visit_stmts(loop_expr.body.stmts)?;
         self.decrement_scope_depth();
@@ -352,13 +352,13 @@ impl<'ast, T> Visitor<'ast> for AstPrettifier<'ast, T> where T: AstState {
         write!(self.buffer, " = ")?;
         self.visit_expr(assign_stmt.value_expr)?;
 
-        write!(self.buffer, "\n")
+        writeln!(self.buffer)
     }
 
     fn visit_if_expr(&mut self, if_expr: &'ast crate::IfExpr<'ast>) -> Self::Result {
         write!(self.buffer, "if ")?;
         self.visit_cond_kind(if_expr.cond_kind)?;
-        write!(self.buffer, " then\n")?;
+        writeln!(self.buffer, " then")?;
         self.increment_scope_depth();
         self.visit_stmts(if_expr.true_block)?;
         self.decrement_scope_depth();
@@ -388,7 +388,7 @@ impl<'ast, T> Visitor<'ast> for AstPrettifier<'ast, T> where T: AstState {
     }
 
     fn visit_block_expr(&mut self, expr: &'ast crate::BlockExpr<'ast>) -> Self::Result {
-        write!(self.buffer, "do\n")?;
+        writeln!(self.buffer, "do")?;
 
         self.increment_scope_depth();
         self.visit_stmts(expr.stmts)?;

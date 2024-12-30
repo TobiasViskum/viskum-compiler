@@ -33,8 +33,8 @@ impl TypeChecker {
         ty2: Ty,
         def_id_to_name_binding: &DefIdToNameBinding
     ) -> Result<(), IntoIter<Option<TypeCheckError>, 4>> {
-        let mut error_len = 0;
-        let mut errors: [Option<TypeCheckError>; 4] = [const { None }; 4];
+        let error_len = 0;
+        let errors: [Option<TypeCheckError>; 4] = [const { None }; 4];
 
         todo!()
     }
@@ -73,9 +73,9 @@ impl TypeChecker {
         }
 
         if error_len > 0 {
-            return Err(
-                errors.into_iter().filter_map(|x| if let Some(x) = x { Some(x) } else { None })
-            );
+            Err(
+                errors.into_iter().flatten()
+            )
         } else {
             Ok(())
         }
@@ -108,7 +108,7 @@ impl TypeChecker {
         }
 
         if error_len > 0 {
-            return Err(errors.into_iter());
+            Err(errors.into_iter())
         } else {
             Ok(())
         }

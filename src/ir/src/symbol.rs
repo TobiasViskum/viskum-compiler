@@ -18,9 +18,7 @@ impl Symbol {
     pub fn new_with_node_id(str: &str, node_id: NodeId) -> Self {
         with_global_session(|globals| {
             let symbol = globals.intern_str(str);
-            if !globals.node_id_to_symbol.contains_key(&node_id) {
-                globals.node_id_to_symbol.insert(node_id, symbol);
-            }
+            globals.node_id_to_symbol.entry(node_id).or_insert(symbol);
             symbol
         })
     }

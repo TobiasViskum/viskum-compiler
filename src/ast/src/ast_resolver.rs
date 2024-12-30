@@ -1,4 +1,3 @@
-use std::marker::PhantomData;
 
 use error::{ Error, ErrorKind };
 use fxhash::{ FxBuildHasher, FxHashMap };
@@ -41,9 +40,6 @@ use ir::{
     INT_8_TY,
     INT_SYMBOL,
     MAIN_SYMBOL,
-    NEVER_TY,
-    NULL_TY,
-    SMALL_SELF_SYMBOL,
     STR_SYMBOL,
     STR_TY,
     UINT16_SYMBOL,
@@ -55,20 +51,17 @@ use ir::{
     UINT_64_TY,
     UINT_8_TY,
     UINT_SYMBOL,
-    UNKOWN_TY,
     VOID_SYMBOL,
     VOID_TY,
 };
 
 use crate::{
-    ast_pre_resolver::{ self, AstPreResolver },
+    ast_pre_resolver::{ self },
     get_ident_node_from_arg_kind,
     ArgKind,
     Ast,
     AstPartlyResolved,
-    AstResolved,
     AstState,
-    AstUnvalidated,
     CompFnDeclItem,
     CondKind,
     DefineStmt,
@@ -85,10 +78,8 @@ use crate::{
     Pat,
     Path,
     PathField,
-    PkgIdentNode,
     PlaceExpr,
     ResolverHandle,
-    StringExpr,
     StructExpr,
     StructItem,
     TupleStructPat,
@@ -209,7 +200,7 @@ impl<'ctx, 'ast, 'b, E> AstResolver<'ctx, 'ast, 'b, E>
         &mut self,
         trait_impl_id: TraitImplId
     ) -> &mut Vec<DefId> {
-        self.trait_impl_id_to_def_ids.entry(trait_impl_id).or_insert_with(Vec::new)
+        self.trait_impl_id_to_def_ids.entry(trait_impl_id).or_default()
     }
 
     fn begin_impl_context(&mut self, trait_impl_id: TraitImplId) {
@@ -243,9 +234,7 @@ impl<'ctx, 'ast, 'b, E> AstResolver<'ctx, 'ast, 'b, E>
                     let rhs_symbol = Symbol::from_node_id(path_field.rhs.ast_node_id);
                     let def_id = self.resolver_handle
                         .lookup_pkg_member(rhs_symbol)
-                        .expect(
-                            format!("`{}` is not a member of package", rhs_symbol.get()).as_str()
-                        );
+                        .unwrap_or_else(|| panic!("`{}` is not a member of package", rhs_symbol.get()));
                     self.set_def_id_to_node_id(path_field.rhs.ast_node_id, def_id);
                     def_id
                 } else {
@@ -255,12 +244,8 @@ impl<'ctx, 'ast, 'b, E> AstResolver<'ctx, 'ast, 'b, E>
             Path::PathSegment(ident_node) => {
                 let def_id = self
                     .lookup_ident_declaration(ident_node, ResKind::Adt)
-                    .expect(
-                        format!(
-                            "Expected adt `{}` to be defined",
-                            Symbol::from_node_id(ident_node.ast_node_id).get()
-                        ).as_str()
-                    );
+                    .unwrap_or_else(|| panic!("Expected adt `{}` to be defined",
+                            Symbol::from_node_id(ident_node.ast_node_id).get()));
                 self.set_def_id_to_node_id(ident_node.ast_node_id, def_id);
                 def_id
             }
@@ -301,11 +286,8 @@ impl<'ctx, 'ast, 'b, E> AstResolver<'ctx, 'ast, 'b, E>
     }
 
     fn set_namebinding_to_def_id(&mut self, def_id: DefId, name_binding: NameBinding<'ctx>) {
-        match name_binding.kind {
-            NameBindingKind::Fn(_, _, Externism::Clib) => {
-                self.clib_fns.push(def_id);
-            }
-            _ => {}
+        if let NameBindingKind::Fn(_, _, Externism::Clib) = name_binding.kind {
+            self.clib_fns.push(def_id);
         }
 
         match name_binding.kind {
@@ -500,7 +482,7 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
     type Result = ();
 
     fn default_result() -> Self::Result {
-        ()
+        
     }
 
     fn visit_ident_pat(&mut self, ident_node: &'ast IdentNode) -> Self::Result {

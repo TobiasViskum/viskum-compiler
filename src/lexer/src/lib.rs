@@ -1,4 +1,4 @@
-use std::{ str::Chars, time::Instant };
+use std::str::Chars;
 
 use span::Span;
 use token::{ Token, TokenKind };
@@ -118,7 +118,7 @@ impl<'a> Lexer<'a> {
         let mut buffer = String::with_capacity(64);
 
         if Self::is_alphabetic(self.current_char) {
-            buffer.push(self.eat_if(|c| Self::is_alphabetic(c)));
+            buffer.push(self.eat_if(Self::is_alphabetic));
         }
 
         self.eat_while_do_from_current(
@@ -163,14 +163,14 @@ impl<'a> Lexer<'a> {
 
     fn make_float_number(&mut self) -> Token {
         self.advance();
-        self.eat_while_from_next(|c| Self::is_digit(c));
+        self.eat_while_from_next(Self::is_digit);
         self.make_token(TokenKind::Float)
     }
 
     fn make_number(&mut self) -> Token {
-        if self.eat_while_from_next(|c| Self::is_digit(c)) == '@' {
+        if self.eat_while_from_next(Self::is_digit) == '@' {
             self.advance();
-            self.eat_while_from_next(|c| Self::is_digit(c));
+            self.eat_while_from_next(Self::is_digit);
             self.make_token(TokenKind::Float)
         } else {
             self.make_token(TokenKind::Integer)
@@ -249,7 +249,7 @@ impl<'a> Lexer<'a> {
     }
 
     fn is_digit(char: char) -> bool {
-        char >= '0' && char <= '9'
+        ('0'..='9').contains(&char)
     }
 
     fn is_alphabetic(char: char) -> bool {

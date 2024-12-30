@@ -1,11 +1,10 @@
 use std::marker::PhantomData;
 
 use error::{ Error, ErrorKind };
-use fxhash::{ FxBuildHasher, FxHashMap };
+use fxhash::FxHashMap;
 use ir::{
     Adt,
     DefId,
-    Externism,
     HasSelfArg,
     Mutability,
     NameBinding,
@@ -18,7 +17,6 @@ use ir::{
     BOOL_TY,
     NEVER_TY,
     NULL_TY,
-    SMALL_SELF_SYMBOL,
     STR_TY,
     UNKOWN_TY,
     VOID_TY,
@@ -26,14 +24,11 @@ use ir::{
 use span::Span;
 
 use crate::{
-    ast_resolver::{ self, AstResolver },
+    ast_resolver::{ self },
     typechecker::{ ArgCmp, TypeChecker },
     AssignStmt,
     Ast,
-    AstPartlyResolved,
     AstResolved,
-    AstTypeChecked,
-    AstUnvalidated,
     BinaryExpr,
     BlockExpr,
     BoolExpr,
@@ -408,9 +403,7 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
             .map_while(|(i, arg)| {
                 if i == 0 && has_self_arg == HasSelfArg::Yes {
                     Some(0)
-                } else {
-                    if arg == &Ty::VariadicArgs { None } else { Some(1) }
-                }
+                } else if arg == &Ty::VariadicArgs { None } else { Some(1) }
             })
             .sum();
 
@@ -606,7 +599,7 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
                 self.set_type_to_node_id(field_expr.rhs.ast_node_id, ty);
                 self.set_type_to_node_id(field_expr.ast_node_id, ty);
 
-                return ty;
+                ty
             } else {
                 todo!("Undefined package member");
             }
@@ -808,7 +801,7 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
                     }
                 }
 
-                return ty;
+                ty
             }
             // Adt::TupleStruct(_) => todo!("Tuple struct"),
             _ => panic!("Expected enum variant"),
@@ -861,7 +854,7 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
                     let atd_constructor_ty = Ty::AtdConstructer(*variant_def_id);
                     self.set_type_to_node_id(path_field.rhs.ast_node_id, atd_constructor_ty);
                     self.set_type_to_node_id(path_field.ast_node_id, atd_constructor_ty);
-                    return atd_constructor_ty;
+                    atd_constructor_ty
                 } else {
                     todo!(
                         "Undefined variant: {}. Lookup constructer method instead (maybe this should be illegal here)",
@@ -909,7 +902,7 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
                 )
             );
             self.set_type_to_node_id(tuple_field_expr.ast_node_id, Ty::Unkown);
-            return Ty::Unkown;
+            Ty::Unkown
         } else {
             let mutability = if lhs_ty.deref_until_stack_ptr().is_mut_ptr() {
                 Mutability::Mutable
@@ -1130,14 +1123,12 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
                     println!("{:?}", error);
                 }
                 panic!("Expected equal types in if expr: {} != {}", true_type, false_type);
+            } else if true_type.is_num_ty() && false_type.is_num_ty() {
+                Ty::get_biggest_num_ty(true_type, false_type)
+                    .expect("Expected number")
+                    .auto_deref()
             } else {
-                if true_type.is_num_ty() && false_type.is_num_ty() {
-                    Ty::get_biggest_num_ty(true_type, false_type)
-                        .expect("Expected number")
-                        .auto_deref()
-                } else {
-                    true_type
-                }
+                true_type
             }
         } else {
             true_type

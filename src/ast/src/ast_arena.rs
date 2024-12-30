@@ -2,6 +2,7 @@ use std::{ fmt::Debug, ops::Deref };
 
 use bumpalo_herd::{ Herd, Member };
 
+#[derive(Default)]
 pub struct AstArena {
     ast_arena: Herd,
 }
@@ -19,20 +20,13 @@ impl AstArena {
         Self::default()
     }
 
-    pub fn get<'b>(&'b self) -> AstArenaObject<'b> {
+    pub fn get(&self) -> AstArenaObject<'_> {
         AstArenaObject {
             member: self.ast_arena.get(),
         }
     }
 }
 
-impl Default for AstArena {
-    fn default() -> Self {
-        Self {
-            ast_arena: Default::default(),
-        }
-    }
-}
 
 pub struct AstArenaObject<'a> {
     member: Member<'a>,
@@ -53,7 +47,7 @@ impl<'a> AstArenaObject<'a> {
     }
 
     pub fn alloc_vec<T>(&self, vec: Vec<T>) -> &'a [T] {
-        self.member.alloc_slice_fill_iter(vec.into_iter())
+        self.member.alloc_slice_fill_iter(vec)
     }
 }
 

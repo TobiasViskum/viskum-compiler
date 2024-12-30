@@ -175,7 +175,7 @@ impl<'ctx, 'ast> Resolver<'ctx, 'ast> where 'ctx: 'ast {
         ) in global_visit_result.trait_impl_id_to_def_ids.into_iter() {
             let def_ids = self.pkg_trait_impl_id_to_def_ids
                 .entry(trait_impl_id)
-                .or_insert(Vec::new());
+                .or_default();
 
             def_ids.extend(new_def_ids);
         }
@@ -218,8 +218,7 @@ impl<'ctx, 'ast> Resolver<'ctx, 'ast> where 'ctx: 'ast {
 
         errors
             .iter()
-            .find(|e| e.get_severity() == severity)
-            .is_some()
+            .any(|e| e.get_severity() == severity)
     }
 }
 
@@ -237,17 +236,14 @@ impl<'ctx, 'ast, T> ResolverHandle<'ctx, 'ast, T> for Resolver<'ctx, 'ast> where
         *self.pkg_def_id_to_res_kind.get(def_id).expect("Expected ResKind")
     }
     fn lookup_pkg_member_name_binding(&self, def_id: &DefId) -> Option<&NameBinding<'ctx>> {
-        self.pkg_def_id_to_name_binding.get(&def_id)
+        self.pkg_def_id_to_name_binding.get(def_id)
     }
     fn lookup_trait_impl_def_ids(&self, trait_impl_id: &TraitImplId) -> Option<&Vec<DefId>> {
         self.pkg_trait_impl_id_to_def_ids.get(trait_impl_id)
     }
 
     fn set_main_fn(&self, fn_item: &'ast FnItem<'ast>) -> bool {
-        match self.found_main_fn.set(fn_item) {
-            Ok(_) => true,
-            Err(_) => false,
-        }
+        self.found_main_fn.set(fn_item).is_ok()
     }
 
     fn make_const_str(
@@ -291,13 +287,9 @@ impl<'ctx, 'ast, T> ResolverHandle<'ctx, 'ast, T> for Resolver<'ctx, 'ast> where
             ResKind::Variable => {
                 let start_context = self.node_id_to_lexical_context
                     .get(&node_id)
-                    .expect(
-                        format!(
-                            "Expected lexical context: {}\n{:#?}",
+                    .unwrap_or_else(|| panic!("Expected lexical context: {}\n{:#?}",
                             symbol.get(),
-                            node_id
-                        ).as_str()
-                    );
+                            node_id));
 
                 let mut current_context = *start_context;
                 loop {
@@ -329,13 +321,9 @@ impl<'ctx, 'ast, T> ResolverHandle<'ctx, 'ast, T> for Resolver<'ctx, 'ast> where
             ResKind::Fn | ResKind::Adt => {
                 let start_context = self.node_id_to_lexical_context
                     .get(&node_id)
-                    .expect(
-                        format!(
-                            "Expected lexical context: {}\n{:#?}",
+                    .unwrap_or_else(|| panic!("Expected lexical context: {}\n{:#?}",
                             symbol.get(),
-                            node_id
-                        ).as_str()
-                    );
+                            node_id));
 
                 let mut current_context = *start_context;
                 loop {

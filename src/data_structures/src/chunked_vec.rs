@@ -1,4 +1,4 @@
-use std::{ cell::Cell, fmt::Debug, sync::Mutex };
+use std::{ cell::Cell, fmt::Debug };
 
 pub struct ChunkedVec<T> where T: Default {
     inner: Vec<Option<T>>,
@@ -48,7 +48,7 @@ pub struct VecChunk<'a, T> {
     written: usize,
 }
 
-impl<'a, T> VecChunk<'a, T> {
+impl<T> VecChunk<'_, T> {
     pub fn push(&mut self, value: T) {
         if self.written >= self.size {
             panic!("VecChunk: Out of bounds");

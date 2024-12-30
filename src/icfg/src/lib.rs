@@ -6,43 +6,35 @@ Useful links:
 
 */
 
-mod icfg_v2;
+// mod icfg_v2;
 
-use std::{ cell::RefCell, fmt::Display, rc::Rc };
+use std::fmt::Display;
 
-use data_structures::Either;
 use derive_new::new;
-use op::{ ArithmeticOp, BinaryOp };
-use span::Span;
+use op::BinaryOp;
 use ir::{
     CfgFnKind,
     DefId,
-    GlobalMem,
-    GlobalMemId,
     IntTy,
     LocalMem,
     LocalMemId,
-    Mutability,
     PrimTy,
     ResolvedInformation,
     ResultMem,
     ResultMemId,
-    Symbol,
     TempId,
     Ty,
-    TyCtx,
     BOOL_TY,
-    INT_32_TY,
     STR_TY,
     VOID_TY,
 };
 mod icfg_prettifier;
 mod cfg_visitor;
-mod cfg_analyzer;
+// mod cfg_analyzer;
 
 pub use icfg_prettifier::IcfgPrettifier;
 pub use cfg_visitor::*;
-pub use cfg_analyzer::*;
+// pub use cfg_analyzer::*;
 
 pub enum Liveness {
     Alive,

@@ -88,10 +88,8 @@ use ast::{
     ArgKind,
     AsigneeExpr,
     Ast,
-    AstArena,
     AstArenaObject,
     AstMetadata,
-    AstQuerySystem,
     AstState0,
     BlockExpr,
     BoolExpr,
@@ -199,7 +197,7 @@ pub(crate) trait ParserHandle<'ast> {
     fn try_as_path(&mut self, expr: Expr<'ast>) -> Option<Path<'ast>>;
 }
 
-impl<'a, 'b> ParserHandle<'a> for Parser<'a, 'b> {
+impl<'a> ParserHandle<'a> for Parser<'a, '_> {
     fn forget_node(&mut self, node_id: NodeId) {
         self.forgotten_nodes += 1;
     }
@@ -584,7 +582,7 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
                 }
 
                 let fields = args
-                    .into_iter()
+                    .iter()
                     .map(|arg| {
                         match *arg {
                             ArgKind::Arg(field) => field,
@@ -750,8 +748,8 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
     }
 
     pub(crate) fn parse_typing(&mut self) -> Option<Typing<'a>> {
-        fn parse_many_typings<'a, 'b>(
-            parser: &mut Parser<'a, 'b>,
+        fn parse_many_typings<'a>(
+            parser: &mut Parser<'a, '_>,
             mut tuple_typing: Vec<Typing<'a>>
         ) -> &'a [Typing<'a>] {
             while !parser.is_eof() && !parser.is_curr_kind(TokenKind::RightParen) {
@@ -908,11 +906,7 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
                             .parse_typing()
                             .expect("Expected type in function args");
 
-                        match (parsing_declare_fn, arg_typing) {
-                            (ParsingDeclareFn::No, Typing::VariadicArgs) =>
-                                panic!("Error: Variadic args not allowed in function declaration"),
-                            _ => {}
-                        }
+                        if let (ParsingDeclareFn::No, Typing::VariadicArgs) = (parsing_declare_fn, arg_typing) { panic!("Error: Variadic args not allowed in function declaration") }
 
                         let arg = Field::new(
                             self.ast_arena.alloc_expr_or_stmt(arg_ident),

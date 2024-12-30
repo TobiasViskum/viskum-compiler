@@ -1,4 +1,4 @@
-use std::{ fmt::Display, ops::Add };
+use std::fmt::Display;
 
 use enum_iterator::Sequence;
 use span::Span;

@@ -514,7 +514,7 @@ pub struct FloatExpr {
     pub ast_node_id: NodeId,
 }
 
-pub fn get_ident_node_from_arg_kind<'ast>(arg_kind: ArgKind<'ast>) -> &'ast IdentNode {
+pub fn get_ident_node_from_arg_kind(arg_kind: ArgKind<'_>) -> &IdentNode {
     match arg_kind {
         | ArgKind::NormalSelf(ident_node)
         | ArgKind::MutSelf(ident_node)
