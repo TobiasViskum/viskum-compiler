@@ -75,11 +75,6 @@ pub trait GetTyAttr {
     fn get_ty_attr(&self, resolved_information: &ResolvedInformation) -> TyAttr;
 }
 
-enum Delimiter {
-    Parentheses,
-    CurlyBrackets,
-}
-
 #[derive(Debug, Hash, Eq, PartialEq, Clone, Copy)]
 pub enum Ty {
     /// `(T, K, ...)`
@@ -232,7 +227,9 @@ impl Ty {
 
         if let Some(ty) = get_biggest(lhs, rhs) {
             Some(ty)
-        } else { get_biggest(rhs, lhs) }
+        } else {
+            get_biggest(rhs, lhs)
+        }
     }
 
     pub fn from_int(int: i64) -> Self {
@@ -303,8 +300,6 @@ impl Ty {
         } else if self.is_null() && other.is_ptr() {
             return true;
         }
-
-        
 
         match (*self, other) {
             (Self::StackPtr(inner_ty1, mutability1), Self::Ptr(inner_ty2, mutability2)) => {
@@ -413,8 +408,6 @@ impl Ty {
 
         match op {
             BinaryOp::ArithmeticOp(arithmetic_op) => {
-                
-
                 if lhs.is_num_ty() && rhs.is_num_ty() {
                     return Self::get_biggest_num_ty(lhs, rhs).map(|x| x.auto_deref());
                 }
@@ -536,8 +529,6 @@ impl GetTyAttr for Ty {
             }
             Self::Adt(def_id) => {
                 let name_binding = resolved_information.get_name_binding_from_def_id(def_id);
-
-                
 
                 match name_binding.kind {
                     NameBindingKind::Adt(adt) => {

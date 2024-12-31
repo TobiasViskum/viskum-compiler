@@ -6,6 +6,52 @@ use span::Span;
 
 use crate::{ Symbol, Ty };
 
+#[derive(Debug, Clone, Copy)]
+pub enum Delimeter {
+    /// `(`
+    LeftParen,
+    /// `)`
+    RightParen,
+    /// `{`
+    LeftBrace,
+    /// `}`
+    RightBrace,
+    /// `[`
+    LeftBracket,
+    /// `]`
+    RightBracket,
+}
+
+impl Display for Delimeter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Delimeter::LeftParen => write!(f, "("),
+            Delimeter::RightParen => write!(f, ")"),
+            Delimeter::LeftBrace => write!(f, "{{"),
+            Delimeter::RightBrace => write!(f, "}}"),
+            Delimeter::LeftBracket => write!(f, "["),
+            Delimeter::RightBracket => write!(f, "]"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum ItemErrorKind {
+    FnName,
+    FnBody,
+    FnArgs,
+}
+
+impl Display for ItemErrorKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ItemErrorKind::FnName => write!(f, "function name"),
+            ItemErrorKind::FnBody => write!(f, "function body"),
+            ItemErrorKind::FnArgs => write!(f, "function arguments"),
+        }
+    }
+}
+
 #[derive(Hash, Eq, PartialEq, Debug, Clone, Copy)]
 pub enum Mutability {
     Immutable = 0,

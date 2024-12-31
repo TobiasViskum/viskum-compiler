@@ -9,7 +9,8 @@ pub struct Lexer<'a> {
     chars: Chars<'a>,
     byte_start: usize,
     byte_current: usize,
-    line: usize,
+    line_start: usize,
+    line_current: usize,
     current_char: char,
     str_layer: usize,
 }
@@ -20,7 +21,8 @@ impl<'a> Lexer<'a> {
             chars: file_content.chars(),
             byte_start: 0,
             byte_current: 0,
-            line: 1,
+            line_start: 1,
+            line_current: 1,
             current_char: EOF_CHAR,
             str_layer: 0,
         }
@@ -109,7 +111,7 @@ impl<'a> Lexer<'a> {
     }
 
     fn newline_and_scan(&mut self) -> Token {
-        self.line += 1;
+        self.line_current += 1;
         self.skip_char_and_scan()
     }
 
@@ -239,11 +241,17 @@ impl<'a> Lexer<'a> {
     }
 
     fn span(&self) -> Span {
-        Span::new(self.byte_start, self.byte_current, self.line)
+        Span::new(
+            self.byte_start,
+            self.byte_current - self.byte_start,
+            self.line_start,
+            self.line_current - self.line_start
+        )
     }
 
     fn reset_byte_tracker(&mut self) {
         self.byte_start = self.byte_current;
+        self.line_start = self.line_current;
     }
 
     fn is_digit(char: char) -> bool {

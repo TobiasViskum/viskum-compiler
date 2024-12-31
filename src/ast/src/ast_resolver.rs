@@ -1,4 +1,4 @@
-use error::{ Error, ErrorKind };
+use diagnostics::{ report_diagnostics, Diagnostic, ErrorKind };
 use fxhash::{ FxBuildHasher, FxHashMap };
 use ir::{
     Adt,
@@ -53,6 +53,7 @@ use ir::{
     VOID_SYMBOL,
     VOID_TY,
 };
+use span::Span;
 
 use crate::{
     ast_pre_resolver::{ self },
@@ -125,6 +126,8 @@ pub struct AstResolver<'ctx, 'ast, 'b, E>
     fns: Vec<&'ast FnItem<'ast>>,
     clib_fns: Vec<DefId>,
     node_id_to_type: FxHashMap<NodeId, Ty>,
+
+    diagnostics: Vec<Diagnostic>,
 }
 
 impl<'ctx, 'ast, 'b, E> VisitAst<'ast, AstPartlyResolved>
@@ -138,6 +141,9 @@ impl<'ctx, 'ast, 'b, E> VisitAst<'ast, AstPartlyResolved>
         where AstPartlyResolved: AstState<NextState = N>, N: AstState
     {
         self.visit_stmts(self.ast.main_scope.stmts);
+        if !self.diagnostics.is_empty() {
+            report_diagnostics(self.diagnostics);
+        }
         (
             self.ast.next_state(),
             GlobalVisitResult {
@@ -192,6 +198,7 @@ impl<'ctx, 'ast, 'b, E> AstResolver<'ctx, 'ast, 'b, E>
             clib_fns: Vec::new(),
             fns: Vec::with_capacity(ast.metadata.fn_count),
             ast,
+            diagnostics: Vec::new(),
         }
     }
 
@@ -200,6 +207,10 @@ impl<'ctx, 'ast, 'b, E> AstResolver<'ctx, 'ast, 'b, E>
         trait_impl_id: TraitImplId
     ) -> &mut Vec<DefId> {
         self.trait_impl_id_to_def_ids.entry(trait_impl_id).or_default()
+    }
+
+    fn report_error(&mut self, error_kind: ErrorKind, span: Span) {
+        self.diagnostics.push(Diagnostic::new_error(error_kind, span));
     }
 
     fn begin_impl_context(&mut self, trait_impl_id: TraitImplId) {
@@ -595,12 +606,12 @@ impl<'ctx, 'ast, 'b, E> Visitor<'ast>
             {
                 self.set_def_id_to_node_id(ident_node.ast_node_id, implementor_def_id);
             } else {
-                let symbol = Symbol::from_node_id(ident_node.ast_node_id);
-                self.resolver_handle.report_error(
-                    Error::new(
-                        ErrorKind::UndefinedLookup(symbol, ResKind::Variable),
-                        ident_node.span
-                    )
+                self.report_error(
+                    ErrorKind::UndefinedLookup {
+                        symbol: Symbol::from_node_id(ident_node.ast_node_id),
+                        res_kind: ResKind::Variable,
+                    },
+                    ident_node.span
                 );
             }
         }

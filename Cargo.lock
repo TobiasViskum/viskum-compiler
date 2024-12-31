@@ -15,6 +15,7 @@ dependencies = [
  "bumpalo-herd",
  "data_structures",
  "derive-new",
+ "diagnostics",
  "error",
  "fxhash",
  "ir",
@@ -83,6 +84,7 @@ dependencies = [
  "ast",
  "bumpalo",
  "codegen",
+ "diagnostics",
  "icfg",
  "icfg_builder",
  "ir",
@@ -142,7 +144,9 @@ dependencies = [
 name = "diagnostics"
 version = "0.1.0"
 dependencies = [
+ "fxhash",
  "ir",
+ "op",
  "span",
 ]
 
@@ -338,6 +342,7 @@ version = "0.1.0"
 dependencies = [
  "array-init",
  "ast",
+ "diagnostics",
  "enum-iterator",
  "error",
  "fxhash",

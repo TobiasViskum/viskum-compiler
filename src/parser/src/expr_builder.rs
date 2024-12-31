@@ -102,6 +102,7 @@ impl<'ast, 'b> ExprBuilder<'ast, 'b> {
                 self.mut_span,
                 pattern_expr,
                 value_expr,
+                Span::dummy(),
                 parser_handle.get_ast_node_id()
             )
         );
@@ -119,6 +120,7 @@ impl<'ast, 'b> ExprBuilder<'ast, 'b> {
             let field_expr = FieldExpr::new(
                 lhs,
                 self.ast_arena.alloc_expr_or_stmt(ident_node),
+                Span::dummy(),
                 parser_handle.get_ast_node_id()
             );
             self.ast_arena.alloc_expr_or_stmt(field_expr)
@@ -140,6 +142,7 @@ impl<'ast, 'b> ExprBuilder<'ast, 'b> {
             let tuple_field_expr = TupleFieldExpr::new(
                 lhs,
                 self.ast_arena.alloc_expr_or_stmt(integer_expr),
+                Span::dummy(),
                 parser_handle.get_ast_node_id()
             );
             self.ast_arena.alloc_expr_or_stmt(tuple_field_expr)
@@ -158,7 +161,12 @@ impl<'ast, 'b> ExprBuilder<'ast, 'b> {
     ) {
         let index_expr = {
             let lhs = self.exprs.pop().expect("TODO: Error handling");
-            let index_expr = IndexExpr::new(lhs, value_expr, parser_handle.get_ast_node_id());
+            let index_expr = IndexExpr::new(
+                lhs,
+                value_expr,
+                Span::dummy(),
+                parser_handle.get_ast_node_id()
+            );
             self.ast_arena.alloc_expr_or_stmt(index_expr)
         };
 
@@ -185,6 +193,7 @@ impl<'ast, 'b> ExprBuilder<'ast, 'b> {
             let struct_expr = StructExpr::new(
                 ident_node,
                 self.ast_arena.alloc_vec(initialization_fields),
+                Span::dummy(),
                 parser_handle.get_ast_node_id()
             );
 
@@ -204,7 +213,7 @@ impl<'ast, 'b> ExprBuilder<'ast, 'b> {
             .expect("TODO: Error handling (invalid pattern expr)");
 
         let assign_stmt = self.ast_arena.alloc_expr_or_stmt(
-            AssignStmt::new(place_expr, value_expr, parser_handle.get_ast_node_id(), Span::dummy())
+            AssignStmt::new(place_expr, value_expr, Span::dummy(), parser_handle.get_ast_node_id())
         );
 
         self.final_stmt = Some(Stmt::AssignStmt(assign_stmt));
@@ -219,7 +228,7 @@ impl<'ast, 'b> ExprBuilder<'ast, 'b> {
         let args = self.ast_arena.alloc_vec(args);
 
         let call_expr = self.ast_arena.alloc_expr_or_stmt(
-            CallExpr::new(callee, args, parser_handle.get_ast_node_id())
+            CallExpr::new(callee, args, Span::dummy(), parser_handle.get_ast_node_id())
         );
 
         let expr = Expr::ExprWithoutBlock(
@@ -255,7 +264,7 @@ impl<'ast, 'b> ExprBuilder<'ast, 'b> {
         // Now we have a regular grouping expr
         if exprs.len() == 1 {
             let group_expr = self.ast_arena.alloc_expr_or_stmt(
-                GroupExpr::new(exprs[0], parser_handle.get_ast_node_id())
+                GroupExpr::new(exprs[0], Span::dummy(), parser_handle.get_ast_node_id())
             );
             let expr = Expr::ExprWithoutBlock(
                 ExprWithoutBlock::ValueExpr(ValueExpr::GroupExpr(group_expr))
@@ -264,7 +273,7 @@ impl<'ast, 'b> ExprBuilder<'ast, 'b> {
         } else {
             let fields = self.ast_arena.alloc_vec(exprs);
             let tuple_expr = self.ast_arena.alloc_expr_or_stmt(
-                TupleExpr::new(fields, parser_handle.get_ast_node_id())
+                TupleExpr::new(fields, Span::dummy(), parser_handle.get_ast_node_id())
             );
             let expr = Expr::ExprWithoutBlock(
                 ExprWithoutBlock::ValueExpr(ValueExpr::TupleExpr(tuple_expr))
@@ -338,7 +347,7 @@ impl<'ast, 'b> ExprBuilder<'ast, 'b> {
         let lhs = self.exprs.pop().expect("TODO: Error handling");
 
         let binary_expr = self.ast_arena.alloc_expr_or_stmt(
-            BinaryExpr::new(lhs, op, rhs, parser_handle.get_ast_node_id())
+            BinaryExpr::new(lhs, op, rhs, Span::dummy(), parser_handle.get_ast_node_id())
         );
 
         let expr = Expr::ExprWithoutBlock(

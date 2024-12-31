@@ -10,6 +10,8 @@ declare fn.C time(time *int64) int
 declare fn.C sleep(time int) int
 declare fn.C clock_gettime(realtime int, timespec *mut TimeSpec) int
 
+
+
 struct TimeSpec {
     tv_sec int64,
     tv_nsec int64
@@ -172,6 +174,11 @@ fn runTests() {
 
 fn.C main(argc int, args *str) {
 
+    fn thisWillError(hello int, arg int) {
+        abc := 2
+        printf("YAYY%d\n", abc + 1)
+    }
+
     point := Point.new(2, 3, 4)
 
     sumOfPoint := point.sum()
@@ -180,7 +187,7 @@ fn.C main(argc int, args *str) {
 
     printf("Sum of point: %d\n", sumOfPoint)
     
-    printf("doSomething result: %d\n", doSomething())
+    printf("doSomething result: %d\n", pkg.doSomething())
    
     runTests()
 

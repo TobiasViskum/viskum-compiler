@@ -13,6 +13,7 @@ ast = { path = "../ast" }
 span = { path = "../span" }
 error = { path = "../error" }
 ir = { path = "../ir" }
+diagnostics = { path = "../diagnostics" }
 
 fxhash = "0.2.1"
 enum-iterator = "2.1.0"

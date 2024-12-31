@@ -114,6 +114,7 @@ pub struct GlobalScope<'ast> {
     pub stmts: Stmts<'ast>,
 }
 
+/// Implement spans here
 #[derive(Debug, Clone, Copy)]
 pub enum Typing<'ast> {
     Ident(&'ast IdentNode),
@@ -147,6 +148,7 @@ pub enum ItemStmt<'ast> {
 #[derive(Debug, new)]
 pub struct ImportItem<'ast> {
     pub import_items_path: &'ast [Path<'ast>],
+    pub span: Span,
     pub ast_node_id: NodeId,
 }
 
@@ -154,6 +156,7 @@ pub struct ImportItem<'ast> {
 pub struct ImplItem<'ast> {
     pub implementor_path: Path<'ast>,
     pub impl_fns: &'ast [&'ast FnItem<'ast>],
+    pub span: Span,
     pub ast_node_id: NodeId,
 }
 
@@ -167,6 +170,7 @@ pub struct CompFnDeclItem<'ast> {
     pub ident_node: &'ast IdentNode,
     pub args: &'ast [&'ast Field<'ast>],
     pub return_ty: Option<Typing<'ast>>,
+    pub span: Span,
     pub ast_node_id: NodeId,
 }
 
@@ -175,6 +179,7 @@ pub struct TypedefItem<'ast> {
     pub ident_node: &'ast IdentNode,
     pub type_expr: Typing<'ast>,
     pub item_type: ItemType,
+    pub span: Span,
     pub ast_node_id: NodeId,
 }
 
@@ -185,6 +190,7 @@ pub struct FnItem<'ast> {
     pub args: &'ast [ArgKind<'ast>],
     pub return_ty: Option<Typing<'ast>>,
     pub item_type: ItemType,
+    pub span: Span,
     pub ast_node_id: NodeId,
 }
 
@@ -193,6 +199,7 @@ pub struct StructItem<'ast> {
     pub ident_node: &'ast IdentNode,
     pub field_declarations: &'ast [&'ast Field<'ast>],
     pub item_type: ItemType,
+    pub span: Span,
     pub ast_node_id: NodeId,
 }
 
@@ -201,22 +208,26 @@ pub struct EnumItem<'ast> {
     pub ident_node: &'ast IdentNode,
     pub variants: &'ast [EnumVariant<'ast>],
     pub item_type: ItemType,
+    pub span: Span,
     pub ast_node_id: NodeId,
 }
 #[derive(Debug, new)]
 pub struct EnumVariant<'ast> {
     pub ident_node: &'ast IdentNode,
     pub enum_data: Option<&'ast [Typing<'ast>]>,
+    pub span: Span,
 }
 
 #[derive(Debug, new)]
 pub struct Field<'ast> {
     pub ident: &'ast IdentNode,
     pub type_expr: Typing<'ast>,
+    pub span: Span,
 }
 
 type Arg<'ast> = &'ast Field<'ast>;
 
+/// Implement spans for so it also includes pointers `*` and/or `mut`
 #[derive(Debug, Clone, Copy)]
 pub enum ArgKind<'ast> {
     /// `self`
@@ -235,6 +246,7 @@ pub enum ArgKind<'ast> {
 pub struct StructExpr<'ast> {
     pub ident_node: &'ast IdentNode,
     pub field_initializations: &'ast [&'ast FieldInitialization<'ast>],
+    pub span: Span,
     pub ast_node_id: NodeId,
 }
 
@@ -242,6 +254,7 @@ pub struct StructExpr<'ast> {
 pub struct FieldInitialization<'ast> {
     pub ident: &'ast IdentNode,
     pub value: Expr<'ast>,
+    pub span: Span,
 }
 
 #[derive(Debug, new)]
@@ -249,6 +262,7 @@ pub struct DefineStmt<'ast> {
     pub mut_span: Option<Span>,
     pub setter_expr: Pat<'ast>,
     pub value_expr: Expr<'ast>,
+    pub span: Span,
     pub ast_node_id: NodeId,
 }
 
@@ -262,8 +276,8 @@ pub enum AsigneeExpr<'ast> {
 pub struct AssignStmt<'ast> {
     pub setter_expr: AsigneeExpr<'ast>,
     pub value_expr: Expr<'ast>,
-    pub ast_node_id: NodeId,
     pub span: Span,
+    pub ast_node_id: NodeId,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -278,6 +292,7 @@ pub enum Pat<'ast> {
 pub struct TupleStructPat<'ast> {
     pub path: Path<'ast>,
     pub fields: &'ast [Pat<'ast>],
+    pub span: Span,
     pub ast_node_id: NodeId,
 }
 
@@ -305,6 +320,7 @@ pub struct PathEverything {
 #[derive(Debug, Clone, Copy, new)]
 pub struct PathMultiple<'ast> {
     pub paths: &'ast [Path<'ast>],
+    pub span: Span,
     pub ast_node_id: NodeId,
 }
 
@@ -313,6 +329,7 @@ pub struct PathMultiple<'ast> {
 pub struct PathField<'ast> {
     pub lhs: Path<'ast>,
     pub rhs: &'ast IdentNode,
+    pub span: Span,
     pub ast_node_id: NodeId,
 }
 
@@ -332,12 +349,14 @@ pub enum ExprWithBlock<'ast> {
 #[derive(Debug, new)]
 pub struct LoopExpr<'ast> {
     pub body: &'ast BlockExpr<'ast>,
+    pub span: Span,
     pub ast_node_id: NodeId,
 }
 
 #[derive(Debug, new)]
 pub struct BlockExpr<'ast> {
     pub stmts: Stmts<'ast>,
+    pub span: Span,
     pub ast_node_id: NodeId,
 }
 
@@ -352,8 +371,8 @@ pub struct IfExpr<'ast> {
     pub cond_kind: CondKind<'ast>,
     pub true_block: Stmts<'ast>,
     pub false_block: Option<IfFalseBranchExpr<'ast>>,
-    pub ast_node_id: NodeId,
     pub span: Span,
+    pub ast_node_id: NodeId,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -374,17 +393,20 @@ pub enum ExprWithoutBlock<'ast> {
 #[derive(Debug, new)]
 pub struct BreakExpr<'ast> {
     pub value: Option<Expr<'ast>>,
+    pub span: Span,
     pub ast_node_id: NodeId,
 }
 
 #[derive(Debug, new)]
 pub struct ReturnExpr<'ast> {
     pub value: Option<Expr<'ast>>,
+    pub span: Span,
     pub ast_node_id: NodeId,
 }
 
 #[derive(Debug, new)]
 pub struct ContinueExpr {
+    pub span: Span,
     pub ast_node_id: NodeId,
 }
 
@@ -401,6 +423,7 @@ pub enum PlaceExpr<'ast> {
 pub struct IndexExpr<'ast> {
     pub lhs: Expr<'ast>,
     pub value_expr: Expr<'ast>,
+    pub span: Span,
     pub ast_node_id: NodeId,
 }
 
@@ -408,6 +431,7 @@ pub struct IndexExpr<'ast> {
 pub struct FieldExpr<'ast> {
     pub lhs: Expr<'ast>,
     pub rhs: &'ast IdentNode,
+    pub span: Span,
     pub ast_node_id: NodeId,
 }
 
@@ -415,6 +439,7 @@ pub struct FieldExpr<'ast> {
 pub struct TupleFieldExpr<'ast> {
     pub lhs: Expr<'ast>,
     pub rhs: &'ast IntegerExpr,
+    pub span: Span,
     pub ast_node_id: NodeId,
 }
 
@@ -451,18 +476,21 @@ pub enum ValueExpr<'ast> {
 pub struct CallExpr<'ast> {
     pub callee: Expr<'ast>,
     pub args: &'ast [Expr<'ast>],
+    pub span: Span,
     pub ast_node_id: NodeId,
 }
 
 #[derive(Debug, new)]
 pub struct TupleExpr<'ast> {
     pub fields: &'ast [Expr<'ast>],
+    pub span: Span,
     pub ast_node_id: NodeId,
 }
 
 #[derive(Debug, new)]
 pub struct GroupExpr<'ast> {
     pub expr: Expr<'ast>,
+    pub span: Span,
     pub ast_node_id: NodeId,
 }
 
@@ -471,6 +499,7 @@ pub struct BinaryExpr<'ast> {
     pub lhs: Expr<'ast>,
     pub op: BinaryOp,
     pub rhs: Expr<'ast>,
+    pub span: Span,
     pub ast_node_id: NodeId,
 }
 
@@ -491,12 +520,14 @@ pub struct NullExpr {
 #[derive(Debug, new)]
 pub struct BoolExpr {
     pub val: bool,
+    pub span: Span,
     pub ast_node_id: NodeId,
 }
 
 #[derive(Debug, new)]
 pub struct IntegerExpr {
     pub val: i64,
+    pub span: Span,
     pub ast_node_id: NodeId,
 }
 
@@ -510,6 +541,7 @@ pub struct StringExpr {
 #[derive(Debug)]
 pub struct FloatExpr {
     pub val: f64,
+    pub span: Span,
     pub ast_node_id: NodeId,
 }
 

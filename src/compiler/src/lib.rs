@@ -3,6 +3,7 @@ use std::{ path::{ self, PathBuf }, sync::Mutex };
 use ast::{ Ast, AstArena, AstArenaObject, AstUnvalidated, VisitAst };
 use bumpalo::Bump;
 use codegen::CodeGen;
+
 use icfg::Icfg;
 use icfg_builder::IcfgBuilder;
 use ir::ModId;
@@ -64,8 +65,7 @@ impl Compiler {
         let now = std::time::Instant::now();
 
         let arena = Bump::new();
-        // let global_mems = RefCell::new(Vec::new());
-        let icfg = self.compile_icfg(&arena /*, &global_mems*/);
+        let icfg = self.compile_icfg(&arena);
 
         // IcfgPrettifier::new(&icfg).print_icfg();
 
@@ -106,11 +106,7 @@ impl Compiler {
             .iter()
             .enumerate()
             .find_map(|(i, file)| {
-                if file == &self.entry_file {
-                    Some(ModId(i as u32))
-                } else {
-                    None
-                }
+                if file == &self.entry_file { Some(ModId(i as u32)) } else { None }
             })
             .expect("Cannot find entry file in directory");
 
@@ -153,7 +149,13 @@ impl Compiler {
 
         let parser = Parser::new(&file_content, &ast_arena, mod_id);
 
-        (parser.parse_ast(), file_content)
+        let (parsed_ast, diagnostics) = parser.parse_ast();
+
+        if !diagnostics.is_empty() {
+            diagnostics::report_diagnostics(diagnostics);
+        }
+
+        (parsed_ast, file_content)
     }
 
     fn compile_icfg<'a>(&self, arena: &'a Bump) -> Icfg<'a> {
@@ -163,6 +165,7 @@ impl Compiler {
             let now = std::time::Instant::now();
             let (asts, _) = self.parse_all_files_in_package(&ast_arena);
             println!("Parsing took: {:?}", now.elapsed());
+
             let now = std::time::Instant::now();
 
             let total_nodes = asts
@@ -289,6 +292,11 @@ impl Compiler {
 
             resolver.take_resolved_information()
         };
+
+        if diagnostics::has_error() {
+            diagnostics::print_diagnostics();
+            std::process::exit(1);
+        }
 
         let now = std::time::Instant::now();
 
