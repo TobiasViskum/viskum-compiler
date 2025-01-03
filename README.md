@@ -36,6 +36,38 @@
 - Lastly codegen which is pretty much just each cfg that get's converted into LLVM IR alongside some global variables
     - This stage is multithreaded per CFG
 
+## Ideas
+
+### Function pattern matching
+
+Why it could be useful:
+- To avoid an extra layer of indentation and simply let the function call do the pattern matching
+- If both cases (e.g. Option.Some(x) and Option.None) require big code blocks, then instead of creating two seperate functions (where naming might not make the most sense), the compiler could just determine which "function variant" to call
+
+Why it could cause confusion:
+- If for some reason the two functions are not close to each other in the code, it might be difficult to navigate. However a good LSP could counter that
+
+Notes to implementation:
+- An explicit type like this: "Option.Some(containedValue) Option" is not needed, since the type can be computed from the lhs pattern "Option.Some(containedValue)"
+
+Example:
+
+```
+
+fn hello(Option.Some(containedValue)) {
+
+}
+
+fn hello(Option.None) {
+
+}
+
+hello(Option.Some(8)) # Calls the first variant of the function
+
+hello(Option.None) # Calls the second variant
+
+```
+
 ## Clang and llvm
 - https://mcyoung.xyz/2023/08/01/llvm-ir/
 - llvm switch instruction: https://llvm.org/docs/LangRef.html#switch-instruction
