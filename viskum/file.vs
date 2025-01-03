@@ -10,18 +10,19 @@ declare fn.C time(time *int64) int
 declare fn.C sleep(time int) int
 declare fn.C clock_gettime(realtime int, timespec *mut TimeSpec) int
 
-
-
 struct TimeSpec {
     tv_sec int64,
     tv_nsec int64
 }
 
+
+/
 impl TimeSpec {
     fn new() Self {
         ret Self {
-            tv_sec: 0,
-            tv_nsec: 0
+            tv_gsec 0,
+            tv_sec: 0
+            d
         }
     }
 
@@ -30,13 +31,13 @@ impl TimeSpec {
     }
 
     fn getNsec(self) int64 {
-        ret self.tv_nsec
+        ret self.+-
     }
 
     fn print(*self) {
         printf("TimeSpec { tv_sec: %d, tv_nsec: %d }\n", self.tv_sec, self.tv_nsec)
     }
-}
+
 
 typedef Data (int, int, (bool, bool, int))
 
@@ -73,7 +74,7 @@ impl Vec {
     }
 
     fn.C last(*self) *int {
-        ret self.items[self.len - 1]
+        ret self.items[self.len - 1
     }
 
     fn.C lastMut(*mut self) *mut int {
@@ -153,12 +154,6 @@ impl Instant {
 }
 
 
-struct.C StrVec {
-    len uint,
-    cap uint,
-
-}
-
 fn runTests() {    
     maybe := Option.Some(2)
 
@@ -172,10 +167,11 @@ fn runTests() {
     vecTester.runTests()
 }
 
+
 fn.C main(argc int, args *str) {
 
-    fn thisWillError(hello int, arg int) {
-        abc := 2
+    fn testFn(hello int, arg int) {
+        abc := 2 + hello
         printf("YAYY%d\n", abc + 1)
     }
 

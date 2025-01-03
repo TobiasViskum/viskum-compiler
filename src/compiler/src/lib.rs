@@ -4,6 +4,7 @@ use ast::{ Ast, AstArena, AstArenaObject, AstUnvalidated, VisitAst };
 use bumpalo::Bump;
 use codegen::CodeGen;
 
+use diagnostics::set_mode_id_to_file_path;
 use icfg::Icfg;
 use icfg_builder::IcfgBuilder;
 use ir::ModId;
@@ -118,6 +119,8 @@ impl Compiler {
             for file in files {
                 let mod_id = ModId(next_mod_id);
                 let asts_ref = &asts;
+
+                set_mode_id_to_file_path(mod_id, file.clone());
 
                 s.execute(move || {
                     let bump = ast_arena.get();
@@ -290,13 +293,13 @@ impl Compiler {
 
             println!("Type checking took: {:?}", now.elapsed());
 
+            if diagnostics::has_error() {
+                diagnostics::print_diagnostics();
+                std::process::exit(1);
+            }
+
             resolver.take_resolved_information()
         };
-
-        if diagnostics::has_error() {
-            diagnostics::print_diagnostics();
-            std::process::exit(1);
-        }
 
         let now = std::time::Instant::now();
 

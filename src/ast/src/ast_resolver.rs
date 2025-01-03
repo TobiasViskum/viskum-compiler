@@ -210,7 +210,7 @@ impl<'ctx, 'ast, 'b, E> AstResolver<'ctx, 'ast, 'b, E>
     }
 
     fn report_error(&mut self, error_kind: ErrorKind, span: Span) {
-        self.diagnostics.push(Diagnostic::new_error(error_kind, span));
+        self.diagnostics.push(Diagnostic::new_error(error_kind, span, self.ast.metadata.mod_id));
     }
 
     fn begin_impl_context(&mut self, trait_impl_id: TraitImplId) {

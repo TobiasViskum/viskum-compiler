@@ -1,12 +1,26 @@
 use fxhash::FxHashMap;
-use ir::{ Delimeter, ItemErrorKind, ModId, ResKind, Symbol, Ty };
+use ir::{
+    Delimeter,
+    ExpectedSymbolKind,
+    ItemErrorKind,
+    MissingCommaPlace,
+    ModId,
+    ResKind,
+    Symbol,
+    Ty,
+};
 use op::BinaryOp;
 use span::Span;
+use token::TokenKind;
 use std::{ fmt::Write, path::PathBuf, sync::{ LazyLock, Mutex } };
 
 static DIAGNOSTICS: LazyLock<Mutex<ProgramDiagnostics>> = LazyLock::new(||
     Mutex::new(ProgramDiagnostics::new())
 );
+
+pub fn set_mode_id_to_file_path(mod_id: ModId, file_path: PathBuf) {
+    DIAGNOSTICS.lock().unwrap().mod_name_to_file_path.insert(mod_id, file_path);
+}
 
 pub fn report_diagnostics(diagnostics: Vec<Diagnostic>) {
     DIAGNOSTICS.lock().unwrap().add_diagnostics(diagnostics);
@@ -17,45 +31,41 @@ pub fn has_error() -> bool {
 }
 
 pub fn print_diagnostics() {
-    let diagnostics = DIAGNOSTICS.lock().unwrap();
-    let diagnostics = diagnostics.get_diagnostics();
+    let mut diagnostics_lock = DIAGNOSTICS.lock().unwrap();
+    diagnostics_lock.sort_by_mod_id();
+    let diagnostics = diagnostics_lock.get_sorted_diagnostics();
 
-    let errors_vec = diagnostics
-        .iter()
-        .filter(|x| {
-            match x {
-                Diagnostic { kind: DiagnosticKind::Error(_), .. } => true,
-                _ => false,
+    let mut error_buffer = String::new();
+    let mut warning_buffer = String::new();
+
+    let mut mod_id = None;
+    let mut file_content = String::new();
+
+    for diagnostic in diagnostics {
+        if let Some(mod_id) = mod_id {
+            if mod_id != diagnostic.mod_id {
+                file_content = diagnostics_lock.load_file_content(mod_id);
             }
-        })
-        .collect::<Vec<_>>();
-
-    let warnings_vec = diagnostics
-        .iter()
-        .filter(|x| {
-            match x {
-                Diagnostic { kind: DiagnosticKind::Warning(_), .. } => true,
-                _ => false,
-            }
-        })
-        .collect::<Vec<_>>();
-
-    if !errors_vec.is_empty() {
-        println!("\n\x1b[91mErrors:\x1b[0m");
-        let mut buffer = String::new();
-        for diagnostic in errors_vec {
-            diagnostic.write_msg(&mut buffer);
+        } else {
+            mod_id = Some(diagnostic.mod_id);
+            file_content = diagnostics_lock.load_file_content(diagnostic.mod_id);
         }
-        println!("{}\n", buffer);
+
+        if let DiagnosticKind::Error(_) = diagnostic.kind {
+            diagnostic.write_msg(&mut error_buffer, &file_content);
+            writeln!(error_buffer).unwrap();
+        } else if let DiagnosticKind::Warning(_) = diagnostic.kind {
+            diagnostic.write_msg(&mut warning_buffer, &file_content);
+            writeln!(warning_buffer).unwrap();
+        }
     }
 
-    if !warnings_vec.is_empty() {
-        println!("\n\x1b[93mWarnings:\x1b[0m");
-        let mut buffer = String::new();
-        for diagnostic in warnings_vec {
-            diagnostic.write_msg(&mut buffer);
-        }
-        println!("{}\n", buffer);
+    if !error_buffer.is_empty() {
+        println!("\n\x1b[91mErrors:\x1b[0m\n{}", error_buffer);
+    }
+
+    if !warning_buffer.is_empty() {
+        println!("\n\x1b[93mWarnings:\x1b[0m\n{}", warning_buffer);
     }
 }
 
@@ -72,6 +82,12 @@ impl ProgramDiagnostics {
             highest_severity: None,
             mod_name_to_file_path: FxHashMap::default(),
         }
+    }
+
+    pub fn load_file_content(&self, mod_id: ModId) -> String {
+        let file_path = self.mod_name_to_file_path.get(&mod_id).unwrap();
+        let file_content = std::fs::read_to_string(file_path).unwrap();
+        file_content
     }
 
     pub fn add_diagnostic(&mut self, diagnostic: Diagnostic) {
@@ -98,7 +114,11 @@ impl ProgramDiagnostics {
         );
     }
 
-    pub fn get_diagnostics(&self) -> &[Diagnostic] {
+    pub fn sort_by_mod_id(&mut self) {
+        self.diagnostics.sort_by(|a, b| { a.mod_id.0.cmp(&b.mod_id.0) });
+    }
+
+    pub fn get_sorted_diagnostics(&self) -> &[Diagnostic] {
         &self.diagnostics
     }
 }
@@ -107,13 +127,15 @@ impl ProgramDiagnostics {
 pub struct Diagnostic {
     kind: DiagnosticKind,
     range: Span,
+    mod_id: ModId,
 }
 
 impl Diagnostic {
-    pub fn new_error(kind: ErrorKind, range: Span) -> Self {
+    pub fn new_error(kind: ErrorKind, range: Span, mod_id: ModId) -> Self {
         Self {
             kind: DiagnosticKind::Error(kind),
             range,
+            mod_id,
         }
     }
 
@@ -135,9 +157,9 @@ impl Diagnostic {
         }
     }
 
-    pub fn write_msg(&self, buffer: &mut String) {
+    pub fn write_msg(&self, buffer: &mut String, file_content: &str) {
         match self.kind {
-            DiagnosticKind::Error(kind) => kind.write_msg(buffer, &self.range),
+            DiagnosticKind::Error(kind) => kind.write_msg(buffer, &self.range, file_content),
             DiagnosticKind::Warning(_) => todo!(),
             DiagnosticKind::Info(_) => todo!(),
             DiagnosticKind::Hint(_) => todo!(),
@@ -203,8 +225,24 @@ pub enum ErrorKind {
     FnWithoutBody {
         symbol: Symbol,
     },
-    MissingCommaBetweenFnArgs {
+    MissingComma {
+        missing_comma_place: MissingCommaPlace,
         arg_symbol_after_missing_comma: Symbol,
+    },
+    UnexpectedTokens {
+        expected_str: &'static str,
+    },
+    ExpectedIdent {
+        additional_info: Option<&'static str>,
+        found: Symbol,
+    },
+    ExpectedToken {
+        additional_info: Option<&'static str>,
+        expected: TokenKind,
+        found: Symbol,
+    },
+    ExpectedExprOrItem {
+        found: Symbol,
     },
 }
 
@@ -219,7 +257,11 @@ impl ErrorKind {
             Self::MismatchedTypesInBinaryExpr { .. } => Severity::Severe,
             Self::ExpectedDelimeterAfter { .. } => Severity::Severe,
             Self::ExpectedDelimeterBefore { .. } => Severity::Severe,
-            Self::MissingCommaBetweenFnArgs { .. } => Severity::Severe,
+            Self::MissingComma { .. } => Severity::Severe,
+            Self::UnexpectedTokens { .. } => Severity::Severe,
+            Self::ExpectedIdent { .. } => Severity::Severe,
+            Self::ExpectedToken { .. } => Severity::Severe,
+            Self::ExpectedExprOrItem { .. } => Severity::Severe,
 
             Self::FnWithoutBody { .. } => Severity::NoImpact,
             Self::ReturnOutsideFn => Severity::NoImpact,
@@ -231,7 +273,7 @@ impl ErrorKind {
         }
     }
 
-    /// Used with the LSP to make each error unique
+    /// Used with the LSP (in the future) to make each error unique
     pub fn get_issue_code(&self) -> &str {
         match self {
             Self::UndefinedLookup { .. } => "E001",
@@ -249,16 +291,63 @@ impl ErrorKind {
             Self::ExpectedDelimeterBefore { .. } => "E013",
             Self::FnWithoutBody { .. } => "E014",
             Self::ContinueOutsideLoop => "E015",
-            Self::MissingCommaBetweenFnArgs { .. } => "E016",
+            Self::MissingComma { .. } => "E016",
+            Self::UnexpectedTokens { .. } => "E017",
+            Self::ExpectedIdent { .. } => "E018",
+            Self::ExpectedToken { .. } => "E019",
+            Self::ExpectedExprOrItem { .. } => "E020",
         }
     }
 
-    pub fn write_msg(&self, buffer: &mut String, span: &Span) {
+    pub fn write_msg(&self, buffer: &mut String, span: &Span, file_content: &str) {
         let write_error = match self {
-            Self::MissingCommaBetweenFnArgs { arg_symbol_after_missing_comma } => {
+            Self::ExpectedExprOrItem { found } => {
                 write!(
                     buffer,
-                    "Missing comma between function arguments at line {}. Try adding a comma before argument `{}`",
+                    "Expected expression or item at line {}. Found `{}`",
+                    span.get_line(),
+                    found.get()
+                )
+            }
+            Self::ExpectedToken { additional_info, expected, found } => {
+                write!(
+                    buffer,
+                    "Expected `{}`{}at line {}. Found `{}`",
+                    expected,
+                    match additional_info {
+                        Some(additional_info) => format!(" {} ", additional_info),
+                        None => "".to_string(),
+                    },
+                    span.get_line(),
+                    found.get()
+                )
+            }
+            Self::ExpectedIdent { additional_info, found } => {
+                write!(
+                    buffer,
+                    "Expected identifier{}at line {}. Found `{}`",
+                    match additional_info {
+                        Some(additional_info) => format!(" {} ", additional_info),
+                        None => " ".to_string(),
+                    },
+                    span.get_line(),
+                    found.get()
+                )
+            }
+            Self::UnexpectedTokens { expected_str } => {
+                write!(
+                    buffer,
+                    "Unexpected tokens at line {}. {}. Found tokens '{}'",
+                    span.get_line(),
+                    expected_str,
+                    &file_content[span.get_byte_range()]
+                )
+            }
+            Self::MissingComma { missing_comma_place, arg_symbol_after_missing_comma } => {
+                write!(
+                    buffer,
+                    "Missing comma between {} at line {}. Try adding a comma before identifier `{}`",
+                    missing_comma_place,
                     span.get_line(),
                     arg_symbol_after_missing_comma.get()
                 )

@@ -77,8 +77,8 @@ impl<'ast, 'b> ExprBuilder<'ast, 'b> {
     }
 
     pub fn take_stmt(mut self) -> Option<Stmt<'ast>> {
-        if self.final_stmt.is_none() {
-            self.final_stmt = Some(Stmt::ExprStmt(self.exprs.pop().expect("TODO: Error handling")));
+        if let Some(expr) = self.exprs.pop() {
+            self.final_stmt = Some(Stmt::ExprStmt(expr));
         }
 
         self.final_stmt

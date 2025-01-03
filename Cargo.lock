@@ -148,6 +148,7 @@ dependencies = [
  "ir",
  "op",
  "span",
+ "token",
 ]
 
 [[package]]

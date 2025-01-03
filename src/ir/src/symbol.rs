@@ -24,7 +24,7 @@ impl Symbol {
     pub fn new_with_node_id(str: &str, node_id: NodeId) -> Self {
         with_global_session(|globals| {
             let symbol = globals.intern_str(str);
-            globals.node_id_to_symbol.entry(node_id).or_insert(symbol);
+            globals.insert_symbol_to_node_id(node_id, symbol);
             symbol
         })
     }
@@ -34,13 +34,7 @@ impl Symbol {
     }
 
     pub fn from_node_id(node_id: NodeId) -> Self {
-        with_global_session(|globals| {
-            *globals.node_id_to_symbol
-                .get(&node_id)
-                .expect(
-                    "Expected symbol to node id (should only be used after parsing of all files)"
-                )
-        })
+        with_global_session(|globals| globals.get_symbol_from_node_id(node_id))
     }
 
     pub(crate) fn from_id(id: usize) -> Self {

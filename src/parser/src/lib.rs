@@ -131,7 +131,16 @@ use ast::{
 use diagnostics::{ Diagnostic, ErrorKind };
 use error::Error;
 use expr_builder::ExprBuilder;
-use ir::{ Delimeter, ItemErrorKind, ModId, Mutability, NodeId, Symbol };
+use ir::{
+    Delimeter,
+    ExpectedSymbolKind,
+    ItemErrorKind,
+    MissingCommaPlace,
+    ModId,
+    Mutability,
+    NodeId,
+    Symbol,
+};
 use lexer::Lexer;
 use make_parse_rule::make_parse_rule;
 use op::{ ArithmeticOp, BinaryOp, ComparisonOp };
@@ -434,7 +443,7 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
     }
 
     pub(crate) fn report_error(&mut self, error_kind: ErrorKind, span: Span) {
-        self.diagnostics.push(Diagnostic::new_error(error_kind, span));
+        self.diagnostics.push(Diagnostic::new_error(error_kind, span, self.mod_id));
     }
 
     pub fn parse_ast<'c>(mut self) -> (Ast<'a, AstState0>, Vec<Diagnostic>) where 'c: 'b {
@@ -458,7 +467,7 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
 
     pub(crate) fn statement(&mut self) -> Option<Stmt<'a>> {
         match self.current.get_kind() {
-            TokenKind::Impl => Some(self.impl_statement()),
+            TokenKind::Impl => self.impl_statement(),
             TokenKind::Typedef => {
                 self.def_count += 1;
                 Some(self.typedef_statement())
@@ -481,14 +490,15 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
                     None
                 }
             }
-            TokenKind::Declare => Some(self.declare_statement()),
+            TokenKind::Declare => self.declare_statement(),
             TokenKind::Return => Some(self.return_expr()),
             TokenKind::Import => Some(self.import_statement()),
-            _ => Some(self.expression_statement()),
+            _ => self.expression_statement(),
         }
     }
 
     pub(crate) fn parse_path(&mut self) -> Path<'a> {
+        println!("Missing error handling for path parsing");
         let mut start_span = self.current.get_span();
 
         let mut path = if self.is_curr_kind(TokenKind::Pkg) {
@@ -554,13 +564,26 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
         Stmt::ItemStmt(import_stmt)
     }
 
-    pub(crate) fn impl_statement(&mut self) -> Stmt<'a> {
+    pub(crate) fn impl_statement(&mut self) -> Option<Stmt<'a>> {
         let start_span = self.current.get_span();
         self.advance();
 
         let impl_path = self.parse_path();
 
-        self.consume(TokenKind::LeftCurly, "Expected `{` after impl path");
+        let success = self.consume_or_report_error(
+            TokenKind::LeftCurly,
+            ErrorKind::ExpectedToken {
+                additional_info: Some("after impl path"),
+                expected: TokenKind::LeftCurly,
+                found: Symbol::new(self.get_lexeme_of_current()),
+            },
+            self.current.get_span()
+        );
+
+        if !success {
+            self.synchronize();
+            return None;
+        }
 
         let mut impl_fn_items = Vec::with_capacity(8);
 
@@ -571,12 +594,28 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
                 impl_fn_items.push(fn_item);
             }
 
-            if self.is_curr_kind(TokenKind::RightCurly) {
+            if !self.is_curr_kind(TokenKind::Fn) {
                 break;
             }
         }
 
-        self.consume(TokenKind::RightCurly, "Expected `}` after impl block");
+        // self.consume(TokenKind::RightCurly, "Expected `}` after impl block");
+        let success = self.consume_or_report_error(
+            TokenKind::RightCurly,
+            ErrorKind::ExpectedToken {
+                additional_info: Some("after impl block"),
+                expected: TokenKind::RightCurly,
+                found: Symbol::new(self.get_lexeme_of_current()),
+            },
+            self.current.get_span()
+        );
+
+        if !success {
+            self.synchronize();
+            if self.is_curr_kind(TokenKind::RightCurly) {
+                self.advance();
+            }
+        }
 
         let impl_item = ImplItem::new(
             impl_path,
@@ -585,10 +624,12 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
             self.get_ast_node_id()
         );
 
-        Stmt::ItemStmt(ItemStmt::ImplItem(self.ast_arena.alloc_expr_or_stmt(impl_item)))
+        let impl_item_stmt = ItemStmt::ImplItem(self.ast_arena.alloc_expr_or_stmt(impl_item));
+
+        Some(Stmt::ItemStmt(impl_item_stmt))
     }
 
-    pub(crate) fn declare_statement(&mut self) -> Stmt<'a> {
+    pub(crate) fn declare_statement(&mut self) -> Option<Stmt<'a>> {
         let start_span = self.current.get_span();
         self.advance();
 
@@ -596,11 +637,14 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
             panic!("Error: Declare statement must be a C function declaration");
         }
 
-        let (item_type, parsed_fn_sig) = self.parse_fn_signature(ParsingDeclareFn::Yes);
+        let parsed_fn_sig = self.parse_fn_signature(ParsingDeclareFn::Yes);
 
-        let parsed_fn_sig = match parsed_fn_sig {
+        let (item_type, parsed_fn_sig) = match parsed_fn_sig {
             Some(parsed_fn_sig) => parsed_fn_sig,
-            None => panic!("Error: Expected function signature"),
+            None => {
+                self.synchronize();
+                return None;
+            }
         };
 
         if ItemType::Normal == item_type {
@@ -629,7 +673,7 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
             )
         );
 
-        Stmt::ItemStmt(ItemStmt::CompDeclItem(comp_decl_item))
+        Some(Stmt::ItemStmt(ItemStmt::CompDeclItem(comp_decl_item)))
     }
 
     pub(crate) fn typedef_statement(&mut self) -> Stmt<'a> {
@@ -769,6 +813,8 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
                 if self.is_curr_kind(TokenKind::Comma) {
                     self.advance();
                     continue;
+                } else if self.is_curr_kind(TokenKind::Ident) {
+                    todo!();
                 }
 
                 match self.current.get_kind() {
@@ -877,11 +923,10 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
         }
     }
 
-    pub(crate) fn expression_statement(&mut self) -> Stmt<'a> {
+    pub(crate) fn expression_statement(&mut self) -> Option<Stmt<'a>> {
         let mut expr_builder = ExprBuilder::new(self.ast_arena, None);
         self.expression(&mut expr_builder);
-        let stmt = expr_builder.take_stmt().expect("TODO: Error handling");
-        stmt
+        expr_builder.take_stmt()
     }
 
     pub(crate) fn break_expr(&mut self) -> Stmt<'a> {
@@ -902,13 +947,31 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
         Stmt::ExprStmt(expr)
     }
 
+    /// Returns whether or not further arguments can be parsed
+    fn recover_from_arg_parse_error(&mut self) -> bool {
+        let start_span = self.current.get_span();
+        let can_parse_more_args = self.synchronize_with_callback(|token_kind|
+            matches!(token_kind, TokenKind::RightParen | TokenKind::Comma)
+        );
+        self.report_error(
+            ErrorKind::UnexpectedTokens { expected_str: "Expected function argument or `)`" },
+            Span::merge(start_span, self.current.get_span())
+        );
+
+        if self.is_curr_kind(TokenKind::Comma) {
+            self.advance();
+        }
+
+        can_parse_more_args
+    }
+
     /// This will parse a function signature `fn ident(args) -> ret_typing` until the left brace `{`.
     ///
     /// It will also synchronize if there's an error parsing the function signature.
     pub(crate) fn parse_fn_signature(
         &mut self,
         parsing_declare_fn: ParsingDeclareFn
-    ) -> (ItemType, Option<ParsedFnSignature<'a>>) {
+    ) -> Option<(ItemType, ParsedFnSignature<'a>)> {
         self.advance();
         let item_type = if self.is_curr_kind(TokenKind::Dot) {
             self.advance();
@@ -920,7 +983,29 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
         };
 
         let start_span = self.current.get_span();
-        let ident_expr = self.consume_ident("Expected ident after `fn`");
+        let ident_expr = if let Some(ident) = self.try_consume_ident() {
+            ident
+        } else {
+            self.report_error(
+                ErrorKind::ExpectedIdent {
+                    additional_info: Some("after keyword `fn`"),
+                    found: Symbol::new(self.get_lexeme_of_current()),
+                },
+                self.current.get_span()
+            );
+            if self.current.get_kind() != TokenKind::LeftParen {
+                self.synchronize();
+                return None;
+            } else {
+                // We return a ident node with the span equal to the text of an empty string, only if the next token is `(`,
+                // because we hope to parse the function arguments as well
+                let byte_start = self.current.get_span().get_byte_start();
+                let line = self.current.get_span().get_line();
+                let node_id = self.get_ast_node_id();
+                Symbol::new_with_node_id("", node_id);
+                IdentNode::new(Span::new(byte_start, byte_start, line, 0), node_id)
+            }
+        };
 
         let success = self.consume_or_report_error(
             TokenKind::LeftParen,
@@ -934,7 +1019,7 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
         if !success {
             self.synchronize();
 
-            return (item_type, None);
+            return None;
         }
 
         let mut args = Vec::with_capacity(8);
@@ -990,7 +1075,12 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
                         ArgKind::Arg(self.ast_arena.alloc_expr_or_stmt(arg))
                     }
                     _ => {
-                        break;
+                        let can_parse_more_args = self.recover_from_arg_parse_error();
+                        if can_parse_more_args {
+                            continue;
+                        } else {
+                            break;
+                        }
                     }
                 }
             };
@@ -1006,21 +1096,36 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
 
             if self.is_curr_kind(TokenKind::Comma) {
                 self.advance();
+
                 continue;
             } else if self.is_curr_kind(TokenKind::Ident) {
                 let symbol = Symbol::new(self.get_lexeme(self.current.get_span()));
                 self.report_error(
-                    ErrorKind::MissingCommaBetweenFnArgs { arg_symbol_after_missing_comma: symbol },
+                    ErrorKind::MissingComma {
+                        missing_comma_place: MissingCommaPlace::FnArgs,
+                        arg_symbol_after_missing_comma: symbol,
+                    },
                     Span::merge(self.prev.get_span(), self.current.get_span())
                 );
                 continue;
             }
 
-            break;
+            if self.is_curr_kind(TokenKind::RightParen) {
+                break;
+            }
+
+            let can_parse_more_args = self.recover_from_arg_parse_error();
+
+            if !can_parse_more_args {
+                return None;
+            } else {
+                continue;
+            }
         }
+
         let args = self.ast_arena.alloc_vec(args);
 
-        self.consume_or_report_error(
+        let success = self.consume_or_report_error(
             TokenKind::RightParen,
             ErrorKind::ExpectedDelimeterAfter {
                 expected_delim: Delimeter::RightParen,
@@ -1029,27 +1134,37 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
             Span::merge(start_span, self.current.get_span())
         );
 
-        // self.consume(TokenKind::RightParen, "Expected ')' after function args");
+        if !success {
+            self.synchronize();
+            return Some((
+                item_type,
+                ParsedFnSignature {
+                    ident: self.ast_arena.alloc_expr_or_stmt(ident_expr),
+                    args,
+                    ret_typing: None,
+                },
+            ));
+        }
 
         let return_ty = self.parse_typing();
 
         self.parsed_fn_count += 1;
 
-        (
+        Some((
             item_type,
-            Some(ParsedFnSignature {
+            ParsedFnSignature {
                 ident: self.ast_arena.alloc_expr_or_stmt(ident_expr),
                 args,
                 ret_typing: return_ty,
-            }),
-        )
+            },
+        ))
     }
 
     pub(crate) fn function_statement(&mut self) -> Option<&'a FnItem<'a>> {
         let start_span = self.current.get_span();
-        let (item_type, parsed_fn_sig) = self.parse_fn_signature(ParsingDeclareFn::No);
+        let parsed_fn_sig = self.parse_fn_signature(ParsingDeclareFn::No);
 
-        let parsed_fn_sig = match parsed_fn_sig {
+        let (item_type, parsed_fn_sig) = match parsed_fn_sig {
             Some(parsed_fn_sig) => parsed_fn_sig,
             None => {
                 return None;
@@ -1064,7 +1179,7 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
             let success = self.consume_or_report_error(
                 TokenKind::RightCurly,
                 ErrorKind::ExpectedDelimeterAfter {
-                    expected_delim: Delimeter::RightBrace,
+                    expected_delim: Delimeter::RightCurly,
                     kind: ItemErrorKind::FnBody,
                 },
                 Span::merge(body_start_span, self.current.get_span())
@@ -1309,13 +1424,76 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
         todo!()
     }
 
+    // fn consume_ident_or_report_and_synchronize(
+    //     &mut self,
+    //     error_kind: ErrorKind,
+    //     recover_tokens: &[TokenKind]
+    // ) -> Result<IdentNode, bool> {
+    //     match self.try_consume_ident() {
+    //         Some(ident) => Ok(ident),
+    //         None => {
+    //             self.report_error(error_kind, self.current.get_span());
+    //             let stopped_by_callback = self.synchronize_with_callback(|token_kind|
+    //                 recover_tokens.contains(&token_kind)
+    //             );
+    //         }
+    //     }
+    // }
+
     /// Parse rule method: `struct_expr`
     pub(crate) fn struct_expr(&mut self, expr_builder: &mut ExprBuilder<'a, 'b>) {
         let mut initialization_fields = Vec::with_capacity(8);
         while !self.is_eof() && !self.is_curr_kind(TokenKind::RightCurly) {
             let start_field_span = self.current.get_span();
-            let field_ident = self.consume_ident("Expected ident");
-            self.consume(TokenKind::Colon, "Expected colon");
+            let field_ident = match self.try_consume_ident() {
+                Some(ident) => ident,
+                None => {
+                    self.report_error(
+                        ErrorKind::ExpectedIdent {
+                            additional_info: Some("in field declaration"),
+                            found: Symbol::new(self.get_lexeme_of_current()),
+                        },
+                        self.current.get_span()
+                    );
+                    let can_continue = self.synchronize_with_callback(|token_kind|
+                        matches!(token_kind, TokenKind::Comma)
+                    );
+
+                    if can_continue {
+                        if self.is_curr_kind(TokenKind::Comma) {
+                            self.advance();
+                        }
+                        continue;
+                    } else {
+                        break;
+                    }
+                }
+            };
+            let success = self.consume_or_report_error(
+                TokenKind::Colon,
+                ErrorKind::ExpectedToken {
+                    additional_info: Some("after field identifier"),
+                    expected: TokenKind::Colon,
+                    found: Symbol::new(self.get_lexeme_of_current()),
+                },
+                self.current.get_span()
+            );
+
+            if !success {
+                let can_continue = self.synchronize_with_callback(|token_kind|
+                    matches!(token_kind, TokenKind::Comma | TokenKind::RightCurly)
+                );
+
+                if can_continue && !self.is_curr_kind(TokenKind::RightCurly) {
+                    if self.is_curr_kind(TokenKind::Comma) {
+                        self.advance();
+                    }
+                    continue;
+                } else {
+                    break;
+                }
+            }
+
             let expr = self.parse_expr_and_take(Precedence::PrecAssign.get_next());
             let field_init = self.ast_arena.alloc_expr_or_stmt(
                 FieldInitialization::new(
@@ -1329,20 +1507,59 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
             if self.is_curr_kind(TokenKind::Comma) {
                 self.advance();
                 continue;
+            } else if self.is_curr_kind(TokenKind::Ident) {
+                let symbol = Symbol::new(self.get_lexeme_of_prev());
+                println!(
+                    "Try adding a comma after `{}` at line {}",
+                    symbol.get(),
+                    self.prev.get_span().get_line()
+                );
             }
 
             break;
         }
 
-        self.consume(TokenKind::RightCurly, "Expected `}` after struct expression");
+        let success = self.consume_or_report_error(
+            TokenKind::RightCurly,
+            ErrorKind::ExpectedToken {
+                additional_info: Some("after struct expression"),
+                expected: TokenKind::RightCurly,
+                found: Symbol::new(self.get_lexeme_of_current()),
+            },
+            self.current.get_span()
+        );
 
-        expr_builder.emit_struct_expr(initialization_fields, self)
+        if !success {
+            self.synchronize_with_callback(|token_kind|
+                matches!(token_kind, TokenKind::RightCurly)
+            );
+
+            if self.is_curr_kind(TokenKind::RightCurly) {
+                self.advance();
+            }
+        }
+
+        expr_builder.emit_struct_expr(initialization_fields, self);
     }
 
     /// Parse rule method: `index_expr`
     pub(crate) fn index_expr(&mut self, expr_builder: &mut ExprBuilder<'a, 'b>) {
         let index_expr = self.parse_expr_and_take(Precedence::PrecAssign.get_next());
-        self.consume(TokenKind::RightSquare, "Expected `]` after index expression");
+
+        let success = self.consume_or_report_error(
+            TokenKind::RightSquare,
+            ErrorKind::ExpectedToken {
+                additional_info: Some("after index expression"),
+                expected: TokenKind::RightSquare,
+                found: Symbol::new(self.get_lexeme_of_current()),
+            },
+            self.current.get_span()
+        );
+
+        if !success {
+            self.synchronize();
+        }
+
         expr_builder.emit_index_expr(index_expr, self)
     }
 
@@ -1359,10 +1576,16 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
                 expr_builder.emit_field_expr(ident_node, self);
             }
             _ => {
-                println!("{}", self.current.get_kind());
-                todo!()
-                // self.expression(expr_builder);
-                // // Emit dot expr
+                self.report_error(
+                    ErrorKind::ExpectedToken {
+                        additional_info: Some("after `.`"),
+                        expected: TokenKind::Ident,
+                        found: Symbol::new(self.get_lexeme_of_current()),
+                    },
+                    self.current.get_span()
+                );
+                self.synchronize();
+                println!("")
             }
         }
     }
@@ -1583,8 +1806,19 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
         block_expr
     }
 
-    pub(crate) fn synchronize(&mut self) {
-        while !self.is_eof() {
+    pub(crate) fn synchronize_with_callback(
+        &mut self,
+        mut callback: impl FnMut(TokenKind) -> bool
+    ) -> bool {
+        loop {
+            if self.is_eof() {
+                break false;
+            }
+
+            if callback(self.current.get_kind()) {
+                break true;
+            }
+
             match self.current.get_kind() {
                 | TokenKind::Fn
                 | TokenKind::Struct
@@ -1593,16 +1827,22 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
                 | TokenKind::Declare
                 | TokenKind::Import
                 | TokenKind::Loop
+                | TokenKind::Impl
                 | TokenKind::If
                 | TokenKind::Elif
-                | TokenKind::LeftCurly => {
-                    break;
+                | TokenKind::LeftCurly
+                | TokenKind::RightCurly => {
+                    break false;
                 }
                 _ => {
                     self.advance();
                 }
             }
         }
+    }
+
+    pub(crate) fn synchronize(&mut self) {
+        self.synchronize_with_callback(|_| false);
     }
 
     pub(crate) fn parse_precedence(
@@ -1670,7 +1910,13 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
                 }
             }
         } else {
-            panic!("Unexpected token: {}", self.prev.get_kind())
+            self.report_error(
+                ErrorKind::ExpectedExprOrItem {
+                    found: Symbol::new(self.get_lexeme_of_prev()),
+                },
+                self.prev.get_span()
+            );
+            self.synchronize();
         }
     }
 
@@ -1698,6 +1944,10 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
 
     pub(crate) fn get_lexeme_of_prev(&self) -> &str {
         self.get_lexeme(self.prev.get_span())
+    }
+
+    pub(crate) fn get_lexeme_of_current(&self) -> &str {
+        self.get_lexeme(self.current.get_span())
     }
 
     pub(crate) fn is_eof(&self) -> bool {
@@ -1759,6 +2009,17 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
         }
     }
 
+    pub(crate) fn try_consume_self_as_ident_node(&mut self) -> Option<IdentNode> {
+        match self.current.get_kind() {
+            TokenKind::SmallSelf => {
+                let ident_node = self.make_ident_node_from_current();
+                self.advance();
+                Some(ident_node)
+            }
+            _ => None,
+        }
+    }
+
     pub(crate) fn consume_ident(&mut self, err_msg: &str) -> IdentNode {
         match self.current.get_kind() {
             TokenKind::Ident => {
@@ -1767,6 +2028,17 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
                 ident_node
             }
             _ => panic!("{}", err_msg),
+        }
+    }
+
+    pub(crate) fn try_consume_ident(&mut self) -> Option<IdentNode> {
+        match self.current.get_kind() {
+            TokenKind::Ident => {
+                let ident_node = self.make_ident_node_from_current();
+                self.advance();
+                Some(ident_node)
+            }
+            _ => None,
         }
     }
 

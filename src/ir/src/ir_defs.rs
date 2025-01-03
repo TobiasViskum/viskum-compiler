@@ -7,15 +7,36 @@ use span::Span;
 use crate::{ Symbol, Ty };
 
 #[derive(Debug, Clone, Copy)]
+pub enum ExpectedSymbolKind {
+    Colon,
+    Dot,
+    Comma,
+    Semicolon,
+    Delimeter(Delimeter),
+}
+
+impl Display for ExpectedSymbolKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ExpectedSymbolKind::Colon => write!(f, ":"),
+            ExpectedSymbolKind::Dot => write!(f, "."),
+            ExpectedSymbolKind::Comma => write!(f, ","),
+            ExpectedSymbolKind::Semicolon => write!(f, ";"),
+            ExpectedSymbolKind::Delimeter(delimeter) => write!(f, "{}", delimeter),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
 pub enum Delimeter {
     /// `(`
     LeftParen,
     /// `)`
     RightParen,
     /// `{`
-    LeftBrace,
+    LeftCurly,
     /// `}`
-    RightBrace,
+    RightCurly,
     /// `[`
     LeftBracket,
     /// `]`
@@ -27,8 +48,8 @@ impl Display for Delimeter {
         match self {
             Delimeter::LeftParen => write!(f, "("),
             Delimeter::RightParen => write!(f, ")"),
-            Delimeter::LeftBrace => write!(f, "{{"),
-            Delimeter::RightBrace => write!(f, "}}"),
+            Delimeter::LeftCurly => write!(f, "{{"),
+            Delimeter::RightCurly => write!(f, "}}"),
             Delimeter::LeftBracket => write!(f, "["),
             Delimeter::RightBracket => write!(f, "]"),
         }
@@ -40,6 +61,21 @@ pub enum ItemErrorKind {
     FnName,
     FnBody,
     FnArgs,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum MissingCommaPlace {
+    FnArgs,
+    StructFields,
+}
+
+impl Display for MissingCommaPlace {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MissingCommaPlace::FnArgs => write!(f, "function arguments"),
+            MissingCommaPlace::StructFields => write!(f, "struct fields"),
+        }
+    }
 }
 
 impl Display for ItemErrorKind {

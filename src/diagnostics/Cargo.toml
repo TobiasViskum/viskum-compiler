@@ -8,6 +8,7 @@ edition = "2021"
 span = { path = "../span" }
 ir = { path = "../ir" }
 op = { path = "../op" }
+token = { path = "../token" }
 
 # Extern crates
 fxhash = "0.2.1"
