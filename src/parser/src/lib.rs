@@ -140,6 +140,7 @@ use ir::{
     Mutability,
     NodeId,
     Symbol,
+    Ty,
 };
 use lexer::Lexer;
 use make_parse_rule::make_parse_rule;
@@ -607,7 +608,7 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
                 expected: TokenKind::RightCurly,
                 found: Symbol::new(self.get_lexeme_of_current()),
             },
-            self.current.get_span()
+            Span::merge(start_span, self.current.get_span())
         );
 
         if !success {
@@ -680,7 +681,7 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
         let start_span = self.current.get_span();
         self.advance();
         let ident_node = self.consume_ident("Expected ident after `typedef`");
-        let ty = self.parse_typing().expect("TODO: Error handling, Expected type");
+        let ty = self.parse_typing(&[]).expect("TODO: Error handling, Expected type");
 
         let typedef_stmt = ItemStmt::TypedefItem(
             self.ast_arena.alloc_expr_or_stmt(
@@ -735,27 +736,15 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
                 }
                 TokenKind::LeftParen => {
                     self.advance();
-                    let mut tys = Vec::with_capacity(8);
-                    loop {
-                        let ty = self.parse_typing().expect("Expected type in enum variant");
-                        tys.push(ty);
+                    let tys = self.parse_many_typings(&[TokenKind::Comma]);
 
-                        if self.is_curr_kind(TokenKind::Comma) {
-                            self.advance();
-                            continue;
-                        }
-
-                        break;
-                    }
                     variants.push(
                         EnumVariant::new(
                             variant_name,
-                            Some(self.ast_arena.alloc_vec(tys)),
+                            Some(tys),
                             Span::merge(start_enum_variant_span, self.current.get_span())
                         )
                     );
-
-                    self.consume(TokenKind::RightParen, "Expected `)` after enum variant");
 
                     if self.is_curr_kind(TokenKind::Comma) {
                         self.advance();
@@ -800,34 +789,86 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
 
             while !self.is_eof() && !self.is_curr_kind(TokenKind::RightCurly) {
                 let start_field_span = self.current.get_span();
-                let field_name = self.consume_ident("Expected ident in field");
-                let ty = self.parse_typing().expect("TODO: Error handling, Expected type");
+
+                let field_name = if let Some(ident) = self.try_consume_ident() {
+                    ident
+                } else {
+                    self.report_error(
+                        ErrorKind::ExpectedToken {
+                            additional_info: Some("after field"),
+                            expected: TokenKind::Ident,
+                            found: Symbol::new(self.get_lexeme_of_current()),
+                        },
+                        self.current.get_span()
+                    );
+                    let stopped_by_callback = self.synchronize_with_callback(|tkind|
+                        matches!(tkind, TokenKind::Comma)
+                    );
+                    if stopped_by_callback {
+                        self.advance();
+                        continue;
+                    } else {
+                        break;
+                    }
+                };
+
+                let (typing, missing_typing) = if
+                    let Some(typing) = self.parse_typing(&[TokenKind::Comma])
+                {
+                    (typing, false)
+                } else {
+                    self.report_error(
+                        ErrorKind::ExpectedTyping {
+                            additional_info: Some("after identifier"),
+                            found: Symbol::new(self.get_lexeme_of_current()),
+                        },
+                        self.current.get_span()
+                    );
+                    self.synchronize();
+                    (Typing::Error, true)
+                };
+
                 let field = Field::new(
                     self.ast_arena.alloc_expr_or_stmt(field_name),
-                    ty,
+                    typing,
                     Span::merge(start_field_span, self.current.get_span())
                 );
 
                 fields.push(self.ast_arena.alloc_expr_or_stmt(field));
 
+                if
+                    !self.is_curr_kind(TokenKind::Comma) &&
+                    !self.is_curr_kind(TokenKind::RightCurly) &&
+                    !missing_typing
+                {
+                    self.report_error(
+                        ErrorKind::ExpectedToken {
+                            additional_info: Some("after field"),
+                            expected: TokenKind::Comma,
+                            found: Symbol::new(self.get_lexeme_of_current()),
+                        },
+                        self.current.get_span()
+                    );
+                    self.synchronize_with_callback(|tkind| matches!(tkind, TokenKind::Comma));
+                }
+
                 if self.is_curr_kind(TokenKind::Comma) {
                     self.advance();
                     continue;
-                } else if self.is_curr_kind(TokenKind::Ident) {
-                    todo!();
                 }
 
-                match self.current.get_kind() {
-                    TokenKind::RightCurly => {}
-                    TokenKind::Ident =>
-                        todo!("Error: You are probably missing a `,` in struct declaration"),
-                    t =>
-                        todo!("Error: Unexpected token `{}` in struct declaration. Expected `,` or `}}`", t),
-                }
                 break;
             }
 
-            self.consume(TokenKind::RightCurly, "Expected `}` after struct");
+            self.consume_or_report_error(
+                TokenKind::RightCurly,
+                ErrorKind::ExpectedToken {
+                    additional_info: Some("after struct item"),
+                    expected: TokenKind::RightCurly,
+                    found: Symbol::new(self.get_lexeme_of_current()),
+                },
+                Span::merge(start_span, self.current.get_span())
+            );
         }
 
         let fields = self.ast_arena.alloc_vec(fields);
@@ -842,24 +883,52 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
         Stmt::ItemStmt(ItemStmt::StructItem(self.ast_arena.alloc_expr_or_stmt(struct_stmt)))
     }
 
-    pub(crate) fn parse_typing(&mut self) -> Option<Typing<'a>> {
-        fn parse_many_typings<'a>(
-            parser: &mut Parser<'a, '_>,
-            mut tuple_typing: Vec<Typing<'a>>
-        ) -> &'a [Typing<'a>] {
-            while !parser.is_eof() && !parser.is_curr_kind(TokenKind::RightParen) {
-                let typing = parser.parse_typing().expect("Expected typing");
+    pub(crate) fn parse_many_typings(
+        &mut self,
+        synchronize_tokens: &[TokenKind]
+    ) -> &'a [Typing<'a>] {
+        let mut tuple_typing = vec![];
+        while !self.is_eof() && !self.is_curr_kind(TokenKind::RightParen) {
+            if let Some(typing) = self.parse_typing(synchronize_tokens) {
                 tuple_typing.push(typing);
-                if parser.is_curr_kind(TokenKind::Comma) {
-                    parser.advance();
-                    continue;
+            } else {
+                let can_continue_parsing_typing = self.synchronize_with_callback(|tkind| {
+                    match tkind {
+                        TokenKind::Comma | TokenKind::RightParen => true,
+                        t => synchronize_tokens.contains(&t),
+                    }
+                });
+
+                if !can_continue_parsing_typing {
+                    break;
                 }
-                break;
             }
-            parser.consume(TokenKind::RightParen, "Expected `)` after tuple typing");
-            parser.ast_arena.alloc_vec(tuple_typing)
+
+            if self.is_curr_kind(TokenKind::Comma) {
+                self.advance();
+                continue;
+            }
+            break;
         }
 
+        let success = self.consume_or_report_error(
+            TokenKind::RightParen,
+            ErrorKind::ExpectedToken {
+                additional_info: Some("Expected `)` after tuple types"),
+                expected: TokenKind::RightParen,
+                found: Symbol::new(self.get_lexeme_of_current()),
+            },
+            self.current.get_span()
+        );
+
+        if !success {
+            self.synchronize_with_callback(|tkind| synchronize_tokens.contains(&tkind));
+        }
+
+        self.ast_arena.alloc_vec(tuple_typing)
+    }
+
+    pub(crate) fn parse_typing(&mut self, synchronize_tokens: &[TokenKind]) -> Option<Typing<'a>> {
         match self.current.get_kind() {
             TokenKind::Ellipsis => {
                 self.advance();
@@ -881,22 +950,41 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
                 } else {
                     Mutability::Immutable
                 };
-                let ty = self.parse_typing().expect("Expected type after `*`");
-                Some(Typing::Ptr(self.ast_arena.alloc_expr_or_stmt(ty), mutability))
+
+                if let Some(ty) = self.parse_typing(synchronize_tokens) {
+                    return Some(Typing::Ptr(self.ast_arena.alloc_expr_or_stmt(ty), mutability));
+                } else {
+                    self.report_error(
+                        ErrorKind::ExpectedTyping {
+                            additional_info: Some("after `*`"),
+                            found: Symbol::new(self.get_lexeme_of_current()),
+                        },
+                        self.current.get_span()
+                    );
+                    self.synchronize_with_callback(|tkind| synchronize_tokens.contains(&tkind));
+                    return Some(Typing::Error);
+                }
             }
             TokenKind::Fn => {
                 self.advance();
                 self.consume(TokenKind::LeftParen, "Expected `(` before function args");
-                let args_typing = parse_many_typings(self, vec![]);
-                let ret_typing = self.parse_typing().map(|x| self.ast_arena.alloc_expr_or_stmt(x));
+                let args_typing = self.parse_many_typings(synchronize_tokens);
+                let ret_typing = self
+                    .parse_typing(synchronize_tokens)
+                    .map(|x| self.ast_arena.alloc_expr_or_stmt(x));
+
                 Some(Typing::Fn(args_typing, ret_typing))
             }
             TokenKind::LeftSquare => {
+                println!("Doesn't report errors for [*] since it's soon deprecated");
                 self.advance();
                 if self.is_curr_kind(TokenKind::Star) {
                     self.advance();
                     self.consume(TokenKind::RightSquare, "Expected `]` after `[*`");
-                    let ty = self.parse_typing().expect("Expected type after `[*]`");
+                    let ty = self
+                        .parse_typing(synchronize_tokens)
+                        .expect("Expected type after `[*]`");
+
                     Some(Typing::ManyPtr(self.ast_arena.alloc_expr_or_stmt(ty)))
                 } else {
                     todo!("Array typing");
@@ -904,20 +992,8 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
             }
             TokenKind::LeftParen => {
                 self.advance();
-                let typing = self.parse_typing().expect("Expected typing");
-
-                match self.current.get_kind() {
-                    TokenKind::RightParen => {
-                        self.advance();
-                        Some(typing)
-                    }
-                    TokenKind::Comma => {
-                        self.advance();
-                        let tuple_typing = parse_many_typings(self, vec![typing]);
-                        Some(Typing::Tuple(tuple_typing))
-                    }
-                    t => panic!("Unexpected token in typing: {}", t),
-                }
+                let typings = self.parse_many_typings(synchronize_tokens);
+                Some(Typing::Tuple(typings))
             }
             _ => None,
         }
@@ -1054,9 +1130,24 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
                     TokenKind::Ident => {
                         let start_field_span = self.current.get_span();
                         let arg_ident = self.consume_ident("Expected ident in function args");
-                        let arg_typing = self
-                            .parse_typing()
-                            .expect("Expected type in function args");
+                        let arg_typing = match
+                            self.parse_typing(&[TokenKind::Comma, TokenKind::RightParen])
+                        {
+                            Some(typing) => typing,
+                            None => {
+                                self.report_error(
+                                    ErrorKind::ExpectedTyping {
+                                        additional_info: Some(
+                                            "after identifier in function argument"
+                                        ),
+                                        found: Symbol::new(self.get_lexeme_of_current()),
+                                    },
+                                    self.current.get_span()
+                                );
+
+                                Typing::Error
+                            }
+                        };
 
                         if
                             let (ParsingDeclareFn::No, Typing::VariadicArgs) = (
@@ -1146,7 +1237,7 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
             ));
         }
 
-        let return_ty = self.parse_typing();
+        let return_ty = self.parse_typing(&[]);
 
         self.parsed_fn_count += 1;
 
@@ -1186,7 +1277,7 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
             );
 
             if !success {
-                self.advance();
+                self.synchronize();
             }
 
             body

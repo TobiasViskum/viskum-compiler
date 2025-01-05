@@ -1,5 +1,6 @@
 import pkg.Point, pkg.doSomething
 
+
 declare fn.C realloc(prevItems [*]int, bytesize int) [*]int
 declare fn.C malloc(bytesize int) [*]int
 declare fn.C socket(domain int, type int, protocol int) int
@@ -31,7 +32,7 @@ impl TimeSpec {
     }
 
     fn getNsec(self) int64 {
-        ret self.+-
+        ret self.+
     }
 
     fn print(*self) {

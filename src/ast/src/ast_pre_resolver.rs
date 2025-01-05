@@ -232,6 +232,7 @@ impl<'ctx, 'ast, 'b, E> AstPreResolver<'ctx, 'ast, 'b, E>
 
     fn visit_typing(&mut self, typing: &Typing<'ast>) {
         match typing {
+            Typing::Error => {}
             Typing::SelfType | Typing::VariadicArgs => {}
             Typing::Ident(ident_node) => {
                 self.bind_node_id_to_lexical_context(ident_node.ast_node_id);

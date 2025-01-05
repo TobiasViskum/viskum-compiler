@@ -121,6 +121,7 @@ pub enum Typing<'ast> {
     Tuple(&'ast [Typing<'ast>]),
     Ptr(&'ast Typing<'ast>, Mutability),
     ManyPtr(&'ast Typing<'ast>),
+    Error,
     VariadicArgs,
     SelfType,
     Fn(&'ast [Typing<'ast>], Option<&'ast Typing<'ast>>),

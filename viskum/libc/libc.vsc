@@ -1,0 +1,3 @@
+// # Generics in `declare` can only be used, if T is used alongside a pointer like below
+declare fn realloc<T>(prevItems *T, newSize int) *T
+declare fn malloc<T>(size int) *T

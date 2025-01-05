@@ -329,6 +329,7 @@ impl<'ctx, 'ast, 'b, E> AstResolver<'ctx, 'ast, 'b, E>
 
     fn type_from_typing(&mut self, typing: &Typing<'ast>, item_type: ItemType) -> Ty {
         match typing {
+            Typing::Error => Ty::Unkown,
             Typing::SelfType => {
                 if let Some(TraitImplId { implementor_def_id, .. }) = self.trait_impl_context {
                     Ty::Adt(implementor_def_id)

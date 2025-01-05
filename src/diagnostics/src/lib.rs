@@ -1,18 +1,9 @@
 use fxhash::FxHashMap;
-use ir::{
-    Delimeter,
-    ExpectedSymbolKind,
-    ItemErrorKind,
-    MissingCommaPlace,
-    ModId,
-    ResKind,
-    Symbol,
-    Ty,
-};
+use ir::{ Delimeter, ItemErrorKind, MissingCommaPlace, ModId, ResKind, Symbol, Ty };
 use op::BinaryOp;
 use span::Span;
 use token::TokenKind;
-use std::{ fmt::Write, path::PathBuf, sync::{ LazyLock, Mutex } };
+use std::{ ffi::OsString, fmt::Write, path::PathBuf, sync::{ LazyLock, Mutex } };
 
 static DIAGNOSTICS: LazyLock<Mutex<ProgramDiagnostics>> = LazyLock::new(||
     Mutex::new(ProgramDiagnostics::new())
@@ -42,17 +33,48 @@ pub fn print_diagnostics() {
     let mut file_content = String::new();
 
     for diagnostic in diagnostics {
-        if let Some(mod_id) = mod_id {
-            if mod_id != diagnostic.mod_id {
-                file_content = diagnostics_lock.load_file_content(mod_id);
+        if let Some(old_mod_id) = mod_id {
+            if old_mod_id != diagnostic.mod_id {
+                mod_id = Some(diagnostic.mod_id);
+                file_content = diagnostics_lock.load_file_content(diagnostic.mod_id);
+                let file_name = diagnostics_lock.mod_name_to_file_path
+                    .get(&diagnostic.mod_id)
+                    .unwrap()
+                    .clone()
+                    .file_name()
+                    .unwrap()
+                    .to_owned();
+                writeln!(
+                    error_buffer,
+                    "\n\x1b[1mErrors in {}:\x1b[0m",
+                    file_name.to_str().unwrap()
+                ).unwrap();
             }
         } else {
             mod_id = Some(diagnostic.mod_id);
             file_content = diagnostics_lock.load_file_content(diagnostic.mod_id);
+            let file_name = diagnostics_lock.mod_name_to_file_path
+                .get(&diagnostic.mod_id)
+                .unwrap()
+                .clone()
+                .file_name()
+                .unwrap()
+                .to_owned();
+
+            writeln!(
+                error_buffer,
+                "\n\x1b[1mErrors in {}:\x1b[0m",
+                file_name.to_str().unwrap()
+            ).unwrap();
         }
 
         if let DiagnosticKind::Error(_) = diagnostic.kind {
             diagnostic.write_msg(&mut error_buffer, &file_content);
+            // write!(
+            //     error_buffer,
+            //     "\n`{}`",
+            //     &file_content[diagnostic.range.get_byte_range()]
+            // ).unwrap();
             writeln!(error_buffer).unwrap();
         } else if let DiagnosticKind::Warning(_) = diagnostic.kind {
             diagnostic.write_msg(&mut warning_buffer, &file_content);
@@ -61,11 +83,11 @@ pub fn print_diagnostics() {
     }
 
     if !error_buffer.is_empty() {
-        println!("\n\x1b[91mErrors:\x1b[0m\n{}", error_buffer);
+        println!("\n\x1b[91m\x1b[1mErrors:\x1b[0m\n{}", error_buffer);
     }
 
     if !warning_buffer.is_empty() {
-        println!("\n\x1b[93mWarnings:\x1b[0m\n{}", warning_buffer);
+        println!("\n\x1b[93m\x1b[1mWarnings:\x1b[0m\n{}", warning_buffer);
     }
 }
 
@@ -123,7 +145,7 @@ impl ProgramDiagnostics {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct Diagnostic {
     kind: DiagnosticKind,
     range: Span,
@@ -149,7 +171,7 @@ impl Diagnostic {
     }
 
     pub fn get_severity(&self) -> Option<Severity> {
-        match self.kind {
+        match &self.kind {
             DiagnosticKind::Error(kind) => Some(kind.get_severity()),
             DiagnosticKind::Warning(_) => None,
             DiagnosticKind::Info(_) => None,
@@ -158,7 +180,7 @@ impl Diagnostic {
     }
 
     pub fn write_msg(&self, buffer: &mut String, file_content: &str) {
-        match self.kind {
+        match &self.kind {
             DiagnosticKind::Error(kind) => kind.write_msg(buffer, &self.range, file_content),
             DiagnosticKind::Warning(_) => todo!(),
             DiagnosticKind::Info(_) => todo!(),
@@ -167,7 +189,7 @@ impl Diagnostic {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub enum DiagnosticKind {
     Error(ErrorKind),
     Warning(WarningKind),
@@ -175,12 +197,18 @@ pub enum DiagnosticKind {
     Hint(HintKind),
 }
 
-#[derive(Debug, Clone, Copy)]
+/// Use spans for more accurate error messages
+///
+/// Potentially use strings whilst classifiying the error by enum variant, instead of combining enums and symbols to create error messages (does consume less memory as a positive though)
+///
+/// Use spans instead of symbols some places if above isn't implemented
+#[derive(Debug, Clone)]
 pub enum ErrorKind {
     UndefinedLookup {
         symbol: Symbol,
         res_kind: ResKind,
     },
+
     MismatchedFieldTypes {
         struct_symbol: Symbol,
         field_name: Symbol,
@@ -244,6 +272,10 @@ pub enum ErrorKind {
     ExpectedExprOrItem {
         found: Symbol,
     },
+    ExpectedTyping {
+        additional_info: Option<&'static str>,
+        found: Symbol,
+    },
 }
 
 impl ErrorKind {
@@ -262,6 +294,7 @@ impl ErrorKind {
             Self::ExpectedIdent { .. } => Severity::Severe,
             Self::ExpectedToken { .. } => Severity::Severe,
             Self::ExpectedExprOrItem { .. } => Severity::Severe,
+            Self::ExpectedTyping { .. } => Severity::Severe,
 
             Self::FnWithoutBody { .. } => Severity::NoImpact,
             Self::ReturnOutsideFn => Severity::NoImpact,
@@ -296,11 +329,24 @@ impl ErrorKind {
             Self::ExpectedIdent { .. } => "E018",
             Self::ExpectedToken { .. } => "E019",
             Self::ExpectedExprOrItem { .. } => "E020",
+            Self::ExpectedTyping { .. } => "E021",
         }
     }
 
     pub fn write_msg(&self, buffer: &mut String, span: &Span, file_content: &str) {
         let write_error = match self {
+            Self::ExpectedTyping { additional_info, found } => {
+                write!(
+                    buffer,
+                    "Expected a type{}at line {}. Found `{}`",
+                    match additional_info {
+                        Some(additional_info) => format!(" {} ", additional_info),
+                        None => "".to_string(),
+                    },
+                    span.get_line(),
+                    found.get()
+                )
+            }
             Self::ExpectedExprOrItem { found } => {
                 write!(
                     buffer,

@@ -1,8 +1,12 @@
-struct Point { 
-    x int,
-    y int,
-    z int,
+fn doSomething() int {
+    ret 2 * 3
 }
+
+struct Point { 
+    x int sl,
+    y int,
+    z 
+
 
 impl Point {
     fn new(x int, y int, z int) Self {
@@ -14,10 +18,12 @@ impl Point {
     }
 
     fn sum(self) int {
-        ret self.x + self.y + self.z
+        ret self.x + self. + self.z
     }
-}
 
-fn doSomething() int {
-    ret 2 * 3
-}
+    fn errorBecauseOfNoTypes(x) {
+
+    }
+
+
+

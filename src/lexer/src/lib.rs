@@ -29,6 +29,10 @@ impl<'a> Lexer<'a> {
     }
 
     pub fn scan_token(&mut self) -> Token {
+        if self.is_eof() {
+            return self.make_token(TokenKind::Eof);
+        }
+
         let char = self.advance();
 
         if self.is_tokenizing_string() {
