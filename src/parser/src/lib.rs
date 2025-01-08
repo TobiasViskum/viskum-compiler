@@ -4,152 +4,105 @@ const PARSE_RULE_COUNT: usize = enum_iterator::cardinality::<TokenKind>();
 static PARSE_RULES: LazyLock<[ParseRule; PARSE_RULE_COUNT]> = LazyLock::new(|| {
     let mut rules = [ParseRule::dummy(); PARSE_RULE_COUNT];
     for (i, kind) in enum_iterator::all::<TokenKind>().enumerate() {
-        rules[i] =
-            make_parse_rule!(kind,
+        rules[i] = make_parse_rule!(kind,
 
-            /*  TOKENKIND        PREFIX                 INFIX                               POSTFIX             */
-            /*                   method     prec        method      prec                    method      prec    */
-                LeftParen   = { (grouping   None),      (call       PrecCall        ),      (None       None) },
-                RightParen  = { (None       None),      (None       None            ),      (None       None) },
-                LeftCurly   = { (block_expr None),      (None       None            ),      (None       None) },
-                RightCurly  = { (None       None),      (None       None            ),      (None       None) },
-                LeftSquare  = { (None       None),      (index_expr PrecIndex       ),      (None       None) },
-                RightSquare = { (None       None),      (None       None            ),      (None       None) },
-                Eq          = { (None       None),      (eq         PrecEquality    ),      (None       None) },
-                Ne          = { (None       None),      (ne         PrecEquality    ),      (None       None) },
-                Ge          = { (None       None),      (ge         PrecComparison  ),      (None       None) },
-                Gt          = { (None       None),      (gt         PrecComparison  ),      (None       None) },
-                Le          = { (None       None),      (le         PrecComparison  ),      (None       None) },
-                Lt          = { (None       None),      (lt         PrecComparison  ),      (None       None) },
-                Plus        = { (None       None),      (add        PrecTerm        ),      (None       None) },
-                Minus       = { (None       None),      (sub        PrecTerm        ),      (None       None) },
-                Star        = { (None       None),      (mul        PrecFactor      ),      (None       None) },
-                Slash       = { (None       None),      (div        PrecFactor      ),      (None       None) },
-                Colon       = { (None       None),      (None       None            ),      (None       None) },
-                Define      = { (None       None),      (define     PrecAssign      ),      (None       None) },
-                Assign      = { (None       None),      (assign     PrecAssign      ),      (None       None) },
-                Dot         = { (dot_float  None),      (field_expr PrecCall        ),      (None       None) },
-                Comma       = { (None       None),      (None       None            ),      (None       None) },
-                Bang        = { (None       None),      (None       None            ),      (None       None) },
-                Increment   = { (pre_inc    None),      (None       None            ),      (post_inc   None) },
-                Decrement   = { (pre_dec    None),      (None       None            ),      (post_dec   None) },
-                DoubleQuote = { (string     None),      (None       None            ),      (None       None) },
-                StringChar  = { (None       None),      (None       None            ),      (None       None) },
-                Ellipsis    = { (None       None),      (None       None            ),      (None       None) },
-                
-                    
-                // Numbers
-                Integer     = { (integer    None),      (None       None            ),      (None       None) },
-                Float       = { (float      None),      (None       None            ),      (None       None) },
-        
-                // Literal `null``
-                Null        = { (null_lit   None),      (None       None            ),      (None       None) },
-        
-                // Booleans
-                True        = { (true_lit   None),      (None       None            ),      (None       None) },
-                False       = { (false_lit  None),      (None       None            ),      (None       None) },
-                    
-                // Identifier
-                Ident       = { (ident      None),      (None       None            ),      (None       None) },
+        /*  TOKENKIND        PREFIX                 INFIX                               POSTFIX             */
+        /*                   method     prec        method      prec                    method      prec    */
+            LeftParen   = { (grouping   None),      (call       PrecCall        ),      (None       None) },
+            RightParen  = { (None       None),      (None       None            ),      (None       None) },
+            LeftCurly   = { (block_expr None),      (None       None            ),      (None       None) },
+            RightCurly  = { (None       None),      (None       None            ),      (None       None) },
+            LeftSquare  = { (None       None),      (index_expr PrecIndex       ),      (None       None) },
+            RightSquare = { (None       None),      (None       None            ),      (None       None) },
+            Eq          = { (None       None),      (eq         PrecEquality    ),      (None       None) },
+            Ne          = { (None       None),      (ne         PrecEquality    ),      (None       None) },
+            Ge          = { (None       None),      (ge         PrecComparison  ),      (None       None) },
+            Gt          = { (None       None),      (gt         PrecComparison  ),      (None       None) },
+            Le          = { (None       None),      (le         PrecComparison  ),      (None       None) },
+            Lt          = { (None       None),      (lt         PrecComparison  ),      (None       None) },
+            Plus        = { (None       None),      (add        PrecTerm        ),      (None       None) },
+            Minus       = { (None       None),      (sub        PrecTerm        ),      (None       None) },
+            Star        = { (None       None),      (mul        PrecFactor      ),      (None       None) },
+            Slash       = { (None       None),      (div        PrecFactor      ),      (None       None) },
+            Colon       = { (None       None),      (None       None            ),      (None       None) },
+            Define      = { (None       None),      (define     PrecAssign      ),      (None       None) },
+            Assign      = { (None       None),      (assign     PrecAssign      ),      (None       None) },
+            Dot         = { (dot_float  None),      (field_expr PrecCall        ),      (None       None) },
+            Comma       = { (None       None),      (None       None            ),      (None       None) },
+            Bang        = { (None       None),      (None       None            ),      (None       None) },
+            Increment   = { (pre_inc    None),      (None       None            ),      (post_inc   None) },
+            Decrement   = { (pre_dec    None),      (None       None            ),      (post_dec   None) },
+            DoubleQuote = { (string     None),      (None       None            ),      (None       None) },
+            StringChar  = { (None       None),      (None       None            ),      (None       None) },
+            Ellipsis    = { (None       None),      (None       None            ),      (None       None) },
 
-                // Keywords
-                Import      = { (None       None),      (None       None            ),      (None       None) },
-                Impl        = { (None       None),      (None       None            ),      (None       None) },
-                SmallSelf   = { (ident      None),      (None       None            ),      (None       None) },
-                BigSelf     = { (ident      None),      (None       None            ),      (None       None) },
-                Fn          = { (None       None),      (None       None            ),      (None       None) },
-                Declare     = { (None       None),      (None       None            ),      (None       None) },
-                Typedef     = { (None       None),      (None       None            ),      (None       None) },
-                Mut         = { (None       None),      (None       None            ),      (None       None) },
-                Struct      = { (None       None),      (None       None            ),      (None       None) },
-                Enum        = { (None       None),      (None       None            ),      (None       None) },
-                While       = { (None       None),      (None       None            ),      (None       None) },
-                If          = { (if_expr    None),      (None       None            ),      (None       None) },
-                Loop        = { (loop_expr  None),      (None       None            ),      (None       None) },
-                Break       = { (None       None),      (None       None            ),      (None       None) },
-                Continue    = { (None       None),      (None       None            ),      (None       None) },
-                Return      = { (None       None),      (None       None            ),      (None       None) },
-                Else        = { (None       None),      (None       None            ),      (None       None) },
-                Elif        = { (None       None),      (None       None            ),      (None       None) },
-                Pkg         = { (pkg_ident  None),      (None       None            ),      (None       None) },
 
-                Eof         = { (None       None),      (None       None            ),      (None       None) }
-                
-                );
+            // Numbers
+            Integer     = { (integer    None),      (None       None            ),      (None       None) },
+            Float       = { (float      None),      (None       None            ),      (None       None) },
+
+            // Literal `null``
+            Null        = { (null_lit   None),      (None       None            ),      (None       None) },
+
+            // Booleans
+            True        = { (true_lit   None),      (None       None            ),      (None       None) },
+            False       = { (false_lit  None),      (None       None            ),      (None       None) },
+
+            // Identifier
+            Ident       = { (ident      None),      (None       None            ),      (None       None) },
+
+            // Keywords
+            Import      = { (None       None),      (None       None            ),      (None       None) },
+            Impl        = { (None       None),      (None       None            ),      (None       None) },
+            SmallSelf   = { (ident      None),      (None       None            ),      (None       None) },
+            BigSelf     = { (ident      None),      (None       None            ),      (None       None) },
+            Fn          = { (None       None),      (None       None            ),      (None       None) },
+            Declare     = { (None       None),      (None       None            ),      (None       None) },
+            Typedef     = { (None       None),      (None       None            ),      (None       None) },
+            Mut         = { (None       None),      (None       None            ),      (None       None) },
+            Struct      = { (None       None),      (None       None            ),      (None       None) },
+            Enum        = { (None       None),      (None       None            ),      (None       None) },
+            While       = { (None       None),      (None       None            ),      (None       None) },
+            If          = { (if_expr    None),      (None       None            ),      (None       None) },
+            Loop        = { (loop_expr  None),      (None       None            ),      (None       None) },
+            Break       = { (None       None),      (None       None            ),      (None       None) },
+            Continue    = { (None       None),      (None       None            ),      (None       None) },
+            Return      = { (None       None),      (None       None            ),      (None       None) },
+            Else        = { (None       None),      (None       None            ),      (None       None) },
+            Elif        = { (None       None),      (None       None            ),      (None       None) },
+            Pkg         = { (pkg_ident  None),      (None       None            ),      (None       None) },
+
+            Eof         = { (None       None),      (None       None            ),      (None       None) }
+
+            );
     }
 
     rules
 });
 
 use ast::{
-    is_stmt_adt,
-    ArgKind,
-    AsigneeExpr,
-    Ast,
-    AstArenaObject,
-    AstMetadata,
-    AstState0,
-    BlockExpr,
-    BoolExpr,
-    BreakExpr,
-    CompDeclItem,
-    CompFnDeclItem,
-    CondKind,
-    ContinueExpr,
-    EnumItem,
-    EnumVariant,
-    Expr,
-    ExprWithoutBlock,
-    Field,
-    FieldInitialization,
-    FnItem,
-    GlobalScope,
-    IdentNode,
-    IfExpr,
-    IfFalseBranchExpr,
-    ImplItem,
-    ImportItem,
-    IntegerExpr,
-    ItemStmt,
-    ItemType,
-    LoopExpr,
-    NullExpr,
-    Pat,
-    Path,
-    PathField,
-    PkgIdentNode,
-    PlaceExpr,
-    ReturnExpr,
-    Stmt,
-    StringExpr,
-    StructItem,
-    TupleStructPat,
-    TypedefItem,
-    Typing,
-    ValueExpr,
+    is_stmt_adt, ArgKind, AsigneeExpr, Ast, AstArenaObject, AstMetadata, AstState0, BlockExpr,
+    BoolExpr, BreakExpr, CompDeclItem, CompFnDeclItem, CondKind, ContinueExpr, EnumItem,
+    EnumVariant, Expr, ExprWithoutBlock, Field, FieldInitialization, FnItem, GlobalScope,
+    IdentNode, IfExpr, IfFalseBranchExpr, ImplItem, ImportItem, IntegerExpr, ItemStmt, ItemType,
+    LoopExpr, NullExpr, Pat, Path, PathField, PkgIdentNode, PlaceExpr, ReturnExpr, Stmt,
+    StringExpr, StructItem, TupleStructPat, TypedefItem, Typing, ValueExpr,
 };
-use diagnostics::{ Diagnostic, ErrorKind };
+use diagnostics::{Diagnostic, ErrorKind};
 use error::Error;
 use expr_builder::ExprBuilder;
 use ir::{
-    Delimeter,
-    ExpectedSymbolKind,
-    ItemErrorKind,
-    MissingCommaPlace,
-    ModId,
-    Mutability,
-    NodeId,
-    Symbol,
-    Ty,
+    Delimeter, ExpectedSymbolKind, ItemErrorKind, MissingCommaPlace, ModId, Mutability, NodeId,
+    Symbol, Ty,
 };
 use lexer::Lexer;
 use make_parse_rule::make_parse_rule;
-use op::{ ArithmeticOp, BinaryOp, ComparisonOp };
+use op::{ArithmeticOp, BinaryOp, ComparisonOp};
 use precedence::Precedence;
 use span::Span;
-use token::{ Token, TokenKind };
-mod make_parse_rule;
+use token::{Token, TokenKind};
 mod expr_builder;
+mod make_parse_rule;
 mod precedence;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -225,185 +178,151 @@ impl<'a> ParserHandle<'a> for Parser<'a, '_> {
     fn try_as_path(&mut self, expr: Expr<'a>) -> Option<Path<'a>> {
         match expr {
             Expr::ExprWithBlock(_) => None,
-            Expr::ExprWithoutBlock(expr) => {
-                match expr {
-                    ExprWithoutBlock::PlaceExpr(place_expr) => {
-                        match place_expr {
-                            PlaceExpr::IdentExpr(ident_expr) => {
-                                Some(Path::PathSegment(ident_expr))
-                            }
-                            PlaceExpr::PkgIdentExpr(pkg_ident_expr) => {
-                                Some(Path::PathPkg(pkg_ident_expr))
-                            }
-                            PlaceExpr::TupleFieldExpr(_) => None,
-                            PlaceExpr::IndexExpr(_) => None,
-                            PlaceExpr::FieldExpr(field_expr) => {
-                                let lhs = self.try_as_path(field_expr.lhs);
+            Expr::ExprWithoutBlock(expr) => match expr {
+                ExprWithoutBlock::PlaceExpr(place_expr) => match place_expr {
+                    PlaceExpr::IdentExpr(ident_expr) => Some(Path::PathSegment(ident_expr)),
+                    PlaceExpr::PkgIdentExpr(pkg_ident_expr) => Some(Path::PathPkg(pkg_ident_expr)),
+                    PlaceExpr::TupleFieldExpr(_) => None,
+                    PlaceExpr::IndexExpr(_) => None,
+                    PlaceExpr::FieldExpr(field_expr) => {
+                        let lhs = self.try_as_path(field_expr.lhs);
 
-                                match lhs {
-                                    Some(lhs) => {
-                                        Some(
-                                            Path::PathField(
-                                                self.ast_arena.alloc_expr_or_stmt(
-                                                    PathField::new(
-                                                        lhs,
-                                                        field_expr.rhs,
-                                                        field_expr.span,
-                                                        field_expr.ast_node_id
-                                                    )
-                                                )
-                                            )
-                                        )
-                                    }
-                                    None => None,
-                                }
-                            }
+                        match lhs {
+                            Some(lhs) => Some(Path::PathField(self.ast_arena.alloc_expr_or_stmt(
+                                PathField::new(
+                                    lhs,
+                                    field_expr.rhs,
+                                    field_expr.span,
+                                    field_expr.ast_node_id,
+                                ),
+                            ))),
+                            None => None,
                         }
                     }
-                    ExprWithoutBlock::BreakExpr(_) => None,
-                    ExprWithoutBlock::ContinueExpr(_) => None,
-                    ExprWithoutBlock::ReturnExpr(_) => None,
-                    ExprWithoutBlock::ValueExpr(value_expr) => {
-                        match value_expr {
-                            ValueExpr::BinaryExpr(_) => None,
-                            ValueExpr::CallExpr(_) => None,
-                            ValueExpr::ConstExpr(_) => None,
-                            ValueExpr::GroupExpr(_) => None,
-                            ValueExpr::StructExpr(_) => None,
-                            ValueExpr::TupleExpr(_) => None,
-                        }
-                    }
-                }
-            }
+                },
+                ExprWithoutBlock::BreakExpr(_) => None,
+                ExprWithoutBlock::ContinueExpr(_) => None,
+                ExprWithoutBlock::ReturnExpr(_) => None,
+                ExprWithoutBlock::ValueExpr(value_expr) => match value_expr {
+                    ValueExpr::BinaryExpr(_) => None,
+                    ValueExpr::CallExpr(_) => None,
+                    ValueExpr::ConstExpr(_) => None,
+                    ValueExpr::GroupExpr(_) => None,
+                    ValueExpr::StructExpr(_) => None,
+                    ValueExpr::TupleExpr(_) => None,
+                },
+            },
         }
     }
 
     fn try_as_pat(&mut self, expr: Expr<'a>) -> Option<Pat<'a>> {
         match expr {
             Expr::ExprWithBlock(_) => None,
-            Expr::ExprWithoutBlock(expr) => {
-                match expr {
-                    ExprWithoutBlock::PlaceExpr(expr) => {
-                        match expr {
-                            PlaceExpr::TupleFieldExpr(_) => None,
-                            PlaceExpr::FieldExpr(_) => None,
-                            PlaceExpr::IndexExpr(_) => None,
-                            PlaceExpr::PkgIdentExpr(_) => None,
-                            PlaceExpr::IdentExpr(ident_expr) =>
-                                Some(
-                                    Pat::IdentPat(
-                                        self.ast_arena.alloc_expr_or_stmt(ident_expr.get_copy())
-                                    )
-                                ),
-                        }
-                    }
-                    ExprWithoutBlock::BreakExpr(_) => None,
-                    ExprWithoutBlock::ContinueExpr(_) => None,
-                    ExprWithoutBlock::ReturnExpr(_) => None,
-                    ExprWithoutBlock::ValueExpr(expr) => {
-                        match expr {
-                            ValueExpr::BinaryExpr(_) => None,
-                            ValueExpr::CallExpr(call_expr) => {
-                                let path = match self.try_as_path(call_expr.callee) {
-                                    Some(path) => path,
-                                    None => {
-                                        return None;
-                                    }
-                                };
-
-                                let mut has_args_failed = false;
-
-                                let pat_args = call_expr.args
-                                    .iter()
-                                    .filter_map(|arg| {
-                                        let pat = self.try_as_pat(*arg);
-                                        if pat.is_none() {
-                                            has_args_failed = true;
-                                        }
-                                        pat
-                                    })
-                                    .collect::<Vec<_>>();
-
-                                if has_args_failed {
-                                    return None;
-                                }
-
-                                let final_pat = Pat::TupleStructPat(
-                                    self.ast_arena.alloc_expr_or_stmt(
-                                        TupleStructPat::new(
-                                            path,
-                                            self.ast_arena.alloc_vec(pat_args),
-                                            call_expr.span,
-                                            call_expr.ast_node_id
-                                        )
-                                    )
-                                );
-
-                                Some(final_pat)
+            Expr::ExprWithoutBlock(expr) => match expr {
+                ExprWithoutBlock::PlaceExpr(expr) => match expr {
+                    PlaceExpr::TupleFieldExpr(_) => None,
+                    PlaceExpr::FieldExpr(_) => None,
+                    PlaceExpr::IndexExpr(_) => None,
+                    PlaceExpr::PkgIdentExpr(_) => None,
+                    PlaceExpr::IdentExpr(ident_expr) => Some(Pat::IdentPat(
+                        self.ast_arena.alloc_expr_or_stmt(ident_expr.get_copy()),
+                    )),
+                },
+                ExprWithoutBlock::BreakExpr(_) => None,
+                ExprWithoutBlock::ContinueExpr(_) => None,
+                ExprWithoutBlock::ReturnExpr(_) => None,
+                ExprWithoutBlock::ValueExpr(expr) => match expr {
+                    ValueExpr::BinaryExpr(_) => None,
+                    ValueExpr::CallExpr(call_expr) => {
+                        let path = match self.try_as_path(call_expr.callee) {
+                            Some(path) => path,
+                            None => {
+                                return None;
                             }
-                            ValueExpr::ConstExpr(_) => None,
-                            ValueExpr::GroupExpr(_) => None,
-                            ValueExpr::StructExpr(_) => None,
-                            ValueExpr::TupleExpr(tuple_expr) =>
-                                todo!("As pattern: {:#?}", tuple_expr),
+                        };
+
+                        let mut has_args_failed = false;
+
+                        let pat_args = call_expr
+                            .args
+                            .iter()
+                            .filter_map(|arg| {
+                                let pat = self.try_as_pat(*arg);
+                                if pat.is_none() {
+                                    has_args_failed = true;
+                                }
+                                pat
+                            })
+                            .collect::<Vec<_>>();
+
+                        if has_args_failed {
+                            return None;
                         }
+
+                        let final_pat = Pat::TupleStructPat(self.ast_arena.alloc_expr_or_stmt(
+                            TupleStructPat::new(
+                                path,
+                                self.ast_arena.alloc_vec(pat_args),
+                                call_expr.span,
+                                call_expr.ast_node_id,
+                            ),
+                        ));
+
+                        Some(final_pat)
                     }
-                }
-            }
+                    ValueExpr::ConstExpr(_) => None,
+                    ValueExpr::GroupExpr(_) => None,
+                    ValueExpr::StructExpr(_) => None,
+                    ValueExpr::TupleExpr(tuple_expr) => todo!("As pattern: {:#?}", tuple_expr),
+                },
+            },
         }
     }
 
     fn try_as_asignee_expr(&mut self, expr: Expr<'a>) -> Option<AsigneeExpr<'a>> {
         match expr {
             Expr::ExprWithBlock(_) => None,
-            Expr::ExprWithoutBlock(expr) => {
-                match expr {
-                    ExprWithoutBlock::PlaceExpr(expr) => Some(AsigneeExpr::PlaceExpr(expr)),
-                    ExprWithoutBlock::BreakExpr(_) => None,
-                    ExprWithoutBlock::ReturnExpr(_) => None,
-                    ExprWithoutBlock::ContinueExpr(_) => None,
-                    ExprWithoutBlock::ValueExpr(expr) => {
-                        match expr {
-                            ValueExpr::BinaryExpr(_) => None,
-                            ValueExpr::ConstExpr(_) => None,
-                            ValueExpr::GroupExpr(_) => None,
-                            ValueExpr::CallExpr(call_expr) =>
-                                Some(AsigneeExpr::CallExpr(call_expr)),
-                            ValueExpr::StructExpr(_) => None,
-                            ValueExpr::TupleExpr(tuple_expr) =>
-                                todo!("As place expr: {:#?}", tuple_expr),
-                        }
-                    }
-                }
-            }
+            Expr::ExprWithoutBlock(expr) => match expr {
+                ExprWithoutBlock::PlaceExpr(expr) => Some(AsigneeExpr::PlaceExpr(expr)),
+                ExprWithoutBlock::BreakExpr(_) => None,
+                ExprWithoutBlock::ReturnExpr(_) => None,
+                ExprWithoutBlock::ContinueExpr(_) => None,
+                ExprWithoutBlock::ValueExpr(expr) => match expr {
+                    ValueExpr::BinaryExpr(_) => None,
+                    ValueExpr::ConstExpr(_) => None,
+                    ValueExpr::GroupExpr(_) => None,
+                    ValueExpr::CallExpr(call_expr) => Some(AsigneeExpr::CallExpr(call_expr)),
+                    ValueExpr::StructExpr(_) => None,
+                    ValueExpr::TupleExpr(tuple_expr) => todo!("As place expr: {:#?}", tuple_expr),
+                },
+            },
         }
     }
 
     fn try_as_ident(&mut self, expr: Expr<'a>) -> Option<&'a IdentNode> {
         match expr {
             Expr::ExprWithBlock(_) => None,
-            Expr::ExprWithoutBlock(expr) => {
-                match expr {
-                    ExprWithoutBlock::BreakExpr(_) => None,
-                    ExprWithoutBlock::ReturnExpr(_) => None,
-                    ExprWithoutBlock::ContinueExpr(_) => None,
-                    ExprWithoutBlock::ValueExpr(_) => None,
-                    ExprWithoutBlock::PlaceExpr(expr) => {
-                        match expr {
-                            PlaceExpr::IdentExpr(expr) => Some(expr),
-                            PlaceExpr::PkgIdentExpr(_) => None,
-                            PlaceExpr::TupleFieldExpr(_) => None,
-                            PlaceExpr::FieldExpr(_) => None,
-                            PlaceExpr::IndexExpr(_) => None,
-                        }
-                    }
-                }
-            }
+            Expr::ExprWithoutBlock(expr) => match expr {
+                ExprWithoutBlock::BreakExpr(_) => None,
+                ExprWithoutBlock::ReturnExpr(_) => None,
+                ExprWithoutBlock::ContinueExpr(_) => None,
+                ExprWithoutBlock::ValueExpr(_) => None,
+                ExprWithoutBlock::PlaceExpr(expr) => match expr {
+                    PlaceExpr::IdentExpr(expr) => Some(expr),
+                    PlaceExpr::PkgIdentExpr(_) => None,
+                    PlaceExpr::TupleFieldExpr(_) => None,
+                    PlaceExpr::FieldExpr(_) => None,
+                    PlaceExpr::IndexExpr(_) => None,
+                },
+            },
         }
     }
 }
 
-pub struct Parser<'a, 'b> where 'a: 'b {
+pub struct Parser<'a, 'b>
+where
+    'a: 'b,
+{
     lexer: Lexer<'b>,
     ast_arena: &'b AstArenaObject<'a>,
     src: &'b str,
@@ -423,7 +342,10 @@ pub struct Parser<'a, 'b> where 'a: 'b {
     diagnostics: Vec<Diagnostic>,
 }
 
-impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
+impl<'a, 'b> Parser<'a, 'b>
+where
+    'a: 'b,
+{
     pub fn new(src: &'b str, ast_arena: &'b AstArenaObject<'a>, mod_id: ModId) -> Self {
         let mut lexer = Lexer::new(src);
 
@@ -444,10 +366,14 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
     }
 
     pub(crate) fn report_error(&mut self, error_kind: ErrorKind, span: Span) {
-        self.diagnostics.push(Diagnostic::new_error(error_kind, span, self.mod_id));
+        self.diagnostics
+            .push(Diagnostic::new_error(error_kind, span, self.mod_id));
     }
 
-    pub fn parse_ast<'c>(mut self) -> (Ast<'a, AstState0>, Vec<Diagnostic>) where 'c: 'b {
+    pub fn parse_ast<'c>(mut self) -> (Ast<'a, AstState0>, Vec<Diagnostic>)
+    where
+        'c: 'b,
+    {
         let global_scope = GlobalScope::new(self.parse_block_as_stmts(StopToken::None));
 
         let nodes_count = (self.next_ast_node_id as usize) - self.forgotten_nodes;
@@ -459,8 +385,8 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
                     self.parsed_fn_count,
                     nodes_count,
                     self.def_count + self.parsed_fn_count,
-                    self.mod_id
-                )
+                    self.mod_id,
+                ),
             ),
             self.diagnostics,
         )
@@ -471,11 +397,11 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
             TokenKind::Impl => self.impl_statement(),
             TokenKind::Typedef => {
                 self.def_count += 1;
-                Some(self.typedef_statement())
+                self.typedef_statement()
             }
             TokenKind::Struct => {
                 self.def_count += 1;
-                Some(self.struct_item())
+                self.struct_item()
             }
             TokenKind::Enum => {
                 self.def_count += 1;
@@ -484,13 +410,9 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
             TokenKind::Mut => Some(self.mut_stmt()),
             TokenKind::Break => Some(self.break_expr()),
             TokenKind::Continue => Some(self.continue_expr()),
-            TokenKind::Fn => {
-                if let Some(fn_item) = self.function_statement() {
-                    Some(Stmt::ItemStmt(ItemStmt::FnItem(fn_item)))
-                } else {
-                    None
-                }
-            }
+            TokenKind::Fn => self
+                .function_statement()
+                .map(|x| Stmt::ItemStmt(ItemStmt::FnItem(x))),
             TokenKind::Declare => self.declare_statement(),
             TokenKind::Return => Some(self.return_expr()),
             TokenKind::Import => Some(self.import_statement()),
@@ -517,16 +439,12 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
                 let end_span = self.current.get_span();
 
                 let span = Span::merge(start_span, end_span);
-                path = Path::PathField(
-                    self.ast_arena.alloc_expr_or_stmt(
-                        PathField::new(
-                            path,
-                            self.ast_arena.alloc_expr_or_stmt(ident),
-                            span,
-                            self.get_ast_node_id()
-                        )
-                    )
-                );
+                path = Path::PathField(self.ast_arena.alloc_expr_or_stmt(PathField::new(
+                    path,
+                    self.ast_arena.alloc_expr_or_stmt(ident),
+                    span,
+                    self.get_ast_node_id(),
+                )));
 
                 start_span = end_span;
             } else {
@@ -552,15 +470,11 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
             }
         }
 
-        let import_stmt = ItemStmt::ImportItem(
-            self.ast_arena.alloc_expr_or_stmt(
-                ImportItem::new(
-                    self.ast_arena.alloc_vec(import_items),
-                    Span::merge(start_span, self.current.get_span()),
-                    self.get_ast_node_id()
-                )
-            )
-        );
+        let import_stmt = ItemStmt::ImportItem(self.ast_arena.alloc_expr_or_stmt(ImportItem::new(
+            self.ast_arena.alloc_vec(import_items),
+            Span::merge(start_span, self.current.get_span()),
+            self.get_ast_node_id(),
+        )));
 
         Stmt::ItemStmt(import_stmt)
     }
@@ -578,7 +492,7 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
                 expected: TokenKind::LeftCurly,
                 found: Symbol::new(self.get_lexeme_of_current()),
             },
-            self.current.get_span()
+            self.current.get_span(),
         );
 
         if !success {
@@ -608,7 +522,7 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
                 expected: TokenKind::RightCurly,
                 found: Symbol::new(self.get_lexeme_of_current()),
             },
-            Span::merge(start_span, self.current.get_span())
+            Span::merge(start_span, self.current.get_span()),
         );
 
         if !success {
@@ -622,7 +536,7 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
             impl_path,
             self.ast_arena.alloc_vec(impl_fn_items),
             Span::merge(start_span, self.current.get_span()),
-            self.get_ast_node_id()
+            self.get_ast_node_id(),
         );
 
         let impl_item_stmt = ItemStmt::ImplItem(self.ast_arena.alloc_expr_or_stmt(impl_item));
@@ -652,50 +566,71 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
             panic!("Error: Declare statement must be a C function declaration");
         }
 
-        let fields = parsed_fn_sig.args
+        let fields = parsed_fn_sig
+            .args
             .iter()
-            .map(|arg| {
-                match *arg {
-                    ArgKind::Arg(field) => field,
-                    _ => panic!("Error: Only normal arguments are allowed in function declaration"),
-                }
+            .map(|arg| match *arg {
+                ArgKind::Arg(field) => field,
+                _ => panic!("Error: Only normal arguments are allowed in function declaration"),
             })
             .collect::<Vec<_>>();
 
-        let comp_decl_item = CompDeclItem::CompFnDeclItem(
-            self.ast_arena.alloc_expr_or_stmt(
-                CompFnDeclItem::new(
-                    parsed_fn_sig.ident,
-                    self.ast_arena.alloc_vec(fields),
-                    parsed_fn_sig.ret_typing,
-                    Span::merge(start_span, self.current.get_span()),
-                    self.get_ast_node_id()
-                )
-            )
-        );
+        let comp_decl_item =
+            CompDeclItem::CompFnDeclItem(self.ast_arena.alloc_expr_or_stmt(CompFnDeclItem::new(
+                parsed_fn_sig.ident,
+                self.ast_arena.alloc_vec(fields),
+                parsed_fn_sig.ret_typing,
+                Span::merge(start_span, self.current.get_span()),
+                self.get_ast_node_id(),
+            )));
 
         Some(Stmt::ItemStmt(ItemStmt::CompDeclItem(comp_decl_item)))
     }
 
-    pub(crate) fn typedef_statement(&mut self) -> Stmt<'a> {
+    pub(crate) fn typedef_statement(&mut self) -> Option<Stmt<'a>> {
         let start_span = self.current.get_span();
         self.advance();
-        let ident_node = self.consume_ident("Expected ident after `typedef`");
-        let ty = self.parse_typing(&[]).expect("TODO: Error handling, Expected type");
+        let ident_node = match self.try_consume_ident() {
+            Some(ident_node) => ident_node,
+            None => {
+                self.report_error(
+                    ErrorKind::ExpectedIdent {
+                        additional_info: Some("after `typedef`"),
 
-        let typedef_stmt = ItemStmt::TypedefItem(
-            self.ast_arena.alloc_expr_or_stmt(
-                TypedefItem::new(
-                    self.ast_arena.alloc_expr_or_stmt(ident_node),
-                    ty,
-                    ItemType::Normal,
+                        found: Symbol::new(self.get_lexeme_of_current()),
+                    },
                     Span::merge(start_span, self.current.get_span()),
-                    self.get_ast_node_id()
-                )
-            )
-        );
+                );
+                self.synchronize();
+                return None;
+            }
+        };
 
-        Stmt::ItemStmt(typedef_stmt)
+        let typing = match self.parse_typing(&[]) {
+            Some(typing) => typing,
+            None => {
+                self.report_error(
+                    ErrorKind::ExpectedTyping {
+                        additional_info: Some("after identifier in `typedef`"),
+                        found: Symbol::new(self.get_lexeme_of_current()),
+                    },
+                    Span::merge(start_span, self.current.get_span()),
+                );
+
+                Typing::Error
+            }
+        };
+
+        let typedef_stmt =
+            ItemStmt::TypedefItem(self.ast_arena.alloc_expr_or_stmt(TypedefItem::new(
+                self.ast_arena.alloc_expr_or_stmt(ident_node),
+                typing,
+                ItemType::Normal,
+                Span::merge(start_span, self.current.get_span()),
+                self.get_ast_node_id(),
+            )));
+
+        Some(Stmt::ItemStmt(typedef_stmt))
     }
 
     pub(crate) fn enum_item(&mut self) -> Stmt<'a> {
@@ -708,43 +643,37 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
 
         while !self.is_eof() && !self.is_curr_kind(TokenKind::RightCurly) {
             let start_enum_variant_span = self.current.get_span();
-            let variant_name = self.ast_arena.alloc_expr_or_stmt(
-                self.consume_ident("Expected ident in enum variant")
-            );
+            let variant_name = self
+                .ast_arena
+                .alloc_expr_or_stmt(self.consume_ident("Expected ident in enum variant"));
 
             match self.current.get_kind() {
                 TokenKind::Comma => {
                     self.advance();
-                    variants.push(
-                        EnumVariant::new(
-                            variant_name,
-                            None,
-                            Span::merge(start_enum_variant_span, self.current.get_span())
-                        )
-                    );
+                    variants.push(EnumVariant::new(
+                        variant_name,
+                        None,
+                        Span::merge(start_enum_variant_span, self.current.get_span()),
+                    ));
                     continue;
                 }
                 TokenKind::RightCurly => {
-                    variants.push(
-                        EnumVariant::new(
-                            variant_name,
-                            None,
-                            Span::merge(start_enum_variant_span, self.current.get_span())
-                        )
-                    );
+                    variants.push(EnumVariant::new(
+                        variant_name,
+                        None,
+                        Span::merge(start_enum_variant_span, self.current.get_span()),
+                    ));
                     break;
                 }
                 TokenKind::LeftParen => {
                     self.advance();
                     let tys = self.parse_many_typings(&[TokenKind::Comma]);
 
-                    variants.push(
-                        EnumVariant::new(
-                            variant_name,
-                            Some(tys),
-                            Span::merge(start_enum_variant_span, self.current.get_span())
-                        )
-                    );
+                    variants.push(EnumVariant::new(
+                        variant_name,
+                        Some(tys),
+                        Span::merge(start_enum_variant_span, self.current.get_span()),
+                    ));
 
                     if self.is_curr_kind(TokenKind::Comma) {
                         self.advance();
@@ -762,13 +691,15 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
             self.ast_arena.alloc_vec(variants),
             ItemType::Normal,
             Span::merge(start_span, self.current.get_span()),
-            self.get_ast_node_id()
+            self.get_ast_node_id(),
         );
 
-        Stmt::ItemStmt(ItemStmt::EnumItem(self.ast_arena.alloc_expr_or_stmt(enum_item)))
+        Stmt::ItemStmt(ItemStmt::EnumItem(
+            self.ast_arena.alloc_expr_or_stmt(enum_item),
+        ))
     }
 
-    pub(crate) fn struct_item(&mut self) -> Stmt<'a> {
+    pub(crate) fn struct_item(&mut self) -> Option<Stmt<'a>> {
         let start_span = self.current.get_span();
         self.advance();
 
@@ -781,40 +712,63 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
             ItemType::Normal
         };
 
-        let ident_node = self.consume_ident("Expected identifier after struct");
+        let ident_node = match self.try_consume_ident() {
+            Some(ident_node) => ident_node,
+            None => {
+                self.report_error(
+                    ErrorKind::ExpectedIdent {
+                        additional_info: Some("after `struct`"),
+                        found: Symbol::new(self.get_lexeme_of_current()),
+                    },
+                    Span::merge(start_span, self.current.get_span()),
+                );
+                self.synchronize();
+                return None;
+            }
+        };
+
+        if !self.is_curr_kind(TokenKind::LeftCurly) {
+            return Some(Stmt::ItemStmt(ItemStmt::StructItem(
+                self.ast_arena.alloc_expr_or_stmt(StructItem::new(
+                    self.ast_arena.alloc_expr_or_stmt(ident_node),
+                    self.ast_arena.alloc_vec(vec![]),
+                    item_type,
+                    Span::merge(start_span, self.current.get_span()),
+                    self.get_ast_node_id(),
+                )),
+            )));
+        };
+
+        self.advance();
+
         let mut fields = Vec::with_capacity(8);
 
-        if self.is_curr_kind(TokenKind::LeftCurly) {
-            self.consume(TokenKind::LeftCurly, "Expected `{` before struct fields");
+        while !self.is_eof() && !self.is_curr_kind(TokenKind::RightCurly) {
+            let start_field_span = self.current.get_span();
 
-            while !self.is_eof() && !self.is_curr_kind(TokenKind::RightCurly) {
-                let start_field_span = self.current.get_span();
-
-                let field_name = if let Some(ident) = self.try_consume_ident() {
-                    ident
+            let field_name = if let Some(ident) = self.try_consume_ident() {
+                ident
+            } else {
+                self.report_error(
+                    ErrorKind::ExpectedToken {
+                        additional_info: Some("after field"),
+                        expected: TokenKind::Ident,
+                        found: Symbol::new(self.get_lexeme_of_current()),
+                    },
+                    self.current.get_span(),
+                );
+                let stopped_by_callback =
+                    self.synchronize_with_callback(|tkind| matches!(tkind, TokenKind::Comma));
+                if stopped_by_callback {
+                    self.advance();
+                    continue;
                 } else {
-                    self.report_error(
-                        ErrorKind::ExpectedToken {
-                            additional_info: Some("after field"),
-                            expected: TokenKind::Ident,
-                            found: Symbol::new(self.get_lexeme_of_current()),
-                        },
-                        self.current.get_span()
-                    );
-                    let stopped_by_callback = self.synchronize_with_callback(|tkind|
-                        matches!(tkind, TokenKind::Comma)
-                    );
-                    if stopped_by_callback {
-                        self.advance();
-                        continue;
-                    } else {
-                        break;
-                    }
-                };
+                    break;
+                }
+            };
 
-                let (typing, missing_typing) = if
-                    let Some(typing) = self.parse_typing(&[TokenKind::Comma])
-                {
+            let (typing, missing_typing) =
+                if let Some(typing) = self.parse_typing(&[TokenKind::Comma]) {
                     (typing, false)
                 } else {
                     self.report_error(
@@ -822,54 +776,52 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
                             additional_info: Some("after identifier"),
                             found: Symbol::new(self.get_lexeme_of_current()),
                         },
-                        self.current.get_span()
+                        self.current.get_span(),
                     );
                     self.synchronize();
                     (Typing::Error, true)
                 };
 
-                let field = Field::new(
-                    self.ast_arena.alloc_expr_or_stmt(field_name),
-                    typing,
-                    Span::merge(start_field_span, self.current.get_span())
+            let field = Field::new(
+                self.ast_arena.alloc_expr_or_stmt(field_name),
+                typing,
+                Span::merge(start_field_span, self.current.get_span()),
+            );
+
+            fields.push(self.ast_arena.alloc_expr_or_stmt(field));
+
+            if !self.is_curr_kind(TokenKind::Comma)
+                && !self.is_curr_kind(TokenKind::RightCurly)
+                && !missing_typing
+            {
+                self.report_error(
+                    ErrorKind::ExpectedToken {
+                        additional_info: Some("after field"),
+                        expected: TokenKind::Comma,
+                        found: Symbol::new(self.get_lexeme_of_current()),
+                    },
+                    self.current.get_span(),
                 );
-
-                fields.push(self.ast_arena.alloc_expr_or_stmt(field));
-
-                if
-                    !self.is_curr_kind(TokenKind::Comma) &&
-                    !self.is_curr_kind(TokenKind::RightCurly) &&
-                    !missing_typing
-                {
-                    self.report_error(
-                        ErrorKind::ExpectedToken {
-                            additional_info: Some("after field"),
-                            expected: TokenKind::Comma,
-                            found: Symbol::new(self.get_lexeme_of_current()),
-                        },
-                        self.current.get_span()
-                    );
-                    self.synchronize_with_callback(|tkind| matches!(tkind, TokenKind::Comma));
-                }
-
-                if self.is_curr_kind(TokenKind::Comma) {
-                    self.advance();
-                    continue;
-                }
-
-                break;
+                self.synchronize_with_callback(|tkind| matches!(tkind, TokenKind::Comma));
             }
 
-            self.consume_or_report_error(
-                TokenKind::RightCurly,
-                ErrorKind::ExpectedToken {
-                    additional_info: Some("after struct item"),
-                    expected: TokenKind::RightCurly,
-                    found: Symbol::new(self.get_lexeme_of_current()),
-                },
-                Span::merge(start_span, self.current.get_span())
-            );
+            if self.is_curr_kind(TokenKind::Comma) {
+                self.advance();
+                continue;
+            }
+
+            break;
         }
+
+        self.consume_or_report_error(
+            TokenKind::RightCurly,
+            ErrorKind::ExpectedToken {
+                additional_info: Some("after struct item"),
+                expected: TokenKind::RightCurly,
+                found: Symbol::new(self.get_lexeme_of_current()),
+            },
+            Span::merge(start_span, self.current.get_span()),
+        );
 
         let fields = self.ast_arena.alloc_vec(fields);
         let struct_stmt = StructItem::new(
@@ -877,27 +829,28 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
             fields,
             item_type,
             Span::merge(start_span, self.current.get_span()),
-            self.get_ast_node_id()
+            self.get_ast_node_id(),
         );
 
-        Stmt::ItemStmt(ItemStmt::StructItem(self.ast_arena.alloc_expr_or_stmt(struct_stmt)))
+        Some(Stmt::ItemStmt(ItemStmt::StructItem(
+            self.ast_arena.alloc_expr_or_stmt(struct_stmt),
+        )))
     }
 
     pub(crate) fn parse_many_typings(
         &mut self,
-        synchronize_tokens: &[TokenKind]
+        synchronize_tokens: &[TokenKind],
     ) -> &'a [Typing<'a>] {
         let mut tuple_typing = vec![];
         while !self.is_eof() && !self.is_curr_kind(TokenKind::RightParen) {
             if let Some(typing) = self.parse_typing(synchronize_tokens) {
                 tuple_typing.push(typing);
             } else {
-                let can_continue_parsing_typing = self.synchronize_with_callback(|tkind| {
-                    match tkind {
+                let can_continue_parsing_typing =
+                    self.synchronize_with_callback(|tkind| match tkind {
                         TokenKind::Comma | TokenKind::RightParen => true,
                         t => synchronize_tokens.contains(&t),
-                    }
-                });
+                    });
 
                 if !can_continue_parsing_typing {
                     break;
@@ -918,7 +871,7 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
                 expected: TokenKind::RightParen,
                 found: Symbol::new(self.get_lexeme_of_current()),
             },
-            self.current.get_span()
+            self.current.get_span(),
         );
 
         if !success {
@@ -939,7 +892,8 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
                 Some(Typing::SelfType)
             }
             TokenKind::Ident => {
-                let ident = self.consume_ident("Expected ident");
+                let ident = self.make_ident_node_from_current();
+                self.advance();
                 Some(Typing::Ident(self.ast_arena.alloc_expr_or_stmt(ident)))
             }
             TokenKind::Star => {
@@ -952,17 +906,20 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
                 };
 
                 if let Some(ty) = self.parse_typing(synchronize_tokens) {
-                    return Some(Typing::Ptr(self.ast_arena.alloc_expr_or_stmt(ty), mutability));
+                    Some(Typing::Ptr(
+                        self.ast_arena.alloc_expr_or_stmt(ty),
+                        mutability,
+                    ))
                 } else {
                     self.report_error(
                         ErrorKind::ExpectedTyping {
                             additional_info: Some("after `*`"),
                             found: Symbol::new(self.get_lexeme_of_current()),
                         },
-                        self.current.get_span()
+                        self.current.get_span(),
                     );
                     self.synchronize_with_callback(|tkind| synchronize_tokens.contains(&tkind));
-                    return Some(Typing::Error);
+                    Some(Typing::Error)
                 }
             }
             TokenKind::Fn => {
@@ -1002,22 +959,25 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
     pub(crate) fn expression_statement(&mut self) -> Option<Stmt<'a>> {
         let mut expr_builder = ExprBuilder::new(self.ast_arena, None);
         self.expression(&mut expr_builder);
-        expr_builder.take_stmt()
+        expr_builder.try_take_stmt()
     }
 
     pub(crate) fn break_expr(&mut self) -> Stmt<'a> {
-        let break_expr = self.ast_arena.alloc_expr_or_stmt(
-            BreakExpr::new(None, self.current.get_span(), self.get_ast_node_id())
-        );
+        let break_expr = self.ast_arena.alloc_expr_or_stmt(BreakExpr::new(
+            None,
+            self.current.get_span(),
+            self.get_ast_node_id(),
+        ));
         let expr = Expr::ExprWithoutBlock(ExprWithoutBlock::BreakExpr(break_expr));
         self.advance();
         Stmt::ExprStmt(expr)
     }
 
     pub(crate) fn continue_expr(&mut self) -> Stmt<'a> {
-        let continue_expr = self.ast_arena.alloc_expr_or_stmt(
-            ContinueExpr::new(self.current.get_span(), self.get_ast_node_id())
-        );
+        let continue_expr = self.ast_arena.alloc_expr_or_stmt(ContinueExpr::new(
+            self.current.get_span(),
+            self.get_ast_node_id(),
+        ));
         let expr = Expr::ExprWithoutBlock(ExprWithoutBlock::ContinueExpr(continue_expr));
         self.advance();
         Stmt::ExprStmt(expr)
@@ -1026,12 +986,14 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
     /// Returns whether or not further arguments can be parsed
     fn recover_from_arg_parse_error(&mut self) -> bool {
         let start_span = self.current.get_span();
-        let can_parse_more_args = self.synchronize_with_callback(|token_kind|
+        let can_parse_more_args = self.synchronize_with_callback(|token_kind| {
             matches!(token_kind, TokenKind::RightParen | TokenKind::Comma)
-        );
+        });
         self.report_error(
-            ErrorKind::UnexpectedTokens { expected_str: "Expected function argument or `)`" },
-            Span::merge(start_span, self.current.get_span())
+            ErrorKind::UnexpectedTokens {
+                expected_str: "Expected function argument or `)`",
+            },
+            Span::merge(start_span, self.current.get_span()),
         );
 
         if self.is_curr_kind(TokenKind::Comma) {
@@ -1046,7 +1008,7 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
     /// It will also synchronize if there's an error parsing the function signature.
     pub(crate) fn parse_fn_signature(
         &mut self,
-        parsing_declare_fn: ParsingDeclareFn
+        parsing_declare_fn: ParsingDeclareFn,
     ) -> Option<(ItemType, ParsedFnSignature<'a>)> {
         self.advance();
         let item_type = if self.is_curr_kind(TokenKind::Dot) {
@@ -1067,7 +1029,7 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
                     additional_info: Some("after keyword `fn`"),
                     found: Symbol::new(self.get_lexeme_of_current()),
                 },
-                self.current.get_span()
+                self.current.get_span(),
             );
             if self.current.get_kind() != TokenKind::LeftParen {
                 self.synchronize();
@@ -1089,7 +1051,7 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
                 expected_delim: Delimeter::LeftParen,
                 kind: ItemErrorKind::FnName,
             },
-            Span::merge(start_span, self.current.get_span())
+            Span::merge(start_span, self.current.get_span()),
         );
 
         if !success {
@@ -1103,7 +1065,10 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
             let arg = {
                 match self.current.get_kind() {
                     TokenKind::SmallSelf => {
-                        let self_ident = self.consume_self_as_ident_node("Expected `self`");
+                        let self_ident = match self.try_consume_self_as_ident() {
+                            Some(self_ident) => self_ident,
+                            None => unreachable!(),
+                        };
 
                         ArgKind::NormalSelf(self.ast_arena.alloc_expr_or_stmt(self_ident))
                     }
@@ -1111,12 +1076,24 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
                         self.advance();
                         match self.current.get_kind() {
                             TokenKind::SmallSelf => {
-                                let self_ident = self.consume_self_as_ident_node("Expected `self`");
+                                let self_ident = match self.try_consume_self_as_ident() {
+                                    Some(self_ident) => self_ident,
+                                    None => unreachable!(),
+                                };
+
                                 ArgKind::PtrSelf(self.ast_arena.alloc_expr_or_stmt(self_ident))
                             }
                             TokenKind::Mut => {
                                 self.advance();
-                                let self_ident = self.consume_self_as_ident_node("Expected `self`");
+
+                                let self_ident = match self.try_consume_self_as_ident() {
+                                    Some(self_ident) => self_ident,
+                                    None => {
+                                        // self.report_error(ErrorKind::ExpectedToken { additional_info: Some(""), expected: (), found: () }, span);
+                                        todo!()
+                                    }
+                                };
+
                                 ArgKind::MutPtrSelf(self.ast_arena.alloc_expr_or_stmt(self_ident))
                             }
                             _ => panic!("Expected `self` or `mut` after `*` in function argument"),
@@ -1130,30 +1107,26 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
                     TokenKind::Ident => {
                         let start_field_span = self.current.get_span();
                         let arg_ident = self.consume_ident("Expected ident in function args");
-                        let arg_typing = match
-                            self.parse_typing(&[TokenKind::Comma, TokenKind::RightParen])
-                        {
-                            Some(typing) => typing,
-                            None => {
-                                self.report_error(
-                                    ErrorKind::ExpectedTyping {
-                                        additional_info: Some(
-                                            "after identifier in function argument"
-                                        ),
-                                        found: Symbol::new(self.get_lexeme_of_current()),
-                                    },
-                                    self.current.get_span()
-                                );
+                        let arg_typing =
+                            match self.parse_typing(&[TokenKind::Comma, TokenKind::RightParen]) {
+                                Some(typing) => typing,
+                                None => {
+                                    self.report_error(
+                                        ErrorKind::ExpectedTyping {
+                                            additional_info: Some(
+                                                "after identifier in function argument",
+                                            ),
+                                            found: Symbol::new(self.get_lexeme_of_current()),
+                                        },
+                                        self.current.get_span(),
+                                    );
 
-                                Typing::Error
-                            }
-                        };
+                                    Typing::Error
+                                }
+                            };
 
-                        if
-                            let (ParsingDeclareFn::No, Typing::VariadicArgs) = (
-                                parsing_declare_fn,
-                                arg_typing,
-                            )
+                        if let (ParsingDeclareFn::No, Typing::VariadicArgs) =
+                            (parsing_declare_fn, arg_typing)
                         {
                             panic!("Error: Variadic args not allowed in function declaration");
                         }
@@ -1161,7 +1134,7 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
                         let arg = Field::new(
                             self.ast_arena.alloc_expr_or_stmt(arg_ident),
                             arg_typing,
-                            Span::merge(start_field_span, self.current.get_span())
+                            Span::merge(start_field_span, self.current.get_span()),
                         );
                         ArgKind::Arg(self.ast_arena.alloc_expr_or_stmt(arg))
                     }
@@ -1196,7 +1169,7 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
                         missing_comma_place: MissingCommaPlace::FnArgs,
                         arg_symbol_after_missing_comma: symbol,
                     },
-                    Span::merge(self.prev.get_span(), self.current.get_span())
+                    Span::merge(self.prev.get_span(), self.current.get_span()),
                 );
                 continue;
             }
@@ -1222,7 +1195,7 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
                 expected_delim: Delimeter::RightParen,
                 kind: ItemErrorKind::FnArgs,
             },
-            Span::merge(start_span, self.current.get_span())
+            Span::merge(start_span, self.current.get_span()),
         );
 
         if !success {
@@ -1273,7 +1246,7 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
                     expected_delim: Delimeter::RightCurly,
                     kind: ItemErrorKind::FnBody,
                 },
-                Span::merge(body_start_span, self.current.get_span())
+                Span::merge(body_start_span, self.current.get_span()),
             );
 
             if !success {
@@ -1286,23 +1259,21 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
                 ErrorKind::FnWithoutBody {
                     symbol: Symbol::from_node_id(parsed_fn_sig.ident.ast_node_id),
                 },
-                Span::merge(start_span, self.current.get_span())
+                Span::merge(start_span, self.current.get_span()),
             );
 
             self.ast_arena.alloc_vec(Vec::new())
         };
 
-        let fn_stmt = self.ast_arena.alloc_expr_or_stmt(
-            FnItem::new(
-                parsed_fn_sig.ident,
-                body,
-                parsed_fn_sig.args,
-                parsed_fn_sig.ret_typing,
-                item_type,
-                Span::merge(start_span, self.current.get_span()),
-                self.get_ast_node_id()
-            )
-        );
+        let fn_stmt = self.ast_arena.alloc_expr_or_stmt(FnItem::new(
+            parsed_fn_sig.ident,
+            body,
+            parsed_fn_sig.args,
+            parsed_fn_sig.ret_typing,
+            item_type,
+            Span::merge(start_span, self.current.get_span()),
+            self.get_ast_node_id(),
+        ));
 
         Some(fn_stmt)
     }
@@ -1317,13 +1288,11 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
             None
         };
 
-        let return_expr = self.ast_arena.alloc_expr_or_stmt(
-            ReturnExpr::new(
-                ret_value_expr,
-                Span::merge(start_span, self.current.get_span()),
-                self.get_ast_node_id()
-            )
-        );
+        let return_expr = self.ast_arena.alloc_expr_or_stmt(ReturnExpr::new(
+            ret_value_expr,
+            Span::merge(start_span, self.current.get_span()),
+            self.get_ast_node_id(),
+        ));
 
         let expr = Expr::ExprWithoutBlock(ExprWithoutBlock::ReturnExpr(return_expr));
 
@@ -1335,12 +1304,13 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
         self.advance();
         let mut expr_builder = ExprBuilder::new_with_mut_span(self.ast_arena, None, mut_span);
         self.parse_precedence(expr_builder.get_base_prec(), &mut expr_builder);
-        let stmt = expr_builder.take_stmt().expect("TODO: Error handling");
+        let stmt = expr_builder.try_take_stmt().expect("TODO: Error handling");
         Self::test_and_set_mutable(&stmt).expect("Misuse of mut");
+
         stmt
     }
 
-    fn test_and_set_mutable(stmt: &Stmt<'a>) -> Result<(), &'b str> {
+    fn test_and_set_mutable(stmt: &Stmt<'a>) -> Result<(), &'static str> {
         match stmt {
             Stmt::DefineStmt(_) => Ok(()),
             Stmt::AssignStmt(_) => Err("Unexpected token `mut` in assignment"),
@@ -1475,7 +1445,7 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
         let ident_expr = IdentNode::new(self.prev.get_span(), self.get_ast_node_id());
         Symbol::new_with_node_id(
             &self.src[ident_expr.span.get_byte_range()],
-            ident_expr.ast_node_id
+            ident_expr.ast_node_id,
         );
         expr_builder.emit_ident_expr(ident_expr);
     }
@@ -1544,11 +1514,11 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
                             additional_info: Some("in field declaration"),
                             found: Symbol::new(self.get_lexeme_of_current()),
                         },
-                        self.current.get_span()
+                        self.current.get_span(),
                     );
-                    let can_continue = self.synchronize_with_callback(|token_kind|
+                    let can_continue = self.synchronize_with_callback(|token_kind| {
                         matches!(token_kind, TokenKind::Comma)
-                    );
+                    });
 
                     if can_continue {
                         if self.is_curr_kind(TokenKind::Comma) {
@@ -1567,13 +1537,13 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
                     expected: TokenKind::Colon,
                     found: Symbol::new(self.get_lexeme_of_current()),
                 },
-                self.current.get_span()
+                self.current.get_span(),
             );
 
             if !success {
-                let can_continue = self.synchronize_with_callback(|token_kind|
+                let can_continue = self.synchronize_with_callback(|token_kind| {
                     matches!(token_kind, TokenKind::Comma | TokenKind::RightCurly)
-                );
+                });
 
                 if can_continue && !self.is_curr_kind(TokenKind::RightCurly) {
                     if self.is_curr_kind(TokenKind::Comma) {
@@ -1586,13 +1556,11 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
             }
 
             let expr = self.parse_expr_and_take(Precedence::PrecAssign.get_next());
-            let field_init = self.ast_arena.alloc_expr_or_stmt(
-                FieldInitialization::new(
-                    self.ast_arena.alloc_expr_or_stmt(field_ident),
-                    expr,
-                    Span::merge(start_field_span, self.current.get_span())
-                )
-            );
+            let field_init = self.ast_arena.alloc_expr_or_stmt(FieldInitialization::new(
+                self.ast_arena.alloc_expr_or_stmt(field_ident),
+                expr,
+                Span::merge(start_field_span, self.current.get_span()),
+            ));
             initialization_fields.push(field_init);
 
             if self.is_curr_kind(TokenKind::Comma) {
@@ -1617,13 +1585,13 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
                 expected: TokenKind::RightCurly,
                 found: Symbol::new(self.get_lexeme_of_current()),
             },
-            self.current.get_span()
+            self.current.get_span(),
         );
 
         if !success {
-            self.synchronize_with_callback(|token_kind|
+            self.synchronize_with_callback(|token_kind| {
                 matches!(token_kind, TokenKind::RightCurly)
-            );
+            });
 
             if self.is_curr_kind(TokenKind::RightCurly) {
                 self.advance();
@@ -1644,7 +1612,7 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
                 expected: TokenKind::RightSquare,
                 found: Symbol::new(self.get_lexeme_of_current()),
             },
-            self.current.get_span()
+            self.current.get_span(),
         );
 
         if !success {
@@ -1673,7 +1641,7 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
                         expected: TokenKind::Ident,
                         found: Symbol::new(self.get_lexeme_of_current()),
                     },
-                    self.current.get_span()
+                    self.current.get_span(),
                 );
                 self.synchronize();
                 println!("")
@@ -1683,7 +1651,10 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
 
     /// Parse rule method: `float`
     pub(crate) fn float(&mut self, _expr_builder: &mut ExprBuilder<'a, 'b>) {
-        todo!("Floats not implemented yet: {:?}", self.get_lexeme_of_prev().parse::<f64>())
+        todo!(
+            "Floats not implemented yet: {:?}",
+            self.get_lexeme_of_prev().parse::<f64>()
+        )
     }
 
     /// Parse rule method: `eq`
@@ -1738,7 +1709,10 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
 
     /// Logic of binary parse rule methods
     pub(crate) fn binary(&mut self, expr_builder: &mut ExprBuilder<'a, 'b>, binary_op: BinaryOp) {
-        self.parse_precedence(self.get_parse_rule_of_prev().infix_prec.get_next(), expr_builder);
+        self.parse_precedence(
+            self.get_parse_rule_of_prev().infix_prec.get_next(),
+            expr_builder,
+        );
 
         expr_builder.emit_binary_expr(binary_op, self)
     }
@@ -1774,13 +1748,11 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
         let block = self.parse_block();
         self.consume(TokenKind::RightCurly, "Expected `}` after loop");
 
-        let loop_expr = self.ast_arena.alloc_expr_or_stmt(
-            LoopExpr::new(
-                block,
-                Span::merge(start_span, self.current.get_span()),
-                self.get_ast_node_id()
-            )
-        );
+        let loop_expr = self.ast_arena.alloc_expr_or_stmt(LoopExpr::new(
+            block,
+            Span::merge(start_span, self.current.get_span()),
+            self.get_ast_node_id(),
+        ));
 
         expr_builder.emit_loop_expr(loop_expr);
     }
@@ -1795,7 +1767,7 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
     pub(crate) fn parse_expr_and_take_with_terminate_infix_token(
         &mut self,
         prec: Precedence,
-        terminate_infix_token: Option<TokenKind>
+        terminate_infix_token: Option<TokenKind>,
     ) -> Expr<'a> {
         let mut expr_builder = ExprBuilder::new(self.ast_arena, terminate_infix_token);
         self.parse_precedence(prec, &mut expr_builder);
@@ -1812,7 +1784,7 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
         let start_span = self.current.get_span();
         let cond = self.parse_expr_and_take_with_terminate_infix_token(
             Precedence::PrecAssign.get_next(),
-            Some(TokenKind::LeftCurly)
+            Some(TokenKind::LeftCurly),
         );
 
         let cond_kind = if self.is_curr_kind(TokenKind::Define) {
@@ -1823,7 +1795,7 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
 
             let rhs = self.parse_expr_and_take_with_terminate_infix_token(
                 Precedence::PrecAssign.get_next(),
-                Some(TokenKind::LeftCurly)
+                Some(TokenKind::LeftCurly),
             );
 
             self.def_count += 1;
@@ -1839,7 +1811,10 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
 
         self.consume(TokenKind::RightCurly, "Expected `}` after if block");
 
-        self.advance_if(matches!(self.current.get_kind(), TokenKind::Else | TokenKind::Elif));
+        self.advance_if(matches!(
+            self.current.get_kind(),
+            TokenKind::Else | TokenKind::Elif
+        ));
 
         let false_block = match self.prev.get_kind() {
             TokenKind::Else => {
@@ -1852,15 +1827,13 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
             _ => None,
         };
 
-        let if_expr = self.ast_arena.alloc_expr_or_stmt(
-            IfExpr::new(
-                cond_kind,
-                true_block,
-                false_block,
-                Span::merge(start_span, self.current.get_span()),
-                self.get_ast_node_id()
-            )
-        );
+        let if_expr = self.ast_arena.alloc_expr_or_stmt(IfExpr::new(
+            cond_kind,
+            true_block,
+            false_block,
+            Span::merge(start_span, self.current.get_span()),
+            self.get_ast_node_id(),
+        ));
 
         if_expr
     }
@@ -1886,20 +1859,18 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
         let start_span = self.current.get_span();
         let stmts = self.parse_block_as_stmts(StopToken::Token(TokenKind::RightCurly));
 
-        let block_expr = self.ast_arena.alloc_expr_or_stmt(
-            BlockExpr::new(
-                stmts,
-                Span::merge(start_span, self.current.get_span()),
-                self.get_ast_node_id()
-            )
-        );
+        let block_expr = self.ast_arena.alloc_expr_or_stmt(BlockExpr::new(
+            stmts,
+            Span::merge(start_span, self.current.get_span()),
+            self.get_ast_node_id(),
+        ));
 
         block_expr
     }
 
     pub(crate) fn synchronize_with_callback(
         &mut self,
-        mut callback: impl FnMut(TokenKind) -> bool
+        mut callback: impl FnMut(TokenKind) -> bool,
     ) -> bool {
         loop {
             if self.is_eof() {
@@ -1911,7 +1882,7 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
             }
 
             match self.current.get_kind() {
-                | TokenKind::Fn
+                TokenKind::Fn
                 | TokenKind::Struct
                 | TokenKind::Enum
                 | TokenKind::Typedef
@@ -1939,7 +1910,7 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
     pub(crate) fn parse_precedence(
         &mut self,
         mut prec: Precedence,
-        expr_builder: &mut ExprBuilder<'a, 'b>
+        expr_builder: &mut ExprBuilder<'a, 'b>,
     ) {
         self.advance();
 
@@ -1967,19 +1938,17 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
 
             prefix_method(self, expr_builder);
             loop {
-                if
-                    (self.prev.get_kind().eq(&TokenKind::Ident) ||
-                        self.prev.get_kind().eq(&TokenKind::BigSelf)) &&
-                    self.current.get_kind().eq(&TokenKind::LeftCurly) &&
-                    !is_terminate_infix_token!(current)
+                if (self.prev.get_kind().eq(&TokenKind::Ident)
+                    || self.prev.get_kind().eq(&TokenKind::BigSelf))
+                    && self.current.get_kind().eq(&TokenKind::LeftCurly)
+                    && !is_terminate_infix_token!(current)
                 {
                     self.advance();
                     self.struct_expr(expr_builder);
                 }
 
-                while
-                    prec <= self.get_parse_rule_of_current().infix_prec &&
-                    !is_terminate_infix_token!(current)
+                while prec <= self.get_parse_rule_of_current().infix_prec
+                    && !is_terminate_infix_token!(current)
                 {
                     // If this is true we don't want to parse another `:=` or `=` in expr without block
                     if self.current.get_kind().has_assign_prec() {
@@ -2005,7 +1974,7 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
                 ErrorKind::ExpectedExprOrItem {
                     found: Symbol::new(self.get_lexeme_of_prev()),
                 },
-                self.prev.get_span()
+                self.prev.get_span(),
             );
             self.synchronize();
         }
@@ -2024,7 +1993,11 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
     /// Converts e.g. `69` into `0.69` (this is a fast version by chat)
     pub(crate) fn _integer_to_dot_float(int: i64) -> f64 {
         // Compute the number of digits using logarithms
-        let num_digits = if int == 0 { 1 } else { (int.abs() as f64).log10().ceil() as u32 };
+        let num_digits = if int == 0 {
+            1
+        } else {
+            (int.abs() as f64).log10().ceil() as u32
+        };
 
         // Compute the divisor
         let divisor = (10.0_f64).powi(-(num_digits as i32));
@@ -2068,7 +2041,7 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
         &mut self,
         kind: TokenKind,
         error_kind: ErrorKind,
-        span: Span
+        span: Span,
     ) -> bool {
         if self.current.get_kind() == kind {
             self.advance();
@@ -2125,6 +2098,17 @@ impl<'a, 'b> Parser<'a, 'b> where 'a: 'b {
     pub(crate) fn try_consume_ident(&mut self) -> Option<IdentNode> {
         match self.current.get_kind() {
             TokenKind::Ident => {
+                let ident_node = self.make_ident_node_from_current();
+                self.advance();
+                Some(ident_node)
+            }
+            _ => None,
+        }
+    }
+
+    pub(crate) fn try_consume_self_as_ident(&mut self) -> Option<IdentNode> {
+        match self.current.get_kind() {
+            TokenKind::SmallSelf => {
                 let ident_node = self.make_ident_node_from_current();
                 self.advance();
                 Some(ident_node)

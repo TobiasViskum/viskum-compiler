@@ -1,41 +1,22 @@
 use fxhash::FxHashMap;
 use icfg::{
-    walk_args,
-    walk_basic_block,
-    walk_basic_blocks,
-    walk_local_mems,
-    walk_result_mems,
-    BasicBlockId,
-    CallNode,
-    Cfg,
-    CfgVisitor,
-    Const,
-    Icfg,
-    Operand,
-    PlaceKind,
-    ReturnNode,
+    walk_args, walk_basic_block, walk_basic_blocks, walk_local_mems, walk_result_mems,
+    BasicBlockId, CallNode, Cfg, CfgVisitor, Const, Icfg, Operand, PlaceKind, ReturnNode,
     TyCastNode,
 };
-use op::{ ArithmeticOp, BinaryOp, ComparisonOp };
 use ir::{
-    CfgFnKind,
-    DefId,
-    Externism,
-    GetTyAttr,
-    IntTy,
-    LocalMem,
-    NameBindingKind,
-    PrimTy,
-    ResolvedInformation,
-    ResultMem,
-    TempId,
-    Ty,
-    UintTy,
-    VOID_TY,
+    CfgFnKind, DefId, Externism, GetTyAttr, IntTy, LocalMem, NameBindingKind, PrimTy,
+    ResolvedInformation, ResultMem, TempId, Ty, UintTy, VOID_TY,
+};
+use op::{ArithmeticOp, BinaryOp, ComparisonOp};
+use std::{
+    fmt::{Display, Write},
+    fs::File,
+    process::Command,
+    sync::Mutex,
 };
 use threadpool::ThreadPool;
 use threadpool_scope::scope_with;
-use std::{ fmt::{ Display, Write }, fs::File, process::Command, sync::Mutex };
 
 const INDENTATION: usize = 4;
 
@@ -62,7 +43,7 @@ impl<'a> CodeGenUnitHelper<'a> {
     }
 
     pub(crate) fn allocate_places(
-        mut self
+        mut self,
     ) -> (FxHashMap<PlaceKind, usize>, FxHashMap<BasicBlockId, usize>) {
         self.visit_cfg(self.cfg);
 
@@ -91,47 +72,57 @@ impl CfgVisitor for CodeGenUnitHelper<'_> {
 
     fn visit_basic_block(&mut self, basic_block: &icfg::BasicBlock, cfg: &Cfg) -> Self::Result {
         let next_ssa_id = self.get_next_ssa_id();
-        self.basic_block_id_to_ssa_id.insert(basic_block.basic_block_id, next_ssa_id);
+        self.basic_block_id_to_ssa_id
+            .insert(basic_block.basic_block_id, next_ssa_id);
         walk_basic_block(self, basic_block, cfg)
     }
 
     fn visit_arg(&mut self, arg: &(TempId, Ty)) -> Self::Result {
         let next_ssa_id = self.get_next_ssa_id();
-        self.place_to_ssa_id.insert(PlaceKind::TempId(arg.0), next_ssa_id);
+        self.place_to_ssa_id
+            .insert(PlaceKind::TempId(arg.0), next_ssa_id);
     }
 
     fn visit_local_mem(&mut self, local_mem: &LocalMem) -> Self::Result {
         let next_ssa_id = self.get_next_ssa_id();
-        self.place_to_ssa_id.insert(PlaceKind::LocalMemId(local_mem.local_mem_id), next_ssa_id);
+        self.place_to_ssa_id
+            .insert(PlaceKind::LocalMemId(local_mem.local_mem_id), next_ssa_id);
     }
 
     fn visit_result_mem(&mut self, result_mem: &ResultMem) -> Self::Result {
         let next_ssa_id = self.get_next_ssa_id();
-        self.place_to_ssa_id.insert(PlaceKind::ResultMemId(result_mem.result_mem_id), next_ssa_id);
+        self.place_to_ssa_id.insert(
+            PlaceKind::ResultMemId(result_mem.result_mem_id),
+            next_ssa_id,
+        );
     }
 
     fn visit_binary_node(&mut self, binary_node: &icfg::BinaryNode, _cfg: &Cfg) -> Self::Result {
         let next_ssa_id = self.get_next_ssa_id();
-        self.place_to_ssa_id.insert(PlaceKind::TempId(binary_node.result_place), next_ssa_id);
+        self.place_to_ssa_id
+            .insert(PlaceKind::TempId(binary_node.result_place), next_ssa_id);
     }
 
     fn visit_load_node(&mut self, load_node: &icfg::LoadNode, _cfg: &Cfg) -> Self::Result {
         let next_ssa_id = self.get_next_ssa_id();
-        self.place_to_ssa_id.insert(PlaceKind::TempId(load_node.result_place), next_ssa_id);
+        self.place_to_ssa_id
+            .insert(PlaceKind::TempId(load_node.result_place), next_ssa_id);
     }
 
     fn visit_index_node(&mut self, index_node: &icfg::IndexNode, _cfg: &Cfg) -> Self::Result {
         let next_ssa_id = self.get_next_ssa_id();
-        self.place_to_ssa_id.insert(PlaceKind::TempId(index_node.result_place), next_ssa_id);
+        self.place_to_ssa_id
+            .insert(PlaceKind::TempId(index_node.result_place), next_ssa_id);
     }
 
     fn visit_byte_access_node(
         &mut self,
         byte_access_node: &icfg::ByteAccessNode,
-        _cfg: &Cfg
+        _cfg: &Cfg,
     ) -> Self::Result {
         let next_ssa_id = self.get_next_ssa_id();
-        self.place_to_ssa_id.insert(byte_access_node.result_place, next_ssa_id);
+        self.place_to_ssa_id
+            .insert(byte_access_node.result_place, next_ssa_id);
     }
 
     fn visit_call_node(&mut self, call_node: &CallNode, cfg: &Cfg) -> Self::Result {
@@ -139,7 +130,8 @@ impl CfgVisitor for CodeGenUnitHelper<'_> {
             return;
         }
         let next_ssa_id = self.get_next_ssa_id();
-        self.place_to_ssa_id.insert(PlaceKind::TempId(call_node.result_place), next_ssa_id);
+        self.place_to_ssa_id
+            .insert(PlaceKind::TempId(call_node.result_place), next_ssa_id);
     }
 
     fn visit_return_node(&mut self, return_node: &ReturnNode, cfg: &Cfg) -> Self::Result {
@@ -148,7 +140,8 @@ impl CfgVisitor for CodeGenUnitHelper<'_> {
 
     fn visit_ty_cast_node(&mut self, ty_cast_node: &TyCastNode, cfg: &Cfg) -> Self::Result {
         let next_ssa_id = self.get_next_ssa_id();
-        self.place_to_ssa_id.insert(PlaceKind::TempId(ty_cast_node.result_place), next_ssa_id);
+        self.place_to_ssa_id
+            .insert(PlaceKind::TempId(ty_cast_node.result_place), next_ssa_id);
     }
 }
 
@@ -190,9 +183,8 @@ pub(crate) struct CodeGenUnit<'a> {
 
 impl<'a> CodeGenUnit<'a> {
     pub(crate) fn new(cfg: &'a Cfg, resolved_information: &'a ResolvedInformation<'a>) -> Self {
-        let (place_to_ssa_id, basic_block_id_to_ssa_id) = {
-            CodeGenUnitHelper::new(cfg, resolved_information).allocate_places()
-        };
+        let (place_to_ssa_id, basic_block_id_to_ssa_id) =
+            { CodeGenUnitHelper::new(cfg, resolved_information).allocate_places() };
 
         Self {
             cfg,
@@ -214,65 +206,59 @@ impl<'a> CodeGenUnit<'a> {
     }
 
     pub(crate) fn get_bb_id(&self, bb_id: &BasicBlockId) -> usize {
-        *self.basic_block_id_to_ssa_id.get(bb_id).expect("Expected BasicBlockId")
+        *self
+            .basic_block_id_to_ssa_id
+            .get(bb_id)
+            .expect("Expected BasicBlockId")
     }
 
     pub(crate) fn get_llvm_operand(&self, operand: &Operand) -> String {
-        
         match &operand {
-            Operand::PlaceKind(place) => { format!("{}", self.get_ssa_id_from_place(place)) }
-            Operand::Const(const_val) => {
-                match const_val {
-                    Const::FnPtr(def_id) => {
-                        if self.resolved_information.is_clib_fn(def_id) {
-                            format!("@{}", def_id.symbol.get())
-                        } else {
-                            def_id.display_as_fn()
-                        }
-                    }
-                    Const::Str(def_id) => { def_id.display_as_str() }
-                    Const::Bool(bool) =>
-                        (
-                            match bool {
-                                true => "1",
-                                false => "0",
-                            }
-                        ).to_string(),
-                    Const::Null => "null".to_string(),
-                    Const::Int(int, _) => int.to_string(),
-                    Const::Void => panic!("Void cannot be used as an operand"),
-                }
+            Operand::PlaceKind(place) => {
+                format!("{}", self.get_ssa_id_from_place(place))
             }
+            Operand::Const(const_val) => match const_val {
+                Const::FnPtr(def_id) => {
+                    if self.resolved_information.is_clib_fn(def_id) {
+                        format!("@{}", def_id.symbol.get())
+                    } else {
+                        def_id.display_as_fn()
+                    }
+                }
+                Const::Str(def_id) => def_id.display_as_str(),
+                Const::Bool(bool) => (match bool {
+                    true => "1",
+                    false => "0",
+                })
+                .to_string(),
+                Const::Null => "null".to_string(),
+                Const::Int(int, _) => int.to_string(),
+                Const::Void => panic!("Void cannot be used as an operand"),
+            },
         }
     }
 }
 
 fn get_llvm_ty(ty: Ty, resolved_information: &ResolvedInformation<'_>) -> String {
     match &ty {
-        Ty::PrimTy(prim_ty) => {
-            match prim_ty {
-                PrimTy::Bool => "i8".to_string(),
-                PrimTy::Int(int_ty) => {
-                    match int_ty {
-                        IntTy::Int8 => "i8".to_string(),
-                        IntTy::Int16 => "i16".to_string(),
-                        IntTy::Int32 => "i32".to_string(),
-                        IntTy::Int64 => "i64".to_string(),
-                    }
-                }
-                PrimTy::Uint(uint_ty) => {
-                    match uint_ty {
-                        UintTy::Uint8 => "i8".to_string(),
-                        UintTy::Uint16 => "i16".to_string(),
-                        UintTy::Uint32 => "i32".to_string(),
-                        UintTy::Uint64 => "i64".to_string(),
-                    }
-                }
-                PrimTy::Float(float_ty) => todo!(),
-                PrimTy::Void => "void".to_string(),
-                PrimTy::Str => "ptr".to_string(),
-            }
-        }
+        Ty::PrimTy(prim_ty) => match prim_ty {
+            PrimTy::Bool => "i8".to_string(),
+            PrimTy::Int(int_ty) => match int_ty {
+                IntTy::Int8 => "i8".to_string(),
+                IntTy::Int16 => "i16".to_string(),
+                IntTy::Int32 => "i32".to_string(),
+                IntTy::Int64 => "i64".to_string(),
+            },
+            PrimTy::Uint(uint_ty) => match uint_ty {
+                UintTy::Uint8 => "i8".to_string(),
+                UintTy::Uint16 => "i16".to_string(),
+                UintTy::Uint32 => "i32".to_string(),
+                UintTy::Uint64 => "i64".to_string(),
+            },
+            PrimTy::Float(float_ty) => todo!(),
+            PrimTy::Void => "void".to_string(),
+            PrimTy::Str => "ptr".to_string(),
+        },
         Ty::VariadicArgs => "...".to_string(),
         Ty::Ptr(_, _) => "ptr".to_string(),
         Ty::ManyPtr(_, _) => "ptr".to_string(),
@@ -288,11 +274,13 @@ fn get_llvm_ty(ty: Ty, resolved_information: &ResolvedInformation<'_>) -> String
         }
         Ty::FnSig(_) => "ptr".to_string(),
         Ty::FnDef(_) => "ptr".to_string(),
-        Ty::AtdConstructer(_) =>
-            panic!("AdtConstructer type (should not be this far in compilation)"),
+        Ty::AtdConstructer(_) => {
+            panic!("AdtConstructer type (should not be this far in compilation)")
+        }
         Ty::Package => panic!("Package type (should not be this far in compilation)"),
-        t @ (Ty::Unkown | Ty::Never | Ty::ZeroSized) =>
-            panic!("{} type (should not be this far in compilation)", t),
+        t @ (Ty::Unkown | Ty::Never | Ty::ZeroSized) => {
+            panic!("{} type (should not be this far in compilation)", t)
+        }
     }
 }
 
@@ -333,10 +321,16 @@ impl CfgVisitor for CodeGenUnit<'_> {
         walk_local_mems(self, cfg)?;
         walk_result_mems(self, cfg)?;
 
-        let first_bb_id = self.basic_block_id_to_ssa_id
+        let first_bb_id = self
+            .basic_block_id_to_ssa_id
             .get(&BasicBlockId(0))
             .expect("Expected at least one BasicBlock");
-        writeln!(self.buffer, "{}br label %{}", " ".repeat(INDENTATION), first_bb_id)?;
+        writeln!(
+            self.buffer,
+            "{}br label %{}",
+            " ".repeat(INDENTATION),
+            first_bb_id
+        )?;
 
         walk_basic_blocks(self, cfg)?;
         if cfg.cfg_fn_kind == CfgFnKind::Main {
@@ -388,7 +382,12 @@ impl CfgVisitor for CodeGenUnit<'_> {
 
     fn visit_branch_node(&mut self, branch_node: &icfg::BranchNode, cfg: &Cfg) -> Self::Result {
         let branch_id = self.get_bb_id(&branch_node.branch);
-        writeln!(self.buffer, "{}br label %{}", " ".repeat(INDENTATION), branch_id)
+        writeln!(
+            self.buffer,
+            "{}br label %{}",
+            " ".repeat(INDENTATION),
+            branch_id
+        )
     }
 
     fn visit_store_node(&mut self, store_node: &icfg::StoreNode, cfg: &Cfg) -> Self::Result {
@@ -423,7 +422,7 @@ impl CfgVisitor for CodeGenUnit<'_> {
     fn visit_byte_access_node(
         &mut self,
         byte_access_node: &icfg::ByteAccessNode,
-        cfg: &Cfg
+        cfg: &Cfg,
     ) -> Self::Result {
         let temp_id = self.get_ssa_id_from_place(&byte_access_node.result_place);
         let array_id = self.get_ssa_id_from_place(&byte_access_node.access_place);
@@ -441,7 +440,7 @@ impl CfgVisitor for CodeGenUnit<'_> {
     fn visit_branch_cond_node(
         &mut self,
         branch_cond_node: &icfg::BranchCondNode,
-        cfg: &Cfg
+        cfg: &Cfg,
     ) -> Self::Result {
         let cond = self.get_llvm_operand(&branch_cond_node.condition);
         let true_branch = self.get_bb_id(&branch_cond_node.true_branch);
@@ -527,11 +526,19 @@ impl CfgVisitor for CodeGenUnit<'_> {
             write!(self.buffer, "{} = ", ssa_id)?;
         }
 
-        write!(self.buffer, "call {} ", get_llvm_ty(call_node.ret_ty, self.resolved_information))?;
+        write!(
+            self.buffer,
+            "call {} ",
+            get_llvm_ty(call_node.ret_ty, self.resolved_information)
+        )?;
 
         write!(self.buffer, "(")?;
         for (i, arg_ty) in call_node.args_ty.iter().enumerate() {
-            write!(self.buffer, "{}", get_llvm_ty(*arg_ty, self.resolved_information))?;
+            write!(
+                self.buffer,
+                "{}",
+                get_llvm_ty(*arg_ty, self.resolved_information)
+            )?;
             if arg_ty.is_variadic_args() {
                 break;
             }
@@ -597,13 +604,21 @@ impl<'icfg> CodeGen<'icfg> {
 
         let buffer = Mutex::new(String::with_capacity(65536));
 
-        let iter = self.icfg.resolved_information.clib_fns.iter().map(|def_id| {
-            let name_binding = self.icfg.resolved_information.get_name_binding_from_def_id(def_id);
-            match name_binding.kind {
-                NameBindingKind::Fn(fn_sig, _, Externism::Clib) => (def_id.symbol, fn_sig),
-                _ => panic!("Expected extern function"),
-            }
-        });
+        let iter = self
+            .icfg
+            .resolved_information
+            .clib_fns
+            .iter()
+            .map(|def_id| {
+                let name_binding = self
+                    .icfg
+                    .resolved_information
+                    .get_name_binding_from_def_id(def_id);
+                match name_binding.kind {
+                    NameBindingKind::Fn(fn_sig, _, Externism::Clib) => (def_id.symbol, fn_sig),
+                    _ => panic!("Expected extern function"),
+                }
+            });
 
         scope_with(self.threadpool, |s| {
             let buffer = &buffer;
@@ -615,14 +630,16 @@ impl<'icfg> CodeGen<'icfg> {
                         "declare {} @{}(",
                         get_llvm_ty(*fn_sig.ret_ty, &self.icfg.resolved_information),
                         symbol.get()
-                    ).expect("Error writing to buffer");
+                    )
+                    .expect("Error writing to buffer");
 
                     for (i, arg_ty) in fn_sig.args.iter().enumerate() {
                         write!(
                             local_buffer,
                             "{}",
                             get_llvm_ty(*arg_ty, &self.icfg.resolved_information)
-                        ).expect("Error writing to buffer");
+                        )
+                        .expect("Error writing to buffer");
                         if *arg_ty != Ty::VariadicArgs {
                             write!(local_buffer, " noundef").expect("Error writing to buffer");
                         }
@@ -650,7 +667,8 @@ impl<'icfg> CodeGen<'icfg> {
                     const_str.display_as_str(),
                     const_str_len.0,
                     const_str.symbol.get()
-                ).expect("Error writing to buffer");
+                )
+                .expect("Error writing to buffer");
             }
 
             writeln!(locked_buffer).expect("Error writing to buffer");
@@ -676,19 +694,20 @@ impl<'icfg> CodeGen<'icfg> {
 
             let mut file = File::create(&file_name_with_extension).expect("Error creating file");
             use std::io::Write;
-            file.write_all(buffer.lock().unwrap().as_bytes()).expect("Error writing to file");
+            file.write_all(buffer.lock().unwrap().as_bytes())
+                .expect("Error writing to file");
         }
 
         println!("Code generation took: {:?}", now.elapsed());
 
         let result = Command::new("clang")
-            .arg("-O0")
-            .arg(&file_name_with_extension)
-            .arg("-o")
-            .arg("./viskum/dist/main")
-            .output()
-            .expect("Failed to execute clang");
+            .args(["-O0", &file_name_with_extension, "-o", "./viskum/dist/main"])
+            .spawn()
+            .expect("Failed to execute clang")
+            .wait();
 
-        println!("{}", String::from_utf8(result.stderr).expect("Error converting to string"));
+        println!("clang exited with: {:?}", result);
+
+        // println!("{}", String::from_utf8(result.stderr).expect("Error converting to string"));
     }
 }

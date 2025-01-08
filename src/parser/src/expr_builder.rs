@@ -1,38 +1,14 @@
 use ast::{
-    AssignStmt,
-    AstArenaObject,
-    BinaryExpr,
-    BlockExpr,
-    BoolExpr,
-    CallExpr,
-    ConstExpr,
-    DefineStmt,
-    Expr,
-    ExprWithBlock,
-    ExprWithoutBlock,
-    FieldExpr,
-    FieldInitialization,
-    GroupExpr,
-    IdentNode,
-    IfExpr,
-    IndexExpr,
-    IntegerExpr,
-    LoopExpr,
-    NullExpr,
-    PkgIdentNode,
-    PlaceExpr,
-    Stmt,
-    StringExpr,
-    StructExpr,
-    TupleExpr,
-    TupleFieldExpr,
-    ValueExpr,
+    AssignStmt, AstArenaObject, BinaryExpr, BlockExpr, BoolExpr, CallExpr, ConstExpr, DefineStmt,
+    Expr, ExprWithBlock, ExprWithoutBlock, FieldExpr, FieldInitialization, GroupExpr, IdentNode,
+    IfExpr, IndexExpr, IntegerExpr, LoopExpr, NullExpr, PkgIdentNode, PlaceExpr, Stmt, StringExpr,
+    StructExpr, TupleExpr, TupleFieldExpr, ValueExpr,
 };
 use op::BinaryOp;
 use span::Span;
 use token::TokenKind;
 
-use crate::{ precedence::Precedence, ParserHandle };
+use crate::{precedence::Precedence, ParserHandle};
 
 pub(crate) struct ExprBuilder<'ast, 'b> {
     final_stmt: Option<Stmt<'ast>>,
@@ -49,7 +25,7 @@ pub(crate) struct ExprBuilder<'ast, 'b> {
 impl<'ast, 'b> ExprBuilder<'ast, 'b> {
     pub fn new(
         ast_arena: &'b AstArenaObject<'ast>,
-        terminate_infix_token: Option<TokenKind>
+        terminate_infix_token: Option<TokenKind>,
     ) -> Self {
         Self {
             ast_arena,
@@ -64,7 +40,7 @@ impl<'ast, 'b> ExprBuilder<'ast, 'b> {
     pub fn new_with_mut_span(
         ast_arena: &'b AstArenaObject<'ast>,
         terminate_infix_token: Option<TokenKind>,
-        mut_span: Span
+        mut_span: Span,
     ) -> Self {
         Self {
             ast_arena,
@@ -76,7 +52,7 @@ impl<'ast, 'b> ExprBuilder<'ast, 'b> {
         }
     }
 
-    pub fn take_stmt(mut self) -> Option<Stmt<'ast>> {
+    pub fn try_take_stmt(mut self) -> Option<Stmt<'ast>> {
         if let Some(expr) = self.exprs.pop() {
             self.final_stmt = Some(Stmt::ExprStmt(expr));
         }
@@ -97,15 +73,13 @@ impl<'ast, 'b> ExprBuilder<'ast, 'b> {
                 .expect("TODO: Error handling (invalid pattern expr)")
         };
 
-        let define_stmt = self.ast_arena.alloc_expr_or_stmt(
-            DefineStmt::new(
-                self.mut_span,
-                pattern_expr,
-                value_expr,
-                Span::dummy(),
-                parser_handle.get_ast_node_id()
-            )
-        );
+        let define_stmt = self.ast_arena.alloc_expr_or_stmt(DefineStmt::new(
+            self.mut_span,
+            pattern_expr,
+            value_expr,
+            Span::dummy(),
+            parser_handle.get_ast_node_id(),
+        ));
 
         self.final_stmt = Some(Stmt::DefineStmt(define_stmt));
     }
@@ -113,7 +87,7 @@ impl<'ast, 'b> ExprBuilder<'ast, 'b> {
     pub fn emit_field_expr(
         &mut self,
         ident_node: IdentNode,
-        parser_handle: &mut impl ParserHandle<'ast>
+        parser_handle: &mut impl ParserHandle<'ast>,
     ) {
         let field_expr = {
             let lhs = self.exprs.pop().expect("TODO: Error handling");
@@ -121,21 +95,21 @@ impl<'ast, 'b> ExprBuilder<'ast, 'b> {
                 lhs,
                 self.ast_arena.alloc_expr_or_stmt(ident_node),
                 Span::dummy(),
-                parser_handle.get_ast_node_id()
+                parser_handle.get_ast_node_id(),
             );
             self.ast_arena.alloc_expr_or_stmt(field_expr)
         };
 
-        let expr = Expr::ExprWithoutBlock(
-            ExprWithoutBlock::PlaceExpr(PlaceExpr::FieldExpr(field_expr))
-        );
+        let expr = Expr::ExprWithoutBlock(ExprWithoutBlock::PlaceExpr(PlaceExpr::FieldExpr(
+            field_expr,
+        )));
         self.exprs.push(expr);
     }
 
     pub fn emit_tuple_field_expr(
         &mut self,
         integer_expr: IntegerExpr,
-        parser_handle: &mut impl ParserHandle<'ast>
+        parser_handle: &mut impl ParserHandle<'ast>,
     ) {
         let tuple_field_expr = {
             let lhs = self.exprs.pop().expect("TODO: Error handling");
@@ -143,21 +117,21 @@ impl<'ast, 'b> ExprBuilder<'ast, 'b> {
                 lhs,
                 self.ast_arena.alloc_expr_or_stmt(integer_expr),
                 Span::dummy(),
-                parser_handle.get_ast_node_id()
+                parser_handle.get_ast_node_id(),
             );
             self.ast_arena.alloc_expr_or_stmt(tuple_field_expr)
         };
 
-        let expr = Expr::ExprWithoutBlock(
-            ExprWithoutBlock::PlaceExpr(PlaceExpr::TupleFieldExpr(tuple_field_expr))
-        );
+        let expr = Expr::ExprWithoutBlock(ExprWithoutBlock::PlaceExpr(PlaceExpr::TupleFieldExpr(
+            tuple_field_expr,
+        )));
         self.exprs.push(expr);
     }
 
     pub fn emit_index_expr(
         &mut self,
         value_expr: Expr<'ast>,
-        parser_handle: &mut impl ParserHandle<'ast>
+        parser_handle: &mut impl ParserHandle<'ast>,
     ) {
         let index_expr = {
             let lhs = self.exprs.pop().expect("TODO: Error handling");
@@ -165,14 +139,14 @@ impl<'ast, 'b> ExprBuilder<'ast, 'b> {
                 lhs,
                 value_expr,
                 Span::dummy(),
-                parser_handle.get_ast_node_id()
+                parser_handle.get_ast_node_id(),
             );
             self.ast_arena.alloc_expr_or_stmt(index_expr)
         };
 
-        let expr = Expr::ExprWithoutBlock(
-            ExprWithoutBlock::PlaceExpr(PlaceExpr::IndexExpr(index_expr))
-        );
+        let expr = Expr::ExprWithoutBlock(ExprWithoutBlock::PlaceExpr(PlaceExpr::IndexExpr(
+            index_expr,
+        )));
 
         self.exprs.push(expr);
     }
@@ -180,7 +154,7 @@ impl<'ast, 'b> ExprBuilder<'ast, 'b> {
     pub fn emit_struct_expr(
         &mut self,
         initialization_fields: Vec<&'ast FieldInitialization<'ast>>,
-        parser_handle: &mut impl ParserHandle<'ast>
+        parser_handle: &mut impl ParserHandle<'ast>,
     ) {
         let ident_node = {
             let ident_expr = self.exprs.pop().expect("TODO: Error handlings");
@@ -194,15 +168,16 @@ impl<'ast, 'b> ExprBuilder<'ast, 'b> {
                 ident_node,
                 self.ast_arena.alloc_vec(initialization_fields),
                 Span::dummy(),
-                parser_handle.get_ast_node_id()
+                parser_handle.get_ast_node_id(),
             );
 
             self.ast_arena.alloc_expr_or_stmt(struct_expr)
         };
 
-        self.exprs.push(
-            Expr::ExprWithoutBlock(ExprWithoutBlock::ValueExpr(ValueExpr::StructExpr(struct_expr)))
-        );
+        self.exprs
+            .push(Expr::ExprWithoutBlock(ExprWithoutBlock::ValueExpr(
+                ValueExpr::StructExpr(struct_expr),
+            )));
     }
 
     pub fn emit_assign_stmt(&mut self, parser_handle: &mut impl ParserHandle<'ast>) {
@@ -212,9 +187,12 @@ impl<'ast, 'b> ExprBuilder<'ast, 'b> {
             .try_as_asignee_expr(setter_expr)
             .expect("TODO: Error handling (invalid pattern expr)");
 
-        let assign_stmt = self.ast_arena.alloc_expr_or_stmt(
-            AssignStmt::new(place_expr, value_expr, Span::dummy(), parser_handle.get_ast_node_id())
-        );
+        let assign_stmt = self.ast_arena.alloc_expr_or_stmt(AssignStmt::new(
+            place_expr,
+            value_expr,
+            Span::dummy(),
+            parser_handle.get_ast_node_id(),
+        ));
 
         self.final_stmt = Some(Stmt::AssignStmt(assign_stmt));
     }
@@ -222,18 +200,20 @@ impl<'ast, 'b> ExprBuilder<'ast, 'b> {
     pub fn emit_call_expr(
         &mut self,
         parser_handle: &mut impl ParserHandle<'ast>,
-        args: Vec<Expr<'ast>>
+        args: Vec<Expr<'ast>>,
     ) {
         let callee = self.exprs.pop().expect("TODO: Error handling");
         let args = self.ast_arena.alloc_vec(args);
 
-        let call_expr = self.ast_arena.alloc_expr_or_stmt(
-            CallExpr::new(callee, args, Span::dummy(), parser_handle.get_ast_node_id())
-        );
+        let call_expr = self.ast_arena.alloc_expr_or_stmt(CallExpr::new(
+            callee,
+            args,
+            Span::dummy(),
+            parser_handle.get_ast_node_id(),
+        ));
 
-        let expr = Expr::ExprWithoutBlock(
-            ExprWithoutBlock::ValueExpr(ValueExpr::CallExpr(call_expr))
-        );
+        let expr =
+            Expr::ExprWithoutBlock(ExprWithoutBlock::ValueExpr(ValueExpr::CallExpr(call_expr)));
 
         self.exprs.push(expr);
     }
@@ -257,27 +237,34 @@ impl<'ast, 'b> ExprBuilder<'ast, 'b> {
     pub fn emit_grouping_or_tuple_expr(
         &mut self,
         parser_handle: &mut impl ParserHandle<'ast>,
-        exprs: Vec<Expr<'ast>>
+        exprs: Vec<Expr<'ast>>,
     ) {
-        assert!(!exprs.is_empty(), "Expected at least one expr in group (got 0)");
+        assert!(
+            !exprs.is_empty(),
+            "Expected at least one expr in group (got 0)"
+        );
 
         // Now we have a regular grouping expr
         if exprs.len() == 1 {
-            let group_expr = self.ast_arena.alloc_expr_or_stmt(
-                GroupExpr::new(exprs[0], Span::dummy(), parser_handle.get_ast_node_id())
-            );
-            let expr = Expr::ExprWithoutBlock(
-                ExprWithoutBlock::ValueExpr(ValueExpr::GroupExpr(group_expr))
-            );
+            let group_expr = self.ast_arena.alloc_expr_or_stmt(GroupExpr::new(
+                exprs[0],
+                Span::dummy(),
+                parser_handle.get_ast_node_id(),
+            ));
+            let expr = Expr::ExprWithoutBlock(ExprWithoutBlock::ValueExpr(ValueExpr::GroupExpr(
+                group_expr,
+            )));
             self.exprs.push(expr);
         } else {
             let fields = self.ast_arena.alloc_vec(exprs);
-            let tuple_expr = self.ast_arena.alloc_expr_or_stmt(
-                TupleExpr::new(fields, Span::dummy(), parser_handle.get_ast_node_id())
-            );
-            let expr = Expr::ExprWithoutBlock(
-                ExprWithoutBlock::ValueExpr(ValueExpr::TupleExpr(tuple_expr))
-            );
+            let tuple_expr = self.ast_arena.alloc_expr_or_stmt(TupleExpr::new(
+                fields,
+                Span::dummy(),
+                parser_handle.get_ast_node_id(),
+            ));
+            let expr = Expr::ExprWithoutBlock(ExprWithoutBlock::ValueExpr(ValueExpr::TupleExpr(
+                tuple_expr,
+            )));
             self.exprs.push(expr);
         }
     }
@@ -285,9 +272,9 @@ impl<'ast, 'b> ExprBuilder<'ast, 'b> {
     pub fn emit_pkg_ident_expr(&mut self, pkg_ident_expr: PkgIdentNode) {
         let pkg_ident_expr = self.ast_arena.alloc_expr_or_stmt(pkg_ident_expr);
 
-        let expr = Expr::ExprWithoutBlock(
-            ExprWithoutBlock::PlaceExpr(PlaceExpr::PkgIdentExpr(pkg_ident_expr))
-        );
+        let expr = Expr::ExprWithoutBlock(ExprWithoutBlock::PlaceExpr(PlaceExpr::PkgIdentExpr(
+            pkg_ident_expr,
+        )));
 
         self.exprs.push(expr);
     }
@@ -295,9 +282,9 @@ impl<'ast, 'b> ExprBuilder<'ast, 'b> {
     pub fn emit_ident_expr(&mut self, ident_node: IdentNode) {
         let ident_node = self.ast_arena.alloc_expr_or_stmt(ident_node);
 
-        let expr = Expr::ExprWithoutBlock(
-            ExprWithoutBlock::PlaceExpr(PlaceExpr::IdentExpr(ident_node))
-        );
+        let expr = Expr::ExprWithoutBlock(ExprWithoutBlock::PlaceExpr(PlaceExpr::IdentExpr(
+            ident_node,
+        )));
 
         self.exprs.push(expr);
     }
@@ -305,9 +292,9 @@ impl<'ast, 'b> ExprBuilder<'ast, 'b> {
     pub fn emit_string_expr(&mut self, string_expr: StringExpr) {
         let string_expr = self.ast_arena.alloc_expr_or_stmt(string_expr);
 
-        let expr = Expr::ExprWithoutBlock(
-            ExprWithoutBlock::ValueExpr(ValueExpr::ConstExpr(ConstExpr::StringExpr(string_expr)))
-        );
+        let expr = Expr::ExprWithoutBlock(ExprWithoutBlock::ValueExpr(ValueExpr::ConstExpr(
+            ConstExpr::StringExpr(string_expr),
+        )));
 
         self.exprs.push(expr);
     }
@@ -315,9 +302,9 @@ impl<'ast, 'b> ExprBuilder<'ast, 'b> {
     pub fn emit_null_expr(&mut self, null_expr: NullExpr) {
         let null_expr = self.ast_arena.alloc_expr_or_stmt(null_expr);
 
-        let expr = Expr::ExprWithoutBlock(
-            ExprWithoutBlock::ValueExpr(ValueExpr::ConstExpr(ConstExpr::NullExpr(null_expr)))
-        );
+        let expr = Expr::ExprWithoutBlock(ExprWithoutBlock::ValueExpr(ValueExpr::ConstExpr(
+            ConstExpr::NullExpr(null_expr),
+        )));
 
         self.exprs.push(expr);
     }
@@ -325,9 +312,9 @@ impl<'ast, 'b> ExprBuilder<'ast, 'b> {
     pub fn emit_bool_expr(&mut self, bool_expr: BoolExpr) {
         let bool_expr = self.ast_arena.alloc_expr_or_stmt(bool_expr);
 
-        let expr = Expr::ExprWithoutBlock(
-            ExprWithoutBlock::ValueExpr(ValueExpr::ConstExpr(ConstExpr::BoolExpr(bool_expr)))
-        );
+        let expr = Expr::ExprWithoutBlock(ExprWithoutBlock::ValueExpr(ValueExpr::ConstExpr(
+            ConstExpr::BoolExpr(bool_expr),
+        )));
 
         self.exprs.push(expr);
     }
@@ -335,9 +322,9 @@ impl<'ast, 'b> ExprBuilder<'ast, 'b> {
     pub fn emit_integer_expr(&mut self, integer_expr: IntegerExpr) {
         let integer_expr = self.ast_arena.alloc_expr_or_stmt(integer_expr);
 
-        let expr = Expr::ExprWithoutBlock(
-            ExprWithoutBlock::ValueExpr(ValueExpr::ConstExpr(ConstExpr::IntegerExpr(integer_expr)))
-        );
+        let expr = Expr::ExprWithoutBlock(ExprWithoutBlock::ValueExpr(ValueExpr::ConstExpr(
+            ConstExpr::IntegerExpr(integer_expr),
+        )));
 
         self.exprs.push(expr);
     }
@@ -346,13 +333,17 @@ impl<'ast, 'b> ExprBuilder<'ast, 'b> {
         let rhs = self.exprs.pop().expect("TODO: Error handling");
         let lhs = self.exprs.pop().expect("TODO: Error handling");
 
-        let binary_expr = self.ast_arena.alloc_expr_or_stmt(
-            BinaryExpr::new(lhs, op, rhs, Span::dummy(), parser_handle.get_ast_node_id())
-        );
+        let binary_expr = self.ast_arena.alloc_expr_or_stmt(BinaryExpr::new(
+            lhs,
+            op,
+            rhs,
+            Span::dummy(),
+            parser_handle.get_ast_node_id(),
+        ));
 
-        let expr = Expr::ExprWithoutBlock(
-            ExprWithoutBlock::ValueExpr(ValueExpr::BinaryExpr(binary_expr))
-        );
+        let expr = Expr::ExprWithoutBlock(ExprWithoutBlock::ValueExpr(ValueExpr::BinaryExpr(
+            binary_expr,
+        )));
 
         self.exprs.push(expr);
     }

@@ -1,4 +1,4 @@
-use ir::{ ResKind, Symbol, Ty };
+use ir::{ResKind, Symbol, Ty};
 use op::BinaryOp;
 use span::Span;
 use std::fmt::Write;
@@ -21,10 +21,7 @@ pub struct Error {
 
 impl Error {
     pub fn new(kind: ErrorKind, span: Span) -> Self {
-        Self {
-            kind,
-            span,
-        }
+        Self { kind, span }
     }
 
     pub fn get_severity(&self) -> Severity {
@@ -90,17 +87,21 @@ impl ErrorKind {
                     tuple_ty.len()
                 )
             }
-            Self::MissingReturn => { write!(buffer, "Missing return statement") }
+            Self::MissingReturn => {
+                write!(buffer, "Missing return statement")
+            }
             Self::MismatchedReturnTypes(expected_ty, found_ty) => {
                 write!(
                     buffer,
                     "Expected return type `{}` but found type `{}`",
-                    expected_ty,
-                    found_ty
+                    expected_ty, found_ty
                 )
             }
             Self::ReturnOutsideFn => {
-                write!(buffer, "Keyword `return` cannot be used outside of functions")
+                write!(
+                    buffer,
+                    "Keyword `return` cannot be used outside of functions"
+                )
             }
             Self::InvalidTuple(found_ty) => {
                 write!(buffer, "Expected tuple but found type `{}`", found_ty)
@@ -130,16 +131,28 @@ impl ErrorKind {
                 )
             }
             Self::BreakTypeError(expected_ty, found_ty) => {
-                write!(buffer, "Expected type `{}` but found type `{}`", expected_ty, found_ty)
+                write!(
+                    buffer,
+                    "Expected type `{}` but found type `{}`",
+                    expected_ty, found_ty
+                )
             }
             Self::BreakOutsideLoop => {
                 write!(buffer, "Keyword `break` cannot be used outside of loops")
             }
             Self::BinaryExprTypeError(binary_op, lhs_ty, rhs_ty) => {
-                write!(buffer, "`{}` is not defined for `{}` and `{}`", binary_op, lhs_ty, rhs_ty)
+                write!(
+                    buffer,
+                    "`{}` is not defined for `{}` and `{}`",
+                    binary_op, lhs_ty, rhs_ty
+                )
             }
             Self::AssignmentToImmutable(symbol) => {
-                write!(buffer, "Cannot assign to immutable variable `{}`", symbol.get())
+                write!(
+                    buffer,
+                    "Cannot assign to immutable variable `{}`",
+                    symbol.get()
+                )
             }
             Self::UndefinedLookup(symbol, kind /* , adt_kind, AdtKind */) => {
                 let kind_str = match kind {

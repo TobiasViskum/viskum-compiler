@@ -88,7 +88,7 @@ Ast is produced into an ICFG (inter-procedual control flow graph). In the ICFG a
 - Current implementation example:
 ```
 typedef MyTuple (MyInt, MyInt)
-typeDef MyInt Int
+typeDef MyInt int
 
 struct Data {
     data MyTuple
@@ -101,7 +101,7 @@ However if I instead is able to type interning, then the type of MyTuple will ju
 
 ## Todo
 
-### Fix memory issues
+### Fix potential memory issues
 - Heap allocated data (like vecs) is allocated in bump arenas (in TyCtx::intern_many) which never frees the original memory even though it was allocated in the arena
 - Usage of TyCtx::intern_many with non-types (e.g. namebindings) doesn't live for the entire program, but the heap allocated data is never dropped because TyCtx::intern_many returns a static reference (this happens in the resolver)
 - In the resolver: Identical Namebindings are right now being stored in both pkg_def_id_to_name_binding and in the AstTypeChecker (created in AstResolver). The same thing applies to pkg_symbol_to_def_id

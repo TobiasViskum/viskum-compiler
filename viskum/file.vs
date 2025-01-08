@@ -1,6 +1,5 @@
 import pkg.Point, pkg.doSomething
 
-
 declare fn.C realloc(prevItems [*]int, bytesize int) [*]int
 declare fn.C malloc(bytesize int) [*]int
 declare fn.C socket(domain int, type int, protocol int) int
@@ -11,13 +10,17 @@ declare fn.C time(time *int64) int
 declare fn.C sleep(time int) int
 declare fn.C clock_gettime(realtime int, timespec *mut TimeSpec) int
 
+typedef Hello
+
 struct TimeSpec {
     tv_sec int64,
     tv_nsec int64
 }
 
+struct Something {
 
-/
+typedef
+
 impl TimeSpec {
     fn new() Self {
         ret Self {
@@ -67,7 +70,7 @@ impl Vec {
         if self.len == self.cap {
             self.cap = if self.cap == 0 { 2 } else { self.cap * 2 }
             size := self.cap * 4
-            
+
             self.items = if self.len == 0 { malloc(size) } else { realloc(self.items, size) }
         }
         self.items[self.len] = item
@@ -93,7 +96,7 @@ impl Vec {
 
         mut i := 0
         loop {
-            if i == self.len { break } else { 
+            if i == self.len { break } else {
                 printf("[%d] = %d\n", i, self.items[i])
                 i = i + 1
             }
@@ -155,12 +158,14 @@ impl Instant {
 }
 
 
-fn runTests() {    
+// fn geææo
+
+fn runTests() {
     maybe := Option.Some(2)
 
     if Option.Some(x) := maybe {
         printf("Hello, value is: %d\n", x)
-        
+
         printf("Hello, value is: %d + 1 = %d\n", x, x + 1)
     }
 
@@ -183,9 +188,9 @@ fn.C main(argc int, args *str) {
     point.dbg()
 
     printf("Sum of point: %d\n", sumOfPoint)
-    
+
     printf("doSomething result: %d\n", pkg.doSomething())
-   
+
     runTests()
 
     mut now := Instant.new()
@@ -262,4 +267,3 @@ impl VecTester {
         ret self.testCount - 1
     }
 }
-

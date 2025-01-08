@@ -1,16 +1,11 @@
 use fxhash::FxHashMap;
-use ir::{ NodeId, Symbol, Ty };
+use ir::{NodeId, Symbol, Ty};
 
 use crate::{
     ast_state::AstState,
     get_node_id_from_expr,
-    visitor::{ walk_stmt, Visitor },
-    ArgKind,
-    Ast,
-    IdentNode,
-    IfFalseBranchExpr,
-    Stmt,
-    Typing,
+    visitor::{walk_stmt, Visitor},
+    ArgKind, Ast, IdentNode, IfFalseBranchExpr, Stmt, Typing,
 };
 use std::fmt::Write;
 
@@ -18,7 +13,10 @@ use std::fmt::Write;
 // However because the Ast is never borrowed mutably, it doesn't affect the compiler
 //
 // If at any point something requires a mutable borrow to the Ast, this should also change (or compiler go mad)
-pub struct AstPrettifier<'ast, T> where T: AstState {
+pub struct AstPrettifier<'ast, T>
+where
+    T: AstState,
+{
     ast: &'ast Ast<'ast, T>,
     src: &'ast str,
     scope_depth: usize,
@@ -28,17 +26,27 @@ pub struct AstPrettifier<'ast, T> where T: AstState {
 
 const INDENTATION: usize = 4;
 
-impl<'ast, T> AstPrettifier<'ast, T> where T: AstState {
+impl<'ast, T> AstPrettifier<'ast, T>
+where
+    T: AstState,
+{
     pub fn new(
         ast: &'ast Ast<'ast, T>,
         src: &'ast str,
-        node_id_to_ty: Option<&'ast FxHashMap<NodeId, &'ast Ty>>
+        node_id_to_ty: Option<&'ast FxHashMap<NodeId, &'ast Ty>>,
     ) -> Self {
-        Self { ast, src, node_id_to_ty, scope_depth: 0, buffer: String::with_capacity(2024) }
+        Self {
+            ast,
+            src,
+            node_id_to_ty,
+            scope_depth: 0,
+            buffer: String::with_capacity(2024),
+        }
     }
 
     pub fn print_ast(&mut self) {
-        self.visit_stmts(self.ast.main_scope.stmts).expect("Unexpected write error");
+        self.visit_stmts(self.ast.main_scope.stmts)
+            .expect("Unexpected write error");
 
         println!("{}", self.buffer);
     }
@@ -61,10 +69,12 @@ fn write_typing(buffer: &mut String, src: &str, typing: &Typing<'_>) {
         Typing::Error => write!(buffer, "<error>").expect("Unexpected write error"),
         Typing::SelfType => write!(buffer, "Self").expect("Unexpected write error"),
         Typing::VariadicArgs => write!(buffer, "...").expect("Unexpected write error"),
-        Typing::Ident(ident_node) =>
-            write!(buffer, "{}", Symbol::from_node_id(ident_node.ast_node_id).get()).expect(
-                "Unexpected write error"
-            ),
+        Typing::Ident(ident_node) => write!(
+            buffer,
+            "{}",
+            Symbol::from_node_id(ident_node.ast_node_id).get()
+        )
+        .expect("Unexpected write error"),
         // Typing::NamedTuple(typings) => {
         //     write!(buffer, "(").expect("Unexpected write error");
         //     for (i, (span, typing)) in typings.iter().enumerate() {
@@ -119,7 +129,10 @@ fn write_typing(buffer: &mut String, src: &str, typing: &Typing<'_>) {
     }
 }
 
-impl<'ast, T> Visitor<'ast> for AstPrettifier<'ast, T> where T: AstState {
+impl<'ast, T> Visitor<'ast> for AstPrettifier<'ast, T>
+where
+    T: AstState,
+{
     type Result = Result<(), std::fmt::Error>;
 
     fn default_result() -> Self::Result {
@@ -134,7 +147,11 @@ impl<'ast, T> Visitor<'ast> for AstPrettifier<'ast, T> where T: AstState {
         )?;
 
         for (i, field) in struct_expr.field_initializations.iter().enumerate() {
-            write!(self.buffer, "{}: ", Symbol::from_node_id(field.ident.ast_node_id).get())?;
+            write!(
+                self.buffer,
+                "{}: ",
+                Symbol::from_node_id(field.ident.ast_node_id).get()
+            )?;
             self.visit_expr(field.value)?;
 
             if i < struct_expr.field_initializations.len() - 1 {
@@ -191,7 +208,11 @@ impl<'ast, T> Visitor<'ast> for AstPrettifier<'ast, T> where T: AstState {
         for field in struct_item.field_declarations.iter() {
             write!(self.buffer, "{}", self.get_indentation())?;
 
-            write!(self.buffer, "{} ", Symbol::from_node_id(field.ident.ast_node_id).get())?;
+            write!(
+                self.buffer,
+                "{} ",
+                Symbol::from_node_id(field.ident.ast_node_id).get()
+            )?;
 
             write_typing(&mut self.buffer, self.src, &field.type_expr);
 
@@ -215,14 +236,18 @@ impl<'ast, T> Visitor<'ast> for AstPrettifier<'ast, T> where T: AstState {
 
         for (i, arg_kind) in fn_item.args.iter().enumerate() {
             match arg_kind {
-                ArgKind::MutPtrSelf(_) =>
-                    write!(self.buffer, "*mut self").expect("Unexpected write error"),
-                ArgKind::PtrSelf(_) =>
-                    write!(self.buffer, "*self").expect("Unexpected write error"),
-                ArgKind::MutSelf(_) =>
-                    write!(self.buffer, "mut self").expect("Unexpected write error"),
-                ArgKind::NormalSelf(_) =>
-                    write!(self.buffer, "self").expect("Unexpected write error"),
+                ArgKind::MutPtrSelf(_) => {
+                    write!(self.buffer, "*mut self").expect("Unexpected write error")
+                }
+                ArgKind::PtrSelf(_) => {
+                    write!(self.buffer, "*self").expect("Unexpected write error")
+                }
+                ArgKind::MutSelf(_) => {
+                    write!(self.buffer, "mut self").expect("Unexpected write error")
+                }
+                ArgKind::NormalSelf(_) => {
+                    write!(self.buffer, "self").expect("Unexpected write error")
+                }
                 ArgKind::Arg(field) => {
                     write!(
                         self.buffer,
@@ -295,7 +320,7 @@ impl<'ast, T> Visitor<'ast> for AstPrettifier<'ast, T> where T: AstState {
 
     fn visit_tuple_field_expr(
         &mut self,
-        tuple_field_expr: &'ast crate::TupleFieldExpr<'ast>
+        tuple_field_expr: &'ast crate::TupleFieldExpr<'ast>,
     ) -> Self::Result {
         self.visit_expr(tuple_field_expr.lhs)?;
         write!(self.buffer, ".")?;
@@ -365,21 +390,19 @@ impl<'ast, T> Visitor<'ast> for AstPrettifier<'ast, T> where T: AstState {
         self.decrement_scope_depth();
 
         match &if_expr.false_block {
-            Some(expr) => {
-                match expr {
-                    IfFalseBranchExpr::ElseExpr(expr) => {
-                        write!(self.buffer, "\n{}else\n", self.get_indentation())?;
-                        self.increment_scope_depth();
-                        self.visit_stmts(expr.stmts)?;
-                        self.decrement_scope_depth();
-                        write!(self.buffer, "\n{}end", self.get_indentation())?;
-                    }
-                    IfFalseBranchExpr::ElifExpr(if_expr) => {
-                        write!(self.buffer, "\n{}el", self.get_indentation())?;
-                        self.visit_if_expr(if_expr)?;
-                    }
+            Some(expr) => match expr {
+                IfFalseBranchExpr::ElseExpr(expr) => {
+                    write!(self.buffer, "\n{}else\n", self.get_indentation())?;
+                    self.increment_scope_depth();
+                    self.visit_stmts(expr.stmts)?;
+                    self.decrement_scope_depth();
+                    write!(self.buffer, "\n{}end", self.get_indentation())?;
                 }
-            }
+                IfFalseBranchExpr::ElifExpr(if_expr) => {
+                    write!(self.buffer, "\n{}el", self.get_indentation())?;
+                    self.visit_if_expr(if_expr)?;
+                }
+            },
             None => {
                 write!(self.buffer, "\n{}end", self.get_indentation())?;
             }
@@ -401,13 +424,21 @@ impl<'ast, T> Visitor<'ast> for AstPrettifier<'ast, T> where T: AstState {
     }
 
     fn visit_ident_pat(&mut self, ident_node: &'ast IdentNode) -> Self::Result {
-        write!(self.buffer, "{}", &self.src[ident_node.span.get_byte_range()])?;
+        write!(
+            self.buffer,
+            "{}",
+            &self.src[ident_node.span.get_byte_range()]
+        )?;
 
         Self::default_result()
     }
 
     fn visit_ident_expr(&mut self, ident_node: &'ast IdentNode) -> Self::Result {
-        write!(self.buffer, "{}", &self.src[ident_node.span.get_byte_range()])?;
+        write!(
+            self.buffer,
+            "{}",
+            &self.src[ident_node.span.get_byte_range()]
+        )?;
 
         Self::default_result()
     }

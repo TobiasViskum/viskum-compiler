@@ -11,7 +11,7 @@ those structs doesn't rely on logic from the Ast nodes,
 but rather keep their logic separated.
 
 You might see in some of the enums in this file, that
-some have references to their variants and some don't. That's because, 
+some have references to their variants and some don't. That's because,
 they only holds references to "real" nodes, which is a node that has a NodeId
 
 A description of the overall structure of the Ast (inspired by the way Rust structure its HIR).
@@ -50,35 +50,38 @@ Stmt(
 
 */
 
-mod typechecker;
-mod visitor;
 mod ast_arena;
+pub mod ast_pre_resolver;
 mod ast_prettifier;
 mod ast_query_system;
-mod ast_state;
-mod ast_visitor;
-pub mod ast_pre_resolver;
 pub mod ast_resolver;
+mod ast_state;
 pub mod ast_type_checker;
+mod ast_visitor;
+mod typechecker;
+mod visitor;
 
-pub use ast_state::*;
-pub use ast_arena::{ AstArena, AstArenaObject };
+pub use ast_arena::{AstArena, AstArenaObject};
 pub use ast_prettifier::AstPrettifier;
-pub use ast_query_system::{ AstQueryEntry, AstQuerySystem };
+pub use ast_query_system::{AstQueryEntry, AstQuerySystem};
+pub use ast_state::*;
 pub use ast_visitor::ResolverHandle;
 pub use visitor::*;
 
-use std::marker::PhantomData;
-use ir::{ ModId, Mutability, NodeId };
+use derive_new::new;
+use ir::{ModId, Mutability, NodeId};
 use op::BinaryOp;
 use span::Span;
-use derive_new::new;
+use std::marker::PhantomData;
 
 type Stmts<'ast> = &'ast [Stmt<'ast>];
 
 /// The state is only used to get the correct visitor
 #[derive(Debug, new)]
-pub struct Ast<'ast, T> where T: AstState {
+pub struct Ast<'ast, T>
+where
+    T: AstState,
+{
     pub main_scope: GlobalScope<'ast>,
     pub metadata: AstMetadata,
     _state: PhantomData<T>,
@@ -92,9 +95,16 @@ pub struct AstMetadata {
     pub mod_id: ModId,
 }
 
-impl<'ast, T> Ast<'ast, T> where T: AstState {
+impl<'ast, T> Ast<'ast, T>
+where
+    T: AstState,
+{
     // Should be pub(crate), but that will wait until the whole ast validation process is more stable
-    pub fn next_state<N>(self) -> Ast<'ast, N> where T: AstState<NextState = N>, N: AstState {
+    pub fn next_state<N>(self) -> Ast<'ast, N>
+    where
+        T: AstState<NextState = N>,
+        N: AstState,
+    {
         Ast {
             main_scope: self.main_scope,
             metadata: self.metadata,
@@ -548,7 +558,7 @@ pub struct FloatExpr {
 
 pub fn get_ident_node_from_arg_kind(arg_kind: ArgKind<'_>) -> &IdentNode {
     match arg_kind {
-        | ArgKind::NormalSelf(ident_node)
+        ArgKind::NormalSelf(ident_node)
         | ArgKind::MutSelf(ident_node)
         | ArgKind::PtrSelf(ident_node)
         | ArgKind::MutPtrSelf(ident_node) => ident_node,
@@ -558,22 +568,18 @@ pub fn get_ident_node_from_arg_kind(arg_kind: ArgKind<'_>) -> &IdentNode {
 
 pub fn get_node_id_from_expr(expr: Expr) -> NodeId {
     match expr {
-        Expr::ExprWithBlock(expr_with_block) => {
-            match expr_with_block {
-                ExprWithBlock::BlockExpr(block_expr) => block_expr.ast_node_id,
-                ExprWithBlock::IfExpr(if_expr) => if_expr.ast_node_id,
-                ExprWithBlock::LoopExpr(loop_expr) => loop_expr.ast_node_id,
-            }
-        }
-        Expr::ExprWithoutBlock(expr_without_block) => {
-            match expr_without_block {
-                ExprWithoutBlock::BreakExpr(break_expr) => break_expr.ast_node_id,
-                ExprWithoutBlock::ContinueExpr(continue_expr) => continue_expr.ast_node_id,
-                ExprWithoutBlock::ReturnExpr(return_expr) => return_expr.ast_node_id,
-                ExprWithoutBlock::PlaceExpr(place_expr) => get_node_id_from_place_expr(place_expr),
-                ExprWithoutBlock::ValueExpr(value_expr) => get_node_id_from_value_expr(value_expr),
-            }
-        }
+        Expr::ExprWithBlock(expr_with_block) => match expr_with_block {
+            ExprWithBlock::BlockExpr(block_expr) => block_expr.ast_node_id,
+            ExprWithBlock::IfExpr(if_expr) => if_expr.ast_node_id,
+            ExprWithBlock::LoopExpr(loop_expr) => loop_expr.ast_node_id,
+        },
+        Expr::ExprWithoutBlock(expr_without_block) => match expr_without_block {
+            ExprWithoutBlock::BreakExpr(break_expr) => break_expr.ast_node_id,
+            ExprWithoutBlock::ContinueExpr(continue_expr) => continue_expr.ast_node_id,
+            ExprWithoutBlock::ReturnExpr(return_expr) => return_expr.ast_node_id,
+            ExprWithoutBlock::PlaceExpr(place_expr) => get_node_id_from_place_expr(place_expr),
+            ExprWithoutBlock::ValueExpr(value_expr) => get_node_id_from_value_expr(value_expr),
+        },
     }
 }
 
@@ -594,14 +600,12 @@ pub fn get_node_id_from_value_expr(value_expr: ValueExpr) -> NodeId {
         ValueExpr::TupleExpr(tuple_expr) => tuple_expr.ast_node_id,
         ValueExpr::StructExpr(struct_expr) => struct_expr.ast_node_id,
         ValueExpr::CallExpr(call_expr) => call_expr.ast_node_id,
-        ValueExpr::ConstExpr(const_expr) => {
-            match const_expr {
-                ConstExpr::BoolExpr(bool_expr) => bool_expr.ast_node_id,
-                ConstExpr::IntegerExpr(integer_expr) => integer_expr.ast_node_id,
-                ConstExpr::NullExpr(null_expr) => null_expr.ast_node_id,
-                ConstExpr::StringExpr(string_expr) => string_expr.ast_node_id,
-            }
-        }
+        ValueExpr::ConstExpr(const_expr) => match const_expr {
+            ConstExpr::BoolExpr(bool_expr) => bool_expr.ast_node_id,
+            ConstExpr::IntegerExpr(integer_expr) => integer_expr.ast_node_id,
+            ConstExpr::NullExpr(null_expr) => null_expr.ast_node_id,
+            ConstExpr::StringExpr(string_expr) => string_expr.ast_node_id,
+        },
     }
 }
 
@@ -613,10 +617,8 @@ pub fn get_node_id_from_pattern(pat: Pat) -> NodeId {
 }
 
 pub fn is_stmt_adt(stmt: &Stmt) -> bool {
-    match stmt {
-        Stmt::ItemStmt(
-            ItemStmt::StructItem(_) | ItemStmt::EnumItem(_) | ItemStmt::TypedefItem(_),
-        ) => true,
-        _ => false,
-    }
+    matches!(
+        stmt,
+        Stmt::ItemStmt(ItemStmt::StructItem(_) | ItemStmt::EnumItem(_) | ItemStmt::TypedefItem(_),)
+    )
 }

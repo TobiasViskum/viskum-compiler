@@ -2,10 +2,12 @@ fn doSomething() int {
     ret 2 * 3
 }
 
-struct Point { 
+struct Point {
     x int sl,
     y int,
-    z 
+    z
+
+
 
 
 impl Point {
@@ -24,6 +26,3 @@ impl Point {
     fn errorBecauseOfNoTypes(x) {
 
     }
-
-
-

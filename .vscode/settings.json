@@ -1,0 +1,11 @@
+{
+    "files.associations": {
+        ".mapleinit": "maple",
+        ".vs": "viskum",
+        ".vsc": "viskum",
+        "core.h": "c",
+        "linker.h": "c",
+        "passbuilder.h": "c",
+        "inttypes.h": "c"
+    }
+}

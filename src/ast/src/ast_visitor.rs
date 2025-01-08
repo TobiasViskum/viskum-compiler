@@ -1,15 +1,15 @@
-use crate::{ ast_state::AstState, FnItem, PkgIdentNode, StringExpr };
+use crate::{ast_state::AstState, FnItem, PkgIdentNode, StringExpr};
 use error::Error;
-use fxhash::FxHashMap;
-use ir::{ DefId, LexicalContext, NameBinding, NodeId, ResKind, TraitImplId };
-
-use ir::Symbol;
+use ir::{DefId, NameBinding, ResKind, Symbol, TraitImplId};
 
 /// This can call functions on the Resolver struct in the resolver crate,
 /// which also implements this trait
 ///
 /// The reason it's not using the Resolver directly is to avoid cyclic references
-pub trait ResolverHandle<'ctx, 'ast, T> where T: AstState {
+pub trait ResolverHandle<'ctx, 'ast, T>
+where
+    T: AstState,
+{
     /* Methods available during all passes  */
     fn report_error(&self, error: Error);
 
@@ -29,6 +29,6 @@ pub trait ResolverHandle<'ctx, 'ast, T> where T: AstState {
     fn make_const_str(
         &self,
         str_expr: &'ast StringExpr,
-        make_def_id: impl FnMut() -> DefId
+        make_def_id: impl FnMut() -> DefId,
     ) -> DefId;
 }
